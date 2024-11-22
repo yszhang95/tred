@@ -1,0 +1,41 @@
+#+title: tred
+
+A lean, fast and accurate three dimensional detector response simulation running on CPU/GPU.  Tred initially targets the domain of liquid argon time projection chamber detectors with pixel readout electrodes. 
+
+* Feature overview
+
+The tred simulation is decomposed into well-defined stages of a pipeline.  Tred,
+
+- Inputs data as point depos or line steps such as produced by Geant4 or other particle tracker.
+- Accepts input charge in units of ionized electrons or energy (on which it applies ionization and recombination given models).
+- Drifts distributions of ionized electrons through a bulk medium and uniform electric field while applying a diffusion model.
+- Discretizes the drifted electron distribution to a dimensional grid in space.
+- Inputs detector response defined on a three dimensional grid.
+- Performs a partitioned convolution and sum to produce induced currents on detector electrodes.
+- Applies an electronics readout model to produce final data equivalent to real detector data forms.
+
+* Goals
+
+Some of the design and performance goals that guide tred development are:
+
+- Well-defined interfaces for constructing and calling stage components.
+
+- Well-defined stage input/output data objects with support for at least one common data file format.
+
+- Support and provide multiple implementations of a stage.
+
+- Ability to exercise a valid but otherwise arbitrary pipeline of one or more stages.
+
+- Execute pipelines on CPU or on GPU.
+
+- Provide an implementation of each stage that is optimized for GPU.
+
+- Modest GPU resource requirements (target 24 GB "gamer" GPU or smaller).
+
+- Aspirational target processing speed of one GPU-second to GPU-minute per "typical" event.
+
+  
+* Installation
+
+* Usage
+
