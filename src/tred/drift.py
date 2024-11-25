@@ -1,6 +1,9 @@
 #!/usr/bin/env python
 '''
 Functions to apply drift models.
+
+Caveat: all functions assume 1D, caller should slice accordingly.
+
 '''
 
 import torch
@@ -16,6 +19,8 @@ def transport(locs, target, velocity):
     - locs :: real 1D array of locations of points on the axis.
     - target :: real scalar location on the axis.
     - velocity :: real scalar speed of transport along the axis.
+
+    Caveat: 1D space only, caller slice accordingly.
     '''
     return (target - locs)/velocity
 
@@ -42,6 +47,7 @@ def diffuse(dt, D, sigma=None):
     sigmaL = diffuse(dt, DL)
     sigmaL[torch.isnan(sigmaL)] = 0
 
+    Caveat: 1D space only, caller slice accordingly.
     '''
     if sigma is None:
         return torch.sqrt(2*D*dt)
@@ -58,6 +64,8 @@ def absorb(ne, dt, lifetime, fluctuate=False):
     - fluctuate :: if true, apply binomial fluctuation based on mean lost q
 
     Note, negative dt will lead to exponential increase not decrease.
+
+    Caveat: 1D space only, caller slice accordingly.
     '''
 
     if fluctuate:
@@ -67,3 +75,25 @@ def absorb(ne, dt, lifetime, fluctuate=False):
         return ne - b.sample()
 
     return ne * torch.exp(-dt / lifetime)
+
+
+def drift(locs, target, velocity, D, lifetime, charge=None, sigma=None, fluctuate=False):
+    '''
+    Full drift() = transport() + diffuse() + absorb().
+
+    Returns tuple: (drifted, sigma, charges)
+
+    See docs on individual functions for other arguments.
+
+    Caveat: 1D space only, caller slice accordingly.
+    '''
+    drifted = transport(locs, target, velocity)
+
+    sigma = diffuse(drifted, D=D, sigma=sigma)
+    sigma[torch.isnan(sigma)] = 0
+
+    default_charge = 1000
+    if charge is None:
+        charge = torch.zeros(locs.shape[0], dtype=torch.int32)+default_charge
+    charges = absorb(charge, drifted, lifetime=lifetime, fluctuate=fluctuate)
+    return (drifted, sigma, charges)
