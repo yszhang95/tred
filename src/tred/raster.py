@@ -72,11 +72,12 @@ def depo_binned_1d(grid, centers, widths, q, nsigma=None, minbins=None):
 
     Note, bins are centered on grid points.
 
-    - grid :: 1D 1-tensor of grid spacing
-    - c :: 1D tensor of centers (N_depos,)
-    - w :: 1D tensor of Gaussian widths (N_depos,)
+    - grid :: 1D N-vector of grid spacing
+    - centers :: 1D tensor of centers (N_depos,)
+    - widths :: 1D tensor of Gaussian sigma widths (N_depos,)  (can be zero)
     - q :: 1D tensor of total depo charge (N_depos,)
-    - minbins :: minimum number of bins to cover from center of depo
+    - nsigma :: per-depo minimum multiple of Gaussian sigma to cover.
+    - minbins :: per-dimension absolute minimum number of grid points to cover half the Gaussian.
     '''
     if nsigma is None:
         nsigma = 3.0
@@ -98,10 +99,10 @@ def depo_binned_1d(grid, centers, widths, q, nsigma=None, minbins=None):
     # Enumerate the grid points covering the two halves.
     # Note, add 1 as we do a shift-by-one subtraction below.
     rel_grid_ind = torch.linspace(0, 2*n_half, 2*n_half + 1)
-    rel_grid_ind = torch.unsqueeze(rel_grid_ind, 0) # shape (1,n)
+    rel_grid_ind = torch.unsqueeze(rel_grid_ind, 0)
 
     # (ndepos, 1=vdim)
-    grid0 = torch.unsqueeze(grid0, -1) # shape (n,1)
+    grid0 = torch.unsqueeze(grid0, -1)
 
     # (ndepos, npoints)
     # Points at which to sample the Gaussians.
@@ -126,44 +127,83 @@ def depo_binned_1d(grid, centers, widths, q, nsigma=None, minbins=None):
 def depo_binned_nd(grid, centers, widths, q, nsigma=None,
                    minbins=None):
     '''
-    N-dimensional for N>1.
+    N-dimensional (N>1)
 
-    grid - 1D N-tensor of grid spacing
-    centers - tensor of N-dim centers per depo (N_depos, N)
-    widths - tensor of N-dim widths per depo (N_depos, N)
-    q - 1D tensor of charge per depo (N_depos,)
-    nsigma - tensor of N per-dimension sigma per depo (N_depos, 2)
-    minbins - N-dim tensor giving minimum per-dimension number bins for all depos
+    - grid :: 1D N-vector of grid spacing
+    - centers :: 2D tensor of centers (N_depos, N)
+    - widths :: 2D tensor of Gaussian sigma widths per depo (N_depos, N)  (can have zeros)
+    - q :: 1D tensor of total depo charge (N_depos,)
+    - nsigma :: per-depo minimum multiple of Gaussian sigma per dimension to cover.
+    - minbins :: 1D N-vector of per-dimension absolute minimum number of grid points to cover half the Gaussian.
+
     '''
     ndims = len(grid)
     if nsigma is None:
         nsigma = torch.tensor([3.0]*ndims)
 
-    nbins_half = (1 + (widths*nsigma)/grid).to(dtype=torch.int32)
+    # Find number of grid points that span half the largest Gaussian.
+    n_half = torch.round((widths*nsigma)/grid)
     if minbins is not None:
-        nbins_half = torch.vstack((nbins_half, minbins))
-    nbins_half = torch.max(nbins_half, dim=0).values
+        n_half = torch.vstack((n_half, minbins))
+    n_half = torch.max(n_half.to(dtype=torch.int32), dim=0).values
 
+    # Grid index nearest each center.
+    gridc = torch.round(centers/grid).to(dtype=torch.int32)
+    print(f'{gridc.shape=}\n{gridc}')    
+
+    # Grid index at the starting point (lowest corner grid point) for each region.
+    grid0 = gridc - n_half
+    print(f'{grid0.shape=}\n{grid0}')
+
+    # Location of grid point nearest center relative from start corner point.
+    rel_gridc = gridc - grid0
+    print(f'{rel_gridc.shape=}\n{rel_gridc}')
+
+    # Suffer per-dimension serialization.
+    # This perhaps could be parallelized if refactored to use meshgrid. 
     integs=list()
-    for dim in range(len(grid)):
-        local_grid = torch.linspace(-nbins_half[dim], nbins_half[dim], 2*nbins_half[dim] + 1)*grid[dim]
-        w = widths[:,dim].reshape(-1,1)
-        local_norm = local_grid / w
-        erfs = torch.erf(local_norm)
+    for dim in range(ndims):
+
+        # Enumerate the grid points covering the two halves of this dim's Gaussian
+        # Note, add 1 as we do a shift-by-one subtraction after erf()'s below
+        rel_grid_ind = torch.linspace(0, 2*n_half[dim], 2*n_half[dim]+1)
+        # Add the per-depo axis
+        rel_grid_ind = torch.unsqueeze(rel_grid_ind, 0)
+        print(f'{dim=} {rel_grid_ind.shape=}\n{rel_grid_ind}')
+                                      
+        dim_grid0 = torch.unsqueeze(grid0[:,dim], -1)
+        print(f'{dim_grid0.shape=} {dim_grid0}')
+
+        abs_grid_pts = ((dim_grid0 + rel_grid_ind) - 0.5) * grid[dim]
+        print(f'{abs_grid_pts.shape=}\n{abs_grid_pts}')
+
+        dim_centers = torch.unsqueeze(centers[:,dim], -1)
+        spikes = widths[:,dim] == 0
+        dim_widths = torch.unsqueeze(widths[:,dim], -1)
+
+        normals = (abs_grid_pts - dim_centers)/dim_widths
+        normals[spikes] = 0
+        erfs = torch.erf(normals)
         integ = 0.5*(erfs[:, 1:] - erfs[:, :-1])
+        integ[spikes] = 0
+        integ[spikes, rel_gridc[spikes, dim]] = 1.0
         integs.append(integ)
 
-    integs = [torch.unsqueeze(one, dim=0) for one in integs]
+    # integs = [torch.unsqueeze(one, dim=0) for one in integs]
 
     if ndims == 2:
         ein = 'ij,ik -> ijk'
+        q = q.reshape(-1, 1, 1)
     else:
         eign = 'ij,ik,il -> ijkl'
+        q = q.reshape(-1, 1, 1, 1)
     integ = torch.einsum(ein, *integs)
-    
-    gridc = torch.round(centers/grid).to(dtype=torch.int32)
-    grid0 = gridc - nbins_half
-    return (q.reshape(-1,1,1)*integ, grid0)
+
+    print(f'{q.shape=} {integ.shape=}')
+
+    # return (q.reshape(-1,1,1)*integ, grid0)
+    return (q*integ, grid0)
+
 
 
 def depo_binned(grid, c, w, q, nsigma=None, minbins=None):
