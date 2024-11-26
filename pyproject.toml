@@ -17,6 +17,7 @@ dependencies = [
 hdf = [ "h5py>=3.12.1" ]
 numpy = [ "numpy>=2.1.2" ]
 matplotlib = [ "matplotlib>=3.9.2" ]
+all = [ "h5py>=3.12.1", "numpy>=2.1.2", "matplotlib>=3.9.2" ]
 
 [project.scripts]
 tred = "tred.cli:cli"

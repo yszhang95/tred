@@ -1,6 +1,10 @@
 #!/usr/bin/env python
 
-import matplotlib.pyplot as plt
+try:
+    import matplotlib.pyplot as plt
+except ImportError:
+    print("\nNo matplotlib available, consider running 'uv sync --extra matplotlib'\n")
+    raise
 from matplotlib.backends.backend_pdf import PdfPages
 
 def pages(name, fmt=None):
