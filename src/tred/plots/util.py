@@ -2,10 +2,12 @@
 
 try:
     import matplotlib.pyplot as plt
+    from matplotlib.patches import Ellipse, Circle
 except ImportError:
     print("\nNo matplotlib available, consider running 'uv sync --extra matplotlib'\n")
     raise
 from matplotlib.backends.backend_pdf import PdfPages
+from matplotlib.colors import LogNorm
 
 def pages(name, fmt=None):
     '''
@@ -25,4 +27,10 @@ def make_figure(title, nrows=1, ncols=1, **kwds):
     fig.suptitle(title)
     return fig, axes
 
+
+def ellipse(center, sigma, **kwds):
+    return Ellipse((center[1],center[0]), height=sigma[0], width=sigma[1], **kwds)
+
+def circle(center, radius, **kwds):
+    return Circle((center[1],center[0]), radius, **kwds)
 

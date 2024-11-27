@@ -34,9 +34,9 @@ def plot_diffuse(out):
 
     ax1.set_ylabel("sigma")
     ax2.set_ylabel("sigma")
-    ax2.set_xlabel("drift time")
+    ax2.set_xlabel("drift time (negative is 'backward' drift)")
 
-    ax1.set_title('initial point like, NaN-clamped')
+    ax1.set_title('initial point like')
     ax2.set_title(f'initial finite sigma={sigma0}')
 
     out.savefig()
@@ -65,7 +65,46 @@ def plot_absorb(out):
 
     out.savefig()
 
+def plot_drift1d(out):
+    locs = torch.arange(-1,10)
+    (locs, times, sigma, charges) = td.drift(locs, velocity=-1, diffusion=1.0, lifetime=1)
+    assert len(locs.shape) == 1
+    assert len(sigma.shape) == 1
+    assert torch.sum(locs)/len(locs) == locs[0]
+    title = 'full drift function - 1D'
+    fig, (ax1,ax2) = make_figure(title, nrows=2, sharex=True)
+    ax1.plot(times, sigma)
+    ax1.set_ylabel('sigma')
+    ax2.plot(times, charges)
+    ax2.set_ylabel('charge')
+    ax2.set_xlabel('drift time')
+    out.savefig()
+
+def plot_drift2d(out):
+    locx = torch.arange(-1,10)
+    locy = torch.arange(0,11)
+    locs = torch.vstack((locx,locy)).T
+    (locs, times, sigma, charges) = td.drift(locs, velocity=-1, diffusion=torch.tensor([1.0,2.0]), lifetime=1)
+    assert len(locs.shape) == 2 # (npts,vdim)
+    assert locs.shape[-1] == 2  # vdim
+    assert len(sigma.shape) == 2
+    assert sigma.shape[-1] == 2    
+    assert torch.sum(locs[:0])/locs.shape[0] == locs[0,0]
+    title = 'full drift function - 2D'
+    fig, (ax1,ax2) = make_figure(title, nrows=2, sharex=True)
+    ax1.plot(times, sigma[:,0], label='X')
+    ax1.plot(times, sigma[:,1], label='Y')
+    ax1.set_ylabel('sigma')
+    ax1.legend()
+    ax2.plot(times, charges)
+    ax2.set_ylabel('charge')
+    ax2.set_xlabel('drift time')
+    out.savefig()
+    
+
 def plots(out):
     plot_transport(out)
     plot_diffuse(out)
     plot_absorb(out)    
+    plot_drift1d(out)
+    plot_drift2d(out)

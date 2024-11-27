@@ -12,7 +12,7 @@ def cli():
     pass
 
 @cli.command('plots')
-@click.option('-o','--output',default="tred-diagnostics.pdf")
+@click.option('-o','--output',default=None)
 @click.argument("categories", nargs=-1)
 def plots(output, categories):
     '''
@@ -26,12 +26,16 @@ def plots(output, categories):
     if not categories:
         categories = [meth.replace("_plots","") for meth in dir(tred.plots) if meth.endswith('_plots')]
 
+    if output is None:
+        scat = '-'.join(categories)
+        if scat: scat = '-' + scat
+        output = f"tred-diagnostics{scat}.pdf"
     with pages(output) as out:
         for category in categories:
             meth = getattr(tred.plots, f'{category}_plots')
             meth(out)
         
-    
+    print(output)
 
 
 @cli.command('dummy')

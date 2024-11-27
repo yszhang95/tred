@@ -1,6 +1,6 @@
 #!/usr/bin/env python
 '''
-Methods to raster electron distributions to an N-dimensional grid.
+Methods to raster point-like electron distributions (depos) to an N-dimensional grid.
 
 Each function is called similarly:
 
@@ -15,9 +15,6 @@ Each function is called similarly:
 
   - kwds :: dict of optional keyword parameters specific to the particular
     method.
-
-Function naming convention <object>_<method> with <object> naming the type of
-input object eg "depo" or "step" and <method> naming the raster algorithm.
 
 These functions take N-dimensional grids based on grid tensor size may delegate
 to a specific N-dimensional function <object>_<method>_<N>d().  Not all
@@ -58,7 +55,7 @@ A step object tensor has the following 3N+1 rows
 import torch
 
 
-def depo_binned_1d(grid, centers, widths, q, nsigma=None, minbins=None):
+def binned_1d(grid, centers, widths, q, nsigma=None, minbins=None):
     '''
     1D.
 
@@ -76,7 +73,7 @@ def depo_binned_1d(grid, centers, widths, q, nsigma=None, minbins=None):
     - centers :: 1D tensor of centers (N_depos,)
     - widths :: 1D tensor of Gaussian sigma widths (N_depos,)  (can be zero)
     - q :: 1D tensor of total depo charge (N_depos,)
-    - nsigma :: per-depo minimum multiple of Gaussian sigma to cover.
+    - nsigma :: minimum multiple of Gaussian sigma to cover.
     - minbins :: per-dimension absolute minimum number of grid points to cover half the Gaussian.
     '''
     if nsigma is None:
@@ -124,65 +121,76 @@ def depo_binned_1d(grid, centers, widths, q, nsigma=None, minbins=None):
     return (raster, torch.squeeze(grid0))
 
 
-def depo_binned_nd(grid, centers, widths, q, nsigma=None,
-                   minbins=None):
+def binned_nd(grid, centers, sigmas, charges, nsigma=None, minbins=None):
     '''
     N-dimensional (N>1)
 
-    - grid :: 1D N-vector of grid spacing
-    - centers :: 2D tensor of centers (N_depos, N)
-    - widths :: 2D tensor of Gaussian sigma widths per depo (N_depos, N)  (can have zeros)
-    - q :: 1D tensor of total depo charge (N_depos,)
-    - nsigma :: per-depo minimum multiple of Gaussian sigma per dimension to cover.
+    - grid :: real scalar or 1D N-vector of grid spacing
+    - centers :: 1D (N_depos,) or 2D (N_depos, N) tensor of centers 
+    - sigmas :: 1D (N_depos), or 2D (N_depos, N) tensor of Gaussian sigma widths per depo (can have zeros)
+    - charges :: 1D tensor of total depo charge (N_depos,)
+    - nsigma :: scalar or 1D (N,) minimum multiple of Gaussian sigma to cover.
     - minbins :: 1D N-vector of per-dimension absolute minimum number of grid points to cover half the Gaussian.
 
+    Return tuple (raster, offset) 
+
     '''
-    ndims = len(grid)
+    if not isinstance(grid, torch.Tensor):
+        grid = torch.tensor([grid]) # make 1D (vdim,)
+    vdims = len(grid)
+    if len(centers.shape) == 1:
+        centers = centers[:,None] # add 1D vector dimension
+    if len(sigmas.shape) == 1:
+        sigmas = sigmas[:,None]
     if nsigma is None:
-        nsigma = torch.tensor([3.0]*ndims)
+        nsigma = 3.0
+    if not isinstance(nsigma, torch.Tensor):
+        nsigma = torch.tensor([nsigma]*vdims)
+
+    if centers.shape[1] != vdims:
+        raise ValueError(f'wrong shape: {centers.shape=} for {vdims} vector dims')
+    if sigmas.shape[1] != vdims:
+        raise ValueError(f'wrong shape: {sigmas.shape=} for {vdims} vector dims')
+
 
     # Find number of grid points that span half the largest Gaussian.
-    n_half = torch.round((widths*nsigma)/grid)
+    # (ndepos, vdims)
+    n_half = torch.round(sigmas*(nsigma/grid))
+
     if minbins is not None:
+        # (ndepos+1, vdims)
         n_half = torch.vstack((n_half, minbins))
+    # (vdims, )
     n_half = torch.max(n_half.to(dtype=torch.int32), dim=0).values
 
     # Grid index nearest each center.
+    # (ndepos, vdims)
     gridc = torch.round(centers/grid).to(dtype=torch.int32)
-    print(f'{gridc.shape=}\n{gridc}')    
 
     # Grid index at the starting point (lowest corner grid point) for each region.
     grid0 = gridc - n_half
-    print(f'{grid0.shape=}\n{grid0}')
 
     # Location of grid point nearest center relative from start corner point.
     rel_gridc = gridc - grid0
-    print(f'{rel_gridc.shape=}\n{rel_gridc}')
 
     # Suffer per-dimension serialization.
-    # This perhaps could be parallelized if refactored to use meshgrid. 
+    # We do it because linspace() is 1D only.
+    # Perhaps can remove loop if refactor to use meshgrid. 
     integs=list()
-    for dim in range(ndims):
+    for dim in range(vdims):
+
+        dim_n_half = n_half[dim]
 
         # Enumerate the grid points covering the two halves of this dim's Gaussian
         # Note, add 1 as we do a shift-by-one subtraction after erf()'s below
-        rel_grid_ind = torch.linspace(0, 2*n_half[dim], 2*n_half[dim]+1)
-        # Add the per-depo axis
-        rel_grid_ind = torch.unsqueeze(rel_grid_ind, 0)
-        print(f'{dim=} {rel_grid_ind.shape=}\n{rel_grid_ind}')
-                                      
-        dim_grid0 = torch.unsqueeze(grid0[:,dim], -1)
-        print(f'{dim_grid0.shape=} {dim_grid0}')
+        # (npts,)
+        rel_grid_ind = torch.linspace(0, 2*dim_n_half, 2*dim_n_half+1)
 
-        abs_grid_pts = ((dim_grid0 + rel_grid_ind) - 0.5) * grid[dim]
-        print(f'{abs_grid_pts.shape=}\n{abs_grid_pts}')
+        abs_grid_pts = ((grid0[:,dim][:,None] + rel_grid_ind[None,:]) - 0.5) * grid[dim]
+        spikes = sigmas[:,dim] == 0 # depos with zero width
 
-        dim_centers = torch.unsqueeze(centers[:,dim], -1)
-        spikes = widths[:,dim] == 0
-        dim_widths = torch.unsqueeze(widths[:,dim], -1)
-
-        normals = (abs_grid_pts - dim_centers)/dim_widths
-        normals[spikes] = 0
+        normals = (abs_grid_pts - centers[:,dim][:,None])/sigmas[:,dim][:,None]
+        normals[spikes] = 0     # remove inf
         erfs = torch.erf(normals)
         integ = 0.5*(erfs[:, 1:] - erfs[:, :-1])
         integ[spikes] = 0
@@ -190,31 +198,32 @@ def depo_binned_nd(grid, centers, widths, q, nsigma=None,
         integs.append(integ)
 
     # integs = [torch.unsqueeze(one, dim=0) for one in integs]
-
-    if ndims == 2:
-        ein = 'ij,ik -> ijk'
-        q = q.reshape(-1, 1, 1)
+    if vdims == 1:
+        integ = integs[0]
+        charges = charges.reshape(-1, 1)
+    elif vdims == 2:
+        integ = torch.einsum('ij,ik -> ijk', *integs)
+        charges = charges.reshape(-1, 1, 1)
+    elif vdims == 3:
+        integ = torch.einsum('ij,ik,il -> ijkl', *integs)
+        charges = charges.reshape(-1, 1, 1, 1)
     else:
-        eign = 'ij,ik,il -> ijkl'
-        q = q.reshape(-1, 1, 1, 1)
-    integ = torch.einsum(ein, *integs)
+        raise ValueError(f'unsupported vector dimensions: {vdim}')
 
-    print(f'{q.shape=} {integ.shape=}')
-
-    # return (q.reshape(-1,1,1)*integ, grid0)
-    return (q*integ, grid0)
+    qeff = charges*integ
+    return (qeff, grid0)
 
 
 
-def depo_binned(grid, c, w, q, nsigma=None, minbins=None):
+def binned(grid, centers, sigmas, charges, nsigma=None, minbins=None):
     '''
     Raster depos by integrating Gaussian distribution around each grid point 
 
     nsigma is either scalar or N-dimensional giving the number of sigma over
     which to perform the integration.
     '''
-    ngrid = len(grid)
-    if ngrid == 1:              # special case for now
-        return depo_binned_1d(grid, c, w, q, nsigma, minbins)
+    # ngrid = len(grid)
+    # if ngrid == 1:              # special case for now
+    #     return binned_1d(grid, centers, sigmas, charges, nsigma, minbins)
+    return binned_nd(grid, centers, sigmas, charges, nsigma, minbins)
 
-    return __dir__[f'depo_binned_{ngrid}d'](grid, c, w, q, nsigma)
