@@ -38,6 +38,22 @@ Some of the design and performance goals that guide tred development are:
   
 * Installation
 
+Developers only for now.  Requires [[https://github.com/astral-sh/uv][uv]].
+
+#+begin_example
+$ git clone git@github.com:brettviren/tred.git
+$ cd tred/
+$ uv run tred
+#+end_example
+On first run, this will make a virtual environment and install dependencies including all of PyTorch.  Additional packages are required for certain features.  They can be installed into the virtual environment with:
+
+#+begin_example
+$ uv sync --extra matplotlib --extra numpy --extra hdf
+## or short hand for all dependencies:
+$ uv sync --extra all
+#+end_example
+
+
 * Usage
 
 * Dimensions
