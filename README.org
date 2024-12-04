@@ -56,16 +56,14 @@ $ uv sync --extra all
 
 * Usage
 
-* Dimensions
+This package is not ready for use yet.
 
-Tred supports simulation in one, two or three dimensional space (and time).
-Tred follows a tensor-oriented programming paradigm and thus operates on "multi
-dimensional" tensors (really, Physicists would call them "arrays" or perhaps
-scalar-tensors).  In this combined context, the term *dimension* tends to be
-overloaded and takes on two different meanings:
+Currently, development is driven by this command:
 
-- tensor dimension :: the number of tensor *axes*.  Eg, the return value of ~len(ten.shape)~.
-- vector dimension :: the *size* of one tensor axis.  Eg, the return value of ~len(ten.shape[0])~.
+#+begin_example
+$ uv run tred plots
+#+end_example
 
-In tred the bare term "dimension" and its abbreviation N-D or N-dim refers to the tensor dimension unless qualified by "vector".  The abbreviation N-tensor or N-vector refers to an array of one tensor dimension that is of size N. 
+It produces a PDF of diagnostic plots.
+
 

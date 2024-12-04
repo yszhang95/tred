@@ -1,0 +1,142 @@
+#+title: tred internals
+
+This document provides some information for understanding tred code. 
+
+* Dimensions
+
+Tred supports simulation in one, two or three dimensional space (with one
+dimension designated as the drift time/distance).  Tred follows a
+tensor-oriented programming paradigm and thus operates on "multi dimensional"
+tensors (really, Physicists would call them "arrays" or perhaps scalar-tensors
+as they are not used as "matrix tensors").  In this combined context, the term
+*dimension* tends to be overloaded and takes on two different meanings:
+
+- tensor dimension :: the number of tensor *axes*.  Eg, the return value of ~len(ten.shape)~.
+- vector dimension :: the *size* of one tensor axis.  Eg, the return value of ~len(ten.shape[0])~.
+
+In tred the bare term "dimension" and its abbreviation "N-D" or "N-dim" refers
+to the *tensor dimension* unless qualified by the term "vector".  The abbreviation
+"N-tensor" or "N-vector" refers to an array of one tensor dimension that is of
+size N.
+
+* Grids and voxels
+
+Tred largely works on discrete spaces defined on /grids/.  A grid spans some
+N-dimensional space with /grid points/.  The /grid spacing/ in a given dimension is
+uniform but each dimension may have different spacing.  The spacing is used only
+in mapping values from the continuous space to the discrete space of the grid.
+Generally, the spacing becomes irrelevant for subsequent treatment of values on
+the grid.
+
+A value on a grid point represents some quantity distributed through a /voxel/ of
+nearby space.  Tred assumes a *binned interpretation*.  That is, a grid point
+represents the *lower corner* of its voxel and the discrete value at that grid
+point represents some integral over the voxel volume.  Where the distinction matters, voxels are *half-open*.  Their low edges are inside the voxel and their high edges are in neighboring voxels.  
+
+A *box* is a rectangular array of neighboring voxels spanning all dimensions with similar binned interpretation.  A box is defined by a minimum or beginning grid point coincident with "lowest corner" (smallest grid indices) and a maximum or ending grid point coincident with the high corner of the highest voxel.  As such, this point is not in the box but "one plus the last" point in the box.   This is the usual iterator range semantics.
+
+
+Conceptually the grid is infinite but has an arbitrarily chosen /origin/ at the
+grid point with all zero indices.  The origin corresponds and ties the grid to
+some point in the continuous space.  Negative grid absolute indices are legal
+and relative indices "counted" are w.r.t. the origin.
+
+A finite, "rectangular" subset of the grid is called a /grid box/ (regardless of
+the dimension of the grid).  A box has a /shape/ which is an N-vector giving the
+extent of each dimension measured in the number of grid points spanned.  A
+dimension of size ~n~ spans ~n~ grid points which can be (relatively) indexed from ~0~
+to ~n-1~.  The ~n~'th point is not inside the box.
+
+A box is located in the (infinite) grid with an N-vector /offset/ which is represented as an N-vector holding the index of the grid point at the "lowest" corner of the box and measured relative to the grid origin (ie, simply the grid point indices, which may be negative).  The grid point just "above" the grid point at the "highest" corner of the box is given by the sum of the offset and the shape.
+
+A set of boxes with identical shape but arbitrary offsets is called /uniform/ else the set is called /ragged/.  A set is called /aligned/ when both shapes and offsets, though varied, are some multiple of a fixed shape.  That is, the extent and location of aligned boxes are defined on /super-grid/ which has a spacing that is some multiple of the grid.  Boxes are said to be /binned/ when they span a single voxel of the super-grid.
+
+
+* Sparse data
+
+An initial ionization electron distribution is modeled with discrete point-like "depos" or line segment-like "steps".  After drifting, these zero or one dimensional objects diffuse into the N-D space.  Effectively, the diffuse distribution is formed as a convolution of an N-D Gaussian and the resulting distribution is integrated over the region near each spatial grid point.  The integrals are artificially truncated at some distance from the depo/step that is characterized by a number of Gaussian sigma.  This results in a finite, rectangular box of grid points taking non-zero charge (not charge density) values.
+
+Over the entire charge distribution, these /charge boxes/ can overlap and share no particular alignment other than that imposed by the grid and the vast majority of the grid points have zero charge.  As the grid is large it is not practical to explicitly represent values on all its points with dense tensors.  Instead a sparse, N-d tensor object is developed.
+
+PyTorch has limited support for sparse tensors.  While it supports a number of common formats, most do not provide 3D support.  The coordinate (COO) format does support 3D but is more suited for "uniformly sparse" data and does not exploit the block-sparse nature.  The Block Sparse Row format supports 3D only through a 1D array of 2D BSR tensors.  The third alternative is a custom tensor (or tensor-like) object.
+
+** Key problem
+
+This section describes the key problems that must be solved for sparse representation of tred data.
+
+*** Charge box accumulation
+
+The many, individual charge boxes are defined densely on their own local, finite set of grid points.  Values from all charge boxes that span a given grid point must be summed.  The trivial implementation of this accumulation is serial and Pytorch provides no parallel equivalent.  It does provide a few operations that get close.
+
+**** Put accumulate
+
+The [[https://pytorch.org/docs/stable/generated/torch.Tensor.put_.html][ ~ten.put_(index, values, accumulate=True)~ ]] method will internally reshape
+the ~ten~ tensor to be 1D.  The ~index~ and ~values~ are 1D tensors of the same size
+and the ~put_()~ will set ~values[i]~ on the tensor ~ten~ at the 1D index given by
+~index[i]~.  When ~accumulate=True~ the value is added instead of set.
+
+In principle, this method can be used to accumulate charge blocks but has some
+issues.
+
+The collection of charge boxes must be serialized into 1D ~index~ and ~value~ arrays.  The ~index~ entries must be calculated knowing the ~offset~ and ~shape~ of a charge box.  The ~index~ and ~value~ from all charge blocks must be concatenated.  The ~put_()~ can then be called. 
+  
+The ~index~ can contain arbitrary grid points given the nature of the locations of the charge boxes.  Thus the target tensor ~ten~ must support efficient random element access.  A "normal" dense tensor would suffice except for the sparseness requirement.  Benchmarking is needed to determine if sparse tensors would perform well.
+
+If sparse tensors do not perform well, a /chunked/ approach may be needed.  See below.
+
+**** Scatter add
+
+The [[https://pytorch.org/docs/stable/generated/torch.Tensor.scatter_add_.html#torch.Tensor.scatter_add_][ ~ten.scatter_add(dim, index, values)~ ]] method will add ~values~ to ~ten~ at a location along one dimension ~dim~ given by ~index~.  Both ~index~ and ~values~ have the same shape.  For 3D, it is equivalent to a parallel loop on ~i,j,k~ with this as the central operation:
+
+#+begin_example
+ten[index[i][j][k]][j][k] += values[i][j][k]  # if dim == 0
+#+end_example
+
+It is not yet clear how this may be used to accumulate the charge boxes.
+
+
+*** Response convolution
+
+The accumulated charge on the full N-D grid must then be convolved with a /response/ tensor with proper care that this spreads each non-zero charge information at each grid point over a box with the shape/size of the response tensor.
+
+Again, this is trivially performed in interval or Fourier domain in the case of dense and small tensors.  A trivial interval-domain implementation will spend a majority of the processing time operating on zeros.  The full grid is too large to make a dense, Fourier-domain calculation viable.  Sparse convolutional interval domain methods provided by PyTorch can at best provide on order of two times speed up and are limited to 2D.
+
+** Block Sparse Binned
+
+Some forms of sparse tensors are optimized for data which composed as local, dense blocks.  Block Sparse Row (BSR) format stores non-zero elements in blocks of a fixed size that evenly divides the shape of the full tensor.  PyTorch provides a BSR tensor object but it is limited to 2D and thus not suited for tred.
+
+It is thought that a new, N-D BSR-inspired object, here called a Block Sparse
+Binned (BSB) tensor, is needed to provide a basis for solving the key problems
+listed above.  The BSB must provide support for tred-specific methods with good (parallel) performance including:
+
+- Representing values on a grid.
+- Accumulation of values provided as a set of ragged boxes.
+- Strided partitioning along a subset of dimensions.
+- Convolution of a dense kernel.
+- Sum of multiple BSB objects.
+- Slice along one dimension to produce dense 1D tensor.
+- Full conversion to dense tensor.
+
+The initial design of the BSB is as follows.  First, a BSB is constructed with the following parameters:
+
+- ~blockshape~ N-vector defining the shape of binned boxes holding non-zero grid point values
+  
+- ~lo~ (optional) N-vector defining the "lowest" grid point expected to be represented.  
+
+- ~hi~ (optional) N-vector defining one-past the "highest" grid point expected to be represented.
+
+The BSB carries the following internal representations.
+
+- ~blocks~ a list of dense N-D tensors of shape ~blockshape~ holding non-zero values defined in a particular binned grid box.
+
+- ~offsets~ a list of the locations corresponding to the element in ~blocks~.
+
+- ~bins~ a dense N-D tensor with each element representing one binned grid box in the box bound by ~[lo,hi]~.  The value of the tensor gives the corresponding index in the ~blocks~ and ~offsets~ lists.  Bins consisting of only zero valued grid points have a negative entry.
+
+An arbitrary box must be segmented into binned boxes.  When a binned box is added to the BSB, its offset is used to find the corresponding element of ~bins~.  If negative then the binned box and offset is appended to the corresponding list and the resulting list index is set to the corresponding element of ~bins~.  OTOH, if the element is non-negative, the new binned box is added to the existing tensor found at that index in ~blocks~.
+As binned boxes are added to a BSB the ~[lo,hi]~ bounds and the ~bins~ tensor may require enlargements.  Likewise, it is possible that bins may become zero.  To remove them from the ~blocks~ and ~offsets~ list would require reforming ~bins~.  A half measure may be to set ~None~ at their indices and make a check for existing bins two steps (negative ~bins~ value or positive but with ~None~ at the index).
+
+* Other
+
+- ~vmap()~ for vectorizing over a "batch" dimension
+- Triton language for defining custom kernels
