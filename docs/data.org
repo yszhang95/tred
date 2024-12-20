@@ -1,0 +1,50 @@
+#+title: tred data
+
+* Data loading
+
+Tred supports loading data from a number of file formats.  Some formats require
+tred to be installed with optional variants.
+
+- ~numpy~ :: for Numpy / .npz file support
+- ~hdf~ :: for HDF5 / .h5 file support
+
+All file formats are assumed to provide their contents as a dict-like
+association of a string key to an array-like data object.  Tred provides
+low-level file readers that will provide a dict-like object that yields the data
+as a torch tensor placed on a requested device.
+
+On this dict-like object it is assume the data is organized according to some
+schema.  Trid provides a mid-level loader that takes a low-level loader and
+applies schema-dependent transformation.  
+
+* Data schema
+
+** Depos
+
+Depos are an older representative of ionization representing the center of a
+single particle tracking step (eg ~G4Step~).  A set of ~N~ depos are represented by
+a pair of arrays with keys starting in ~depo_data_~ and ~depo_info_~ and ending in a
+common ~_<n>~ giving an "event" number.  The data array has type float32 and shape
+~(7,N)~ with each column interpreted as ~(t,q,x,y,z,L,T)~.  The info array has type
+int32 and shape ~(4,N)~ with each column interpreted as ~(id,pdg,gen,child)~.  When
+~info[2]~ / ~gen~ is 0 then the corresponding depo is current (not a "prior"
+parent).
+
+The tensor yielded from depos is coerced to match the form of steps (see next).
+
+** Steps
+
+A steps tensor has type float32 and shape ~(9,N)~ with each column interpreted as
+~(x1,y1,z1,x2,y2,z2,t,q,d)~.  The value ~t~ gives the time of measurement of the
+other quantities relative to some externally assumed reference time.  The first
+pair of trios gives the endpoints of the step.  The final two values ~q~ and ~d~ are
+interpreted differently depending on context.
+
+When a step is first constructed (eg from a Geant4 ~G4Step~) the ~q~ value is
+interpreted as the $E$ of the particle at the start of the step and ~d~ as the
+loss of energy of the particle $dE$.  Ionization and recombination is then
+applied and the ~q~ row becomes interpreted as a total number of electrons
+associated with the step and ~d~ is zero.  After drifting, ~d~ is interpreted as the
+drift time (~t~ is reduced by an equal amount) and ~q~ is adjusted for electron
+absorption.
+

@@ -140,3 +140,249 @@ As binned boxes are added to a BSB the ~[lo,hi]~ bounds and the ~bins~ tensor ma
 
 - ~vmap()~ for vectorizing over a "batch" dimension
 - Triton language for defining custom kernels
+
+* Indexing
+
+tred uses and eschews several "indexing methods" supported by PyTorch as described here.
+
+- simple :: indices are integer or ~slice~ 
+- advanced :: indices are tensors
+- ragged :: flatten a target ND tensor to be 1D and use a 1D tensor of integer indices
+- vmap :: vectorize over a batch dimension
+- jagged :: not used
+
+** Simple indexing
+
+In general, indexing depends on the type of the index.  Simple indexing uses a
+scalar integer or a ~slice~:
+
+#+begin_src python :results output
+  import torch
+  x = torch.tensor([[1, 2, 3], [4, 5, 6], [7, 8, 9]])
+  indices = torch.tensor([2, 0])
+  print(x[0,0], x[2,1:3])
+#+end_src
+
+#+RESULTS:
+: tensor(1) tensor([8, 9])
+
+
+** Advanced indexing
+
+Advanced indexing occurs when the index is a ~tensor~.  The tensor ~dtype~ further
+determines the interpretation.  A Boolean tensor index is interpreted as a mask.
+The indices where the mask is ~True~ are used to index the target array.  On the
+other hand, an integer tensor is interpreted as supplying a set of "simple"
+integer indices.
+
+Advanced indexing (and indeed any indexing) must have consistent application
+when the indexed tensors are used in some operation.  In all cases, the result
+of advanced indexing of a tensor results in a tensor of a different shape.
+
+*** Integer tensor indexing
+
+This is a way to select out specific rows or columns.
+
+#+begin_src python :results output
+  import torch
+  x = torch.tensor([[1, 2, 3], [4, 5, 6], [7, 8, 9]])
+  indices = torch.tensor([2, 0])
+  y = x[indices]
+  print(f'{y.shape=}\n{y}')
+  z = x[:,indices]
+  print(f'{z.shape=}\n{z}')
+#+end_src
+
+#+RESULTS:
+: y.shape=torch.Size([2, 3])
+: tensor([[7, 8, 9],
+:         [1, 2, 3]])
+: z.shape=torch.Size([3, 2])
+: tensor([[3, 1],
+:         [6, 4],
+:         [9, 7]])
+
+*** Boolean tensor masking
+
+This involves building a Boolean array that is the same shape as a target array.  
+
+#+begin_src python :results output
+  import torch
+  x = torch.tensor([[1, 2, 3], [4, 5, 6], [7, 8, 9]])
+  mask = torch.zeros((3,3), dtype=torch.bool)
+  mask[1,1] = True
+  m = x[mask]
+  print(f'{m.shape=}\n{m}')
+#+end_src
+
+#+RESULTS:
+: m.shape=torch.Size([1])
+: tensor([5])
+
+In some special cases, the mask can be constructed with a Boolean operation.
+
+#+begin_src python :results output
+  import torch
+  x = torch.tensor([[1, 2, 3], [4, 5, 6], [7, 8, 9]])
+  m = x[x<5]
+  print(f'{m.shape=}\n{m}')
+#+end_src
+
+#+RESULTS:
+: m.shape=torch.Size([4])
+: tensor([1, 2, 3, 4])
+
+
+*** Tuple indexing
+
+This converts an arbitrary shaped tensor into effectively a 1D tensor by
+providing one index tensor for each dimension of the target tensor.  Each
+corresponding element of the dimension indices form one simple index of the
+target.  Torch marches along, filling the output, which can be multi-valued if
+the indices repeat.
+
+#+begin_src python :results output
+  import torch
+  x = torch.tensor([[1, 2, 3], [4, 5, 6], [7, 8, 9]])
+  row_ind = torch.tensor([0,2,0,0])
+  col_ind = torch.tensor([0,0,2,0])
+  rc = x[row_ind, col_ind]
+  print(f'{rc.shape=}\n{rc}')
+#+end_src
+
+#+RESULTS:
+: rc.shape=torch.Size([4])
+: tensor([1, 7, 3, 1])
+
+#+begin_src python :results output
+  import torch
+  x = torch.tensor([[1, 2, 3], [4, 5, 6], [7, 8, 9]])
+  row_ind = torch.tensor([0,2,0,0])
+  col_ind = torch.tensor([0,0,2,0])
+  x[row_ind, col_ind] = x[x<5]
+  print(f'{x.shape=}\n{x}')
+#+end_src
+
+*** Indexed operations
+
+Taking care to match shapes, indexing can be used to operate on a subset of a tensor.
+
+#+begin_src python :results output
+  import torch
+  x = torch.tensor([[1, 2, 3], [4, 5, 6], [7, 8, 9]])
+  row_ind = torch.tensor([0,2,0,0])
+  col_ind = torch.tensor([0,0,2,0])
+  x[row_ind, col_ind] = x[x<5]
+  print(f'{x.shape=}\n{x}')
+#+end_src
+
+#+RESULTS:
+: x.shape=torch.Size([3, 3])
+: tensor([[4, 2, 3],
+:         [4, 5, 6],
+:         [2, 8, 9]])
+
+** Ragged indexing
+
+One pattern required in tred is ability to use different indexing along a
+"batch" dimension.  Effectively one needs a list of lists of indices where that
+inner list has different sizes as one runs along the outer list.  This can be
+accommodated by flattening both the target tensor and the (more sparse) list of
+list of indices (or values).  This shows a small example:
+
+#+begin_src python :results output
+  import torch
+  x = torch.tensor([[1, 2, 3], [4, 5, 6], [7, 8, 9]])
+  loi = [[],[0,1,2],[2,0]]
+  lov = [[],[0,-1,-2],[-2,0]]
+  ncols = x.shape[1]
+  ind = torch.tensor([i*ncols+j for i,r in enumerate(loi) for j in r])
+  print(f'{ind=}')
+  val = torch.tensor([j for i,r in enumerate(lov) for j in r])
+  print(f'{val=}')
+  # x.flatten()[ind] = val
+  # or equivalently and perhaps slightly faster:
+  x.flatten().scatter_(0, ind, val)
+  print(f'{x.shape=}\n{x}')
+#+end_src
+
+#+RESULTS:
+: ind=tensor([3, 4, 5, 8, 6])
+: val=tensor([ 0, -1, -2, -2,  0])
+: x.shape=torch.Size([3, 3])
+: tensor([[ 1,  2,  3],
+:         [ 0, -1, -2],
+:         [ 0,  8, -2]])
+
+The above used ~scatter()~ as an optimization.  It has a related function
+~gather()~.  The two are best understood with a pseudo-code example.  Assuming 3D
+tensors:
+
+#+begin_example
+# out = torch.gather(input, 0, index)
+out[i][j][k] = input[index[i][j][k]][j][k]  # if dim == 0
+
+# out = torch.zeros(...);
+# out.scatter_(0, index, src)
+out[index[i][j][k]][j][k] = src[i][j][k]  # if dim == 0
+#+end_example
+
+In addition, ~scatter()~ can take an arithmetic operator to change, eg ~=~ into ~+=~.
+
+These patterns are applied as a function of the number of dimensions.  To
+understand this, one may include or omit indices in the pseudo code example.
+For example, 1D pseudo-code:
+
+#+begin_example
+# out = torch.gather(input, 0, index)
+out[i] = input[index[i]]
+
+# out = torch.zeros(...);
+# out.scatter_(0, index, src)
+out[index[i]] = src[i]
+#+end_example
+
+Here we see the equivalence in how the flattened tensor was modified in the example.  
+
+** Indexing with ~vmap~
+
+~torch.vmap~ is like ~map(func, iterable)~ (the function, not the C++ data structure) in that it calls its function on each element of the iterable and returns an iterable with the results.  The "v" in "vmap" stands for "vector" meaning that torch will apply the map pattern in a parallel manner.  ~torch.vmap~ is not called like ~map()~ but instead converts a function into a vectorized version.
+
+#+begin_src python :results output
+  import torch
+
+  def doit(x, ind, val=-1):
+      x[ind] = val
+      return x
+  vdoit = torch.vmap(doit, chunk_size=2)
+
+  x = torch.tensor([[1, 2, 3], [4, 5, 6], [7, 8, 9]])
+  inds = torch.tensor([ [0,0], [1,2], [0,2] ])
+  y = vdoit(x, inds)
+  print(f'{y.shape=}\n{y}')
+#+end_src
+
+#+RESULTS:
+: y.shape=torch.Size([3, 3])
+: tensor([[-1,  2,  3],
+:         [ 4, -1, -1],
+:         [-1,  8, -1]])
+
+Some limitations:
+- The ~func~ must always return the same shape tensor.
+
+- The ~func~ body must not call ~tensor.item()~.  This is called implicitly in some cases such as using a tensor element as a scalar value.  In particular, it means one can not use a tensor element to index a Python data structure and that effectively means that any inputs to the vectorized function must be rectangular tensors.  And, since ~vmap~ can not map directly over Python data there is apparently no way to use it to map over a ragged indexing.
+
+#+RESULTS:
+
+** Jagged tensors
+
+The [[https://pytorch.org/FBGEMM/][Facebook GEneral Matrix Multiplication]] library based on PyTorch provides
+[[https://pytorch.org/FBGEMM/fbgemm_gpu-overview/jagged-tensor-ops/JaggedTensorOps.html][Jagged Tensor Operations]] (and data structure).  This represents ND tensors with
+sizes that differ as one runs along dimensions other than the most inner.  The
+elements are stored in a dense 2D array and then structural data in an "offset"
+list of tensor and "max length" tensor.
+
+Jagged tensors may be useful to tred but to start with they are put aside due to
+the need for a new library and the complexity.
+

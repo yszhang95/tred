@@ -1,0 +1,26 @@
+* Package initiation
+
+tred is developed as a [[https://docs.astral.sh/uv/][uv]] [[https://docs.astral.sh/uv/guides/projects/][project]] and requires at least uv version 0.5.3.  You can download pre-built binaries at:
+
+https://github.com/astral-sh/uv/releases
+
+#+begin_example
+uv init tred
+cd tred
+uv add click
+#+end_example
+
+Some specific info on [[https://docs.astral.sh/uv/guides/integration/pytorch/][using uv with PyTorch]].
+
+Build system is setuptools, hatchling doesn't allow .org.
+#+begin_example
+[build-system]
+requires = ["setuptools"]
+build-backend = "setuptools.build_meta"
+#+end_example
+
+
+#+begin_example
+uv sync [--extra test]
+#+end_example
+

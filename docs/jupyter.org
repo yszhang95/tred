@@ -1,0 +1,9 @@
+#+title: Using tred with Jupyter Notebook and k3d
+
+Some 
+
+
+#+begin_example
+uv pip install jupyter[notebook] k3d
+uv run --with jupyter jupyter notebook
+#+end_example

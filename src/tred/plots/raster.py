@@ -37,7 +37,7 @@ def make_3d():
     return grid, rasters, offsets
 
 
-def sum_3d(grid, rasters, offsets):
+def sum_3d_serial(rasters, offsets):
     '''
     Do a serial sum of offset rasters and return array spanning grid.
     '''
@@ -57,6 +57,17 @@ def sum_3d(grid, rasters, offsets):
     return full_raster
 
 
+def sum_3d(rasters, offsets):
+    '''
+    Sum rasters given offsets
+    '''
+    # 1. transform (ndepo, 3) offsets to 
+
+    # tot = torch.zeros_like(rasters[0])
+    # tot.index_put_(tuple(offsets.T), rasters, accumulate=True)
+    # return tot
+
+
 def plot_depo_k3d():
     '''
     Generate some 3D depos, drift, raster and plot with k3d.
@@ -68,11 +79,11 @@ def plot_depo_k3d():
     Then in a notebook cell:
     
     import tred.plots.raster
-    tred.plots.raster.plot_depo_k3d(None)
+    tred.plots.raster.plot_depo_k3d()
     '''
     import k3d
     grid, rasters, offsets = make_3d()
-    full_raster = sum_3d(grid, rasters, offsets)
+    full_raster = sum_3d_serial(rasters, offsets)
 
     vol = k3d.volume(full_raster)
     plot = k3d.plot()
@@ -86,7 +97,7 @@ def plot_depo_3d(out):
     '''
     grid, rasters, offsets = make_3d()
 
-    full_raster = sum_3d(grid, rasters, offsets)
+    full_raster = sum_3d_serial(rasters, offsets)
 
     fig, axes = make_figure('3D depo rasters', nrows=3)
 
