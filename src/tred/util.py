@@ -47,3 +47,24 @@ def make_points(num, vdim, bb=None, device='cpu'):
         dimpts.append( uni*(pmax-pmin)+pmin )
     return torch.vstack(dimpts).T
 
+def to_tuple(thing):
+    '''
+    Try hard to convert a thing into a tuple.
+    '''
+    if isinstance(thing, tuple):
+        return thing
+    if isinstance(thing, torch.Tensor):
+        thing = thing.tolist()
+    else:
+        thing = list(thing)
+    return tuple(thing)
+
+def to_tensor(thing, dtype=None, device=None):
+    '''
+    Try hard to convert thing into a torch.Tensor of given dtype and device
+    '''
+    if isinstance(thing, torch.Tensor):
+        dtype = dtype or thing.dtype
+        device = device or thing.device
+        return thing.to(device=device, dtype=dtype)
+    return torch.tensor(thing, device=device or 'cpu', dtype=dtype or torch.int32)

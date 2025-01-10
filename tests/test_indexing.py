@@ -1,7 +1,36 @@
 import torch
-from tred.indexing import chunk
-
+from tred.indexing import chunk, chunk_location, union_bounds, crop_batched
+from tred.util import to_tensor
+from functools import reduce
     
+def nele(t):
+    return reduce(torch.mul, t, 1)
+
+def test_crop_batched():
+    bshape = (2,3,4,5)
+    bnele = nele(bshape)
+    data = torch.arange(bnele).reshape(bshape).to(dtype=torch.int32)
+    offsets = torch.tensor([[1, 2, 3],[2, 3, 4]], dtype=torch.int32)
+    inner = to_tensor(data.shape[1:])
+
+    outer = torch.tensor([10, 20, 30], dtype=torch.int32)
+    inds = crop_batched(offsets, inner, outer)
+
+    assert len(inds) == bnele
+    env = torch.zeros([2, 10,20,30], dtype=torch.int32)
+    env.flatten()[inds] = data.flatten()
+
+
+def test_union_bounds():
+    block = torch.rand((2,3,4,6))
+    print(block.shape)
+    offset = torch.tensor([ (-1,-2,-3), (1,2,3) ])
+    print(offset)
+    pos = union_bounds(block.shape[1:], offset)
+    assert len(pos) == 2
+    assert all([s>0 for s in pos[1]])
+    assert torch.all(pos[0] == offset[0])
+
 
 def test_chunking_2d():
     '''
@@ -69,15 +98,30 @@ def test_chunking_2d():
                 assert torch.all(rs[b, x, y] == val)
 
 
+def test_chunk_locating_3d():
+    '''
+    Test tred.indexing.chunk_location() in 3D
+    '''
+    cshape = torch.tensor([3,4,5])
+    # number of bins per envelope dimension
+    mshape = torch.tensor([3,2,1])
+    eshape = cshape * mshape
+
+    nbatch = 2
+    fullshape = torch.tensor([nbatch] + eshape.tolist())
+
+    offsets = (torch.rand(fullshape.tolist())*10).to(dtype=torch.int)
+
+    loc = chunk_location(offsets, eshape, cshape)
+    
+
 def test_chunking_3d():
     '''
-    We break a batch of nb N-d "envelope" tensors into chunks or bins.
+    Test tred.indexing.chunk() in 3D
 
-    The envelope shape (ex, ey, ez) is an integer multiple (mx, my, mz) of the
-    chunk / bin shape (cx, cy, cz).
-
-    Input is an 1+N-dimensional tensor of shape (nb, ex, ey, ez) and and output
-    is a 1+N+N-dimensional tensor in shape (nb, mx, my, mz, cx, cy, cz).
+    This test constructs "envelopes" with elements that encode their chunk
+    index, applies chunking and then requires each chunk to have elements all
+    the same and correct value.
     '''
 
     cshape = torch.tensor([3,4,5])
@@ -117,7 +161,6 @@ def test_chunking_3d():
                      .reshape(-1,
                               mshape[0], mshape[1], mshape[2],
                               cshape[0], cshape[1], cshape[2])
-    print(f'{rs.shape=}\n{rs}')
 
     for b in range(nbatch):
 
@@ -132,6 +175,8 @@ def test_chunking_3d():
 
                     assert torch.all(rs[b, x, y, z] == val)
 
+    print(f'{rs.shape=}')
+    print(rs.flatten(0, 3).shape)
 
 
 

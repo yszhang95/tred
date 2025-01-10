@@ -1,6 +1,10 @@
-import tred.sparse
 import torch
+import tred.sparse
+from tred.indexing import union_bounds
 
+
+# Must run in jupyter notebook
+# $ uv run --with jupyter,k3d  jupyter notebook
 import k3d
 
 def bo_volumes(block, offset):
@@ -51,5 +55,30 @@ def k3d_block_offset():
     for v in bo_volumes(eblock, eoffset):
         plot += v
 
+    plot.display()
 
+
+
+def k3d_voxels():
+    '''
+    Draw blocks as voxels
+    '''
+
+    bshape = (3, 4, 6)
+    blocks = torch.ones((2,3,4,6), dtype=torch.int)
+    blocks[1] += 1
+    boffsets = torch.tensor([ (-1,-2,-3), (1,2,3) ], dtype=torch.int)
+    moffset, mshape = union_bounds(bshape, boffsets)
+    print(f'{moffset=} {mshape=}')
+    voxels = torch.zeros(tuple(mshape), dtype=torch.uint8)
+    for ind, o in enumerate(boffsets):
+        print(f'{o=}')
+        o = o - moffset
+        s = [slice(start.item(), (start+p).item()) for start,p in zip(o, bshape)]
+        print(f'{s=}')
+        voxels[*s] = blocks[ind]
+
+    plt_voxels = k3d.voxels(voxels, outlines=True, opacity=0.1)
+    plot = k3d.plot()
+    plot += plt_voxels
     plot.display()
