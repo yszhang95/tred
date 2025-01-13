@@ -1,0 +1,61 @@
+#+title: tred concepts and terms
+
+* Block-sparse binned
+
+tred provides a very specific "block-sparse binned" N-dimensional tensor
+representation.  It stores data in locally dense and globally sparse blocks
+called "chunks".  All chunks have pre-defined shape (N-dimensional size) and are
+aligned to some super-grid.  The terms and concepts used in the implementation
+of this representation, some of which are exposed to the user, are as follows:
+
+A *point* is an integer-valued N-vector that is interpreted as an absolute
+location in an infinite, discrete N-dimensional space.
+
+A *grid* (or *point grid*) is the collection of all possible points.
+
+An *offset vector* or *offset* represents the vector difference from one given
+point to another.
+
+An *origin point* or *origin* is a particular point of reference.  An *absolute
+origin* is defined as the "zero point" vector with all elements equal to zero.
+All other origins are at some offset from the absolute origin.
+
+An *index vector* or *index* is an offset that is constrained to have
+non-negative values with upper bounds.  It may be used to index a tensor or to
+describe a vector-distance.
+
+A *bounds* is a rectangular subset of a grid identified by two points.  The
+lowest corner point represents the location of the bounds.  The offset from
+lowest corner to highest corner gives the shape or extent of the bounds.  The
+highest corner is one grid spacing higher than the points assumed to be in
+bounds.
+
+A *block* is a tensor providing values associated with points in a bounds.
+
+A *super-grid* is derived from a grid.  On its own, a super-grid is a grid but
+to keep terms clear the prefix *super-* is given to all grid concepts when they
+apply to the super-grid.
+
+The super-origin is identified with the origin (both are zero-points).  
+
+The remaining derivation of the super-grid from the grid is specified by an
+index vector defined on the grid called the *spacing*.  In general, the point
+identified with a given super-point is defined as the element-wise product of
+the super-point and the spacing.  Conversely, the super-point associated with
+any point is the element-wise integer-division of the point by the spacing.
+
+We call this association a *bin*.  A bin may be located in the super-grid by its
+super-point or in the grid by the corresponding point.  A bin has half-open unit
+extent in the super-grid and in the grid it has half-open extent given by the
+spacing.
+
+A *chunk* is a grid block with bounds spanning a single bin of grid points or
+equivalently a single super-grid point.
+
+An *envelope* represents a bounds spanning an integer number of chunk bounds.
+
+The code uses a shorthand hint to keep super-grid and grid distinct.  The prefix
+"s" is used to indicate a super-grid quantity and "g" to indicate a grid
+quantity.  For example a bin may be located by its (absolute) ~spoint~ or its
+~gpoint~.  Given a sorigin and a gorigin one may convert between a sindex and a
+gindex.

@@ -5,6 +5,7 @@ Some basic utility functions
 import subprocess
 from pathlib import Path
 import torch
+from torch import Tensor
 
 try:
     import magic
@@ -68,3 +69,4 @@ def to_tensor(thing, dtype=None, device=None):
         device = device or thing.device
         return thing.to(device=device, dtype=dtype)
     return torch.tensor(thing, device=device or 'cpu', dtype=dtype or torch.int32)
+
