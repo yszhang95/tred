@@ -56,7 +56,6 @@ def crop_batched(offsets, inner, outer):
     be the outer shape itself (tuple or N-tensor).  The outer shape is common to
     all inners.
     '''
-    print(f'crop_batched:\n{offsets=}\n{inner=}\n{outer=}')
     if isinstance(outer, torch.Tensor):
         outer = tuple(outer.tolist())
 

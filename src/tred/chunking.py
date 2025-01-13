@@ -58,7 +58,7 @@ def location(envelope: Block, chunk_shape:Shape):
     grids = list()
     # per-dimension grids
     for o,c in zip(orig_shape, chunk_shape):
-        r = torch.arange(0, o, c)
+        r = torch.arange(start=0, end=o, step=c)
         grids.append(r)
     mg = torch.meshgrid(*grids, indexing='ij')
 
@@ -69,7 +69,7 @@ def location(envelope: Block, chunk_shape:Shape):
             off = torch.unsqueeze(off, -1) # match space dims
         mgd = mg[idim][None,:]  # add batch dim
 
-        prod = torch.unsqueeze(mgd*off, -1) # dimension 1+N+1
+        prod = torch.unsqueeze(mgd+off, -1) # dimension 1+N+1
         off_mg.append(prod)
     return torch.cat(off_mg, dim=-1)
     

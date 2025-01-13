@@ -109,6 +109,11 @@ def fill_envelope(envelope: Block, block: Block) -> Block:
 
     If envelop lacks a .data attribute it will be allocated.
     '''
+    if not isinstance(envelope, Block):
+        raise TypeError(f'sparse.fill_envelope() envelope must be Block got {type(envelope)}')
+    if not isinstance(block, Block):
+        raise TypeError(f'sparse.fill_envelope() block must be Block got {type(block)}')
+
     if not hasattr(envelope, "data"):
         envelope.set_data(torch.zeros(envelope.size(),
                                       dtype=block.data.dtype, device=block.data.device))
