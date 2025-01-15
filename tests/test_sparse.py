@@ -1,7 +1,7 @@
 #!/usr/bin/env pytest
 import pytest
 import torch
-from tred.sparse import BSB, SGrid, fill_envelope, reshape_envelope, block_chunk
+from tred.sparse import SGrid, fill_envelope, reshape_envelope
 from tred.util import to_tensor
 from tred.blocking import Block
 
@@ -66,14 +66,3 @@ def test_sparse_funcs_multichunk():
     for ichunk in range(chunks.nbatches):
         print(f'{ichunk}: loc={chunks.location[ichunk]}: tot={torch.sum(chunks.data[ichunk])}')
 
-def test_sparse_bsb_multichunk():
-    bsb = BSB([10,10])
-    loc = torch.tensor([-1,-1])
-    block = Block(loc, data=torch.ones([12,12]))
-    bsb.fill(block)
-    print(f'{bsb.chunks_origin} (chunk space)')
-    assert all(bsb.chunks_origin == torch.tensor([-1,-1]))
-    assert len(bsb.chunks) == 9
-    print(f'{bsb.chunks_index=} (chunk space)')
-    assert torch.all(bsb.chunks_index.flatten() == torch.arange(9))
-    assert sum([torch.sum(b.data) for b in bsb.chunks], 0) == 144

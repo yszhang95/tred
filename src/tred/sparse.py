@@ -2,11 +2,9 @@
 '''
 Support for block-sparse binned (BSB) data.
 
-
-Most functions take singular or batched tensor input and will return tensor
-output shaped equivalently.
-
 See docs/concepts.org for a description of the concepts and their terms.
+
+See tred.bsb for a class to add value to these functions.
 
 '''
 
@@ -19,7 +17,6 @@ from .util import to_tensor, to_tuple
 from .blocking import Block
 from .types import IntTensor, Shape, Tensor
 
-from collections import defaultdict
 
 class SGrid:
     '''
@@ -53,7 +50,7 @@ class SGrid:
         return to_tensor(thing, device=self.spacing.device)
 
 
-    def spoint(self, gpoint:IntTensor) -> IntTensor:
+    def spoint(self, gpoint:IntTensor, goffset:IntTensor|None=None) -> IntTensor:
         '''
         Return the bin-grid index vector that would contain the
         grid-point index vector in the bin's half-open extent.
@@ -66,8 +63,9 @@ class SGrid:
 
         Inverse of `gpoint`.
         '''
-
-        return self.to_tensor(gpoint) // self.spacing
+        if goffset is None:
+            return self.to_tensor(gpoint) // self.spacing
+        return (self.to_tensor(gpoint) - self.to_tensor(goffset)) // self.spacing
 
     def gpoint(self, spoint: IntTensor) -> IntTensor:
         '''
@@ -155,76 +153,58 @@ def block_chunk(sgrid: SGrid, block: Block) -> Block:
     return reshape_envelope(env, sgrid.spacing)
 
 
-class BSB:
+def index_chunks(sgrid: SGrid, chunk: Block) -> Block:
     '''
-    An N-dimensional tensor-like object with "block sparse bin" storage.
+    Index the chunks over space by bin.
 
-    A BSB implements a super-grid of given spacing.  It then stores user data in
-    chunks and provides a subset of tensor operations.
+    Chunks are assumed to be non-overlapping.  See chunking.accumulate().
+
+    This returns a Block with a single batch and is defined on the super-grid.
+    Each chunk is mapped to one element in the N-dimensional data which in turn
+    holds the batch index of the chunk.  Elements with negative value indicate
+    that no chunk exists.  
+
+    The returned index block allows round trip navigation between a chunk and
+    its neighbors.  For example:
+
+    >>> ic = index_chunks(sgrid, chunk)
+    >>> ic_origin = ic.location[0]
+    >>> ic_index = ic.data
+
+    Round trip through the index
+
+    >>> s_index = sgrid.spoint(chunk.location, ic_origin).T
+    >>> b_index = ic_index[s_index]
+    >>> assert torch.all(b_index == torch.arange(chunk.nbatches))
+    
+    Find nearest neighbor above a chunk along dimension zero.
+
+    >>> nn = torch.zeros_like(ic_origin)
+    >>> nn[0] = 1
+    >>> nn += s_index
+    >>> # fixme: we ignore overflowing s_index bounds
+    >>> print("we have this many NN's:", torch.sum(ic_origin[nn] >= 0))
+
     '''
 
-    spacing: IntTensor
-    """1D N-vector of bin shape"""
+    # 1+1-dimension, shape (Nbatch, N)
+    super_location = sgrid.spoint(chunk.location)
+    # 1-D, shape(N)
+    minp = super_location.min(dim=0).values
+    maxp = super_location.max(dim=0).values
+    shape = to_tuple(maxp - minp + 1)
 
-
-    def __init__(self, spacing: IntTensor, block: torch.Tensor|None = None):
-        '''
-        Create a BSB sparse tensor-like object with given super-grid spacing.
-        '''
-        self.sgrid = SGrid(spacing)
-        if block is not None:
-            self.fill(block)
-
-            
-    def fill(self, block: Block):
-        '''
-        Fill self with block.
-
-        A `block` may be N-dimensional or 1+N dimensional if batched.  N must be
-        same as the size of the spacing vector.
-        '''
-        if block.vdim != self.sgrid.vdim:
-            raise ValueError(f'BSB.fill: dimension mismatch: {block.vdim=} != {self.sgrid.vdim}')
-
-        chunks = block_chunk(self.sgrid, block)
-        self.fill_chunks(chunks)
-
-
-    # fixme: move to chunking.py
-    def fill_chunks(self, chunks: Block):
-        '''
-        Fill self from chunks.
-        '''
-
-        # The bins in super-grid points.
-        super_locations = self.sgrid.spoint(chunks.location)
-
-        # Find the super-grid bounds that contain all chunks.
-        min_point = super_locations.min(dim=0).values
-        max_point = super_locations.max(dim=0).values
-        shape = to_tuple(max_point - min_point + 1)
-
-        # The map from an super-grid index to an index of a list of chunks.
-        # Explicitly on CPU because we use it to index into Python list.
-        self.chunks_index = torch.zeros(shape, dtype=torch.int32, device='cpu')
-        self.chunks_origin = min_point # super-grid loc of [0]-index
-
-        # intermediate collection of chunks by their super_offset
-        by_bin = defaultdict(list)
-        for super_loc, data in zip(super_locations, chunks.data):
-            cindex = super_loc - self.chunks_origin
-            cindex = to_tuple(cindex)
-            by_bin[cindex].append(data)
-            
-        self.chunks = list()
-        for cindex, cdatas in by_bin.items():
-            cdata = cdatas.pop()
-            if len(cdatas):
-                cdata = sum(cdatas, cdata)
-            if not torch.any(cdata):
-                continue
-            cind = len(self.chunks) # linear index
-            self.chunks.append(Block(data=cdata, location=cindex))
-            self.chunks_index[cindex] = cind
-            
+    # FIXME: though limited by extent of chunks and reduced by super-grid chunk
+    # size, the index will still be sparse.  Perhaps we would be better to use a
+    # point-sparse tensor instead of dense.
+    #
+    # N-d with shape of shape.
+    cindex = torch.zeros(shape, dtype=torch.int32, device=chunk.location.device) - 1
+    # Batches of indices into cindex. shape after transpose is (N, Nbatch).
+    indices = (super_location - minp).T
+    # Count over the batch dimension, shape is (Nbatch,)
+    iota = torch.arange(chunk.nbatches, dtype=torch.int32, device=chunk.location.device)
+    cindex[*indices] = iota
+    # Block assumes batches, so must make one even though it will only be one.
+    return Block(location = minp[None,:], data = cindex[None,:])
 

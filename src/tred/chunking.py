@@ -1,6 +1,9 @@
 #!/usr/bin/env python
 '''
 tred.chunking provides functions to chunk N-dimensional tensors.
+
+See also tred.sparse for related functions that depend on the idea of a
+super-grid.
 '''
 
 
@@ -8,6 +11,7 @@ from .blocking import Block
 from .util import to_tuple
 from .types import Shape, Tensor
 
+from collections import defaultdict
 import torch
 
 
@@ -131,3 +135,49 @@ def content(envelope, chunk_shape):
     rargs2 = tuple([-1] + mshape.tolist() + chunk_shape.tolist())
 
     return envelope.data.reshape(*rargs1).permute(*pargs).reshape(*rargs2)
+
+
+def accumulate(chunk : Block) -> Block:
+    '''
+    Sum chunks at the same location, skipping any that are empty
+    '''
+    by_loc = defaultdict(list)
+    for loc, dat in zip(chunk.location, chunk.data):
+        loc = to_tuple(loc)
+        by_loc[loc].append(dat)
+
+    locs = list()
+    dats = list()
+    for cloc, cdats in by_loc.items():
+        cdat = cdats.pop()
+        if len(cdats):
+            cdat = sum(cdats, cdat)
+        if not torch.any(cdat):
+            continue
+        locs.append(cloc)
+        dats.append(cdat)
+
+    # checkme: in principle, we could leave these as lists.
+    locs = chunk.to_tensor(locs)
+    dats = torch.stack(dats, axis=0)
+    return Block(location=locs, data=dats)
+
+
+def chunk_slice(chunk: Block, slices) -> Block:
+    '''
+    Apply a slicing to each chunk and return as a block.
+
+    The `slices` is an N-tuple of slice, one for each dimension.
+    '''
+
+    starts =  list()
+    stops = list()
+    for slc, shp in zip(slices, chunk.shape):
+        start = slc.start or 0
+        step = slc.step or 1
+        stop = slc.stop or 
+
+
+#     = torch.tensor([s.start or 0 for s in slices], dtype=torch.int32)
+
+#torch.tensor(

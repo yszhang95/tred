@@ -70,3 +70,17 @@ def to_tensor(thing, dtype=None, device=None):
         return thing.to(device=device, dtype=dtype)
     return torch.tensor(thing, device=device or 'cpu', dtype=dtype or torch.int32)
 
+def slice_first(slc):
+    return 0 if slc.start is None else slc.start
+
+def slice_length(slc, tensor_length):
+    if slc.step is None or slc.step == 1:
+        return min(slc.stop if slc.stop is not None else tensor_length, tensor_length) - (slice_first(slc) if slc.start is not None else 0)
+
+    start = slice_first(slc)
+    stop = min(slc.stop if slc.stop is not None else tensor_length, tensor_length)
+    # length = ((stop - start) // abs(slice.step)) + 1
+    # length = min(stop, tensor_length) - max(start, 0)
+    # return min(length, tensor-length - 
+    return max(0, 1+(stop - start) // abs(slc.step))
+
