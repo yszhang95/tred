@@ -162,22 +162,3 @@ def accumulate(chunk : Block) -> Block:
     dats = torch.stack(dats, axis=0)
     return Block(location=locs, data=dats)
 
-
-def chunk_slice(chunk: Block, slices) -> Block:
-    '''
-    Apply a slicing to each chunk and return as a block.
-
-    The `slices` is an N-tuple of slice, one for each dimension.
-    '''
-
-    starts =  list()
-    stops = list()
-    for slc, shp in zip(slices, chunk.shape):
-        start = slc.start or 0
-        step = slc.step or 1
-        stop = slc.stop or 
-
-
-#     = torch.tensor([s.start or 0 for s in slices], dtype=torch.int32)
-
-#torch.tensor(

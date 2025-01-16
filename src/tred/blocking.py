@@ -1,6 +1,6 @@
 #!/usr/bin/env python
 '''
-tred.blocking provides functions for N-dimensional "blocks".
+tred.blocking provides functions for N-dimensional "blocks".  See `Block`.
 '''
 
 from tred.util import to_tensor
@@ -9,9 +9,10 @@ from .types import IntTensor, Tensor, Shape, Size, index_dtype
 
 class Block:
     '''
-    A batch of rectangular volumes at locations in a discrete integer space.
+    A batch of rectangular, N-dimensional volumes at locations in a discrete
+    integer space (grid).
 
-    Each volume is restricted to sharing a common (unbatched) `shape`.
+    Volume are restricted to share a common (unbatched) `shape`.
     '''
     def __init__(self, location:IntTensor, shape: Shape|None=None, data:Tensor|None=None):
         '''
@@ -78,7 +79,6 @@ class Block:
         if len(shape) != vdim:
             raise ValueError(f'Block: volume shape has wrong dimensions: {len(shape)} expected {vdim}')
         self.shape = shape
-
         
     def set_data(self, data:Tensor):
         '''
@@ -105,6 +105,20 @@ class Block:
         Return thing as tensor on same device as location tensor.
         '''
         return to_tensor(thing, device=self.location.device, dtype=dtype)
+
+
+def apply_slice(block: Block, space_slice) -> Block:
+    '''
+    Apply a slice to the block data along the spatial dimensions.
+
+    The space_slice is an N-tuple with a slice instance for each spatial
+    dimensions.  The slice is common to all elements along the batch dimension.
+    The returned Block.location records the input plus the offset defined by the
+    "starts" of the slices.
+    '''
+    offset = block.to_tensor([s.start or 0 for s in space_slice])
+    return Block(location = block.location + offset,
+                 data = block.data[:,*space_slice])
 
 
 def batchify(block: Block) -> Block:
