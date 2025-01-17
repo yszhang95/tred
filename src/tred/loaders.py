@@ -167,13 +167,13 @@ def make_xxx(data):
             return loader
 
 
-def load(files):
-    if isinstance(files, str):
-        files = [files]
-    for path in files:
-        data = file_xxx(path)
-        if data is None:
-            log.warn(f'skipping unsupported file: {path}')
-            continue
-        
-        loader = make_xxx(data)
+def load(path):
+    '''
+    Return list-like object to iterate data in file.
+
+    This function tries to auto-detect the format.
+    '''
+    # fixme: handle multiple files.
+
+    data = file_xxx(path)
+    return make_xxx(data)
