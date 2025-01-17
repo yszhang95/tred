@@ -120,30 +120,3 @@ def apply_slice(block: Block, space_slice) -> Block:
     return Block(location = block.location + offset,
                  data = block.data[:,*space_slice])
 
-
-def batchify(block: Block) -> Block:
-    '''
-    Return block which is assured to be batched.
-    '''
-    nl = len(block.location.shape)
-    nd = len(block.data.shape)
-
-    if nl == 1:             # nominally unbatched
-        vdim = block.location.shape[0]
-        if vdim != nd:
-            raise ValueError(f'unbatched block dimension mismatch {nd} != {vdim}')
-        return Block(location=torch.unsqueeze(block.location,0),
-                     data=torch.unsqueeze(block.data,0))
-
-    bd = block.data.shape[0]
-    bl = block.location.shape[0]
-    if bd != bl:
-        raise ValueError(f'batch size mismatch {bd} != {bl}')
-
-
-    vdim = block.location.shape[1]
-    if vdim+1 != nd:
-        raise ValueError(f'batched block dimension mismatch {nd} != {vdim+1}')
-
-    return block
-
