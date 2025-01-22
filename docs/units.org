@@ -1,0 +1,27 @@
+#+title: tred units
+
+*tred* adopts a *system-of-units* ultimately based that from CLHEP.
+
+There are two rules for the system-of-units that shall not be violated:
+
+- Any value imported to *tred* must be converted into the system-of-units by *multiplying* by the unit for which the value is provided.
+
+- Any value exported from *tred* may be converted to a specific unit by *dividing* by the desired unit.
+
+As a consequence, any value used by tred is in correct units.
+
+In general, any *numeric literal* that gives a value with units shall never be
+*bare* but shall have a unit multiplied.
+
+Some examples in Python:
+
+#+begin_src python
+  from tred.units import *
+
+  # import
+  tick = 50*ns
+
+  # export
+  print(f'the tick is {tick/us} microseconds')
+#+end_src
+
