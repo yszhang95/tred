@@ -7,3 +7,5 @@ ltximg
 .ipynb_checkpoints
 cut
 *.ipynb
+data/
+*.npy

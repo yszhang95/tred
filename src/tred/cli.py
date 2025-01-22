@@ -39,9 +39,15 @@ def plots(output, categories):
 
 
 @cli.command('dummy')
-def dummy():
+@click.option('-o','--output',default=None)
+@click.option('-r','--response',default=None)
+def dummy(output, response):
     '''
-    junk
+    This command does not exist.
+
+    Temporary harness to drive S*R step 
     '''
-    click.echo("derp")
+    import tred.ndlar
+    r = tred.ndlar.response(response)
+    
     
