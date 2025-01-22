@@ -1,0 +1,124 @@
+#+title tred detector response
+
+* Overview
+
+One key function of *tred* is to perform a convolution of the distribution of
+ionization electrons (after drifting, aka the "signal") with a "response" to
+produce the instantaneous current induced in detector electrodes (wires, pixels)
+prior to their input to a readout model which finally gives the "measure".
+Conceptually, M = S*R.
+
+* Response data
+
+The following data items make up a *tred* detector response:
+
+- current tensor (floating point valued N-dimensional tensor)
+- grid spacing (floating point valued N-vector)
+- drift axis (integer scalar)
+- response plane position (floating point scalar)
+
+These quantities fully encode problem-specific details allowing *tred* to operate
+in a general manner.
+
+The "N" used above defines the dimensionality of response convolution.  Wire
+detectors require at least 2-D (historically 1-D was used but found to be too
+inaccurate).  Strips+holes detectors may also be okay with a 2-D response.
+Pixels inherently lack enough symmetry and require 3-D.
+
+Each of the N tensor dimensions of the *response current tensor* are mapped to N-1
+"real" (transverse) space dimensions and one (drift) time dimension according to
+the *response grid spacing* and the *response drift axis*.  The grid spacing is an
+N-tuple that provides N-1 spatial distances and 1 time duration and grant a
+distance metric to the tensor.  The drift axis is a scalar integer that
+specifies which of the N dimensions is along the drift time.
+
+The *response current tensor* dimensions must be ordered in a particular manner.
+The time dimension is *causal* and the space dimensions is *centered* as described
+next.
+
+The time dimension is "causal" when its first element corresponds to the
+earliest current induced by a charge at the *response plane*.  Subsequent elements
+give induced current at later times.  This means that the convolution along the
+time dimension produces a bias in time (latency) between the initial time of a
+charge and the time at which a peak in its contribution to the current may be
+seen.  This latency corresponds exactly to the time required for the unit charge
+to drift along its path.  The exact latency depends on the path taken as encoded
+by the response current tensor.
+
+On the other hand, each spatial dimension is "centered" when the first (and
+last) elements correspond to a path that is nearest to the center of the central
+"electrode of interest".  Elements progressively toward the *middle* of the tensor
+dimension represent paths progressively *further* from the center of the
+"electrode of interest".  Convolution along the space dimensions thus results in
+a symmetric spreading of input charge information and no spatial offset.
+
+The spacial dimensions of the response current tensor must simultaneously align
+with the fine grid described so far and a course or "super" grid that with a
+spacing that matches that of the electrode array.  Given that detector response
+changes radically at a point exactly between two neighboring electrodes and the
+requirement that the grids be regular, the response current tensor element
+corresponds to a "bin center" and not a "bin edge".  When the response is
+constructed with an even number of drift paths per electrode dimension there is
+no path directly above the center of the electrode.  The first element in the
+tensor along that dimension represents the path just above the center while the
+last element represents the path just below the center.  OTOH, if a response is
+prepared with an odd number of paths per pitch, the first element in the tensor
+corresponds to the path directly above the electrode center, the second element
+just above center along a dimension and the last element is just below.  No
+paths are directly at a midpoint between two neighboring electrodes.
+
+
+To assist the user in fulfilling this responsibility, *tred* functions to perform
+transformation primitives to bring a response in a user format into compliance
+with tred.  Full transformations are provided for select "popular" response data. 
+
+* Transformation primitives
+
+t.b.d.  see ~response.py~ for now
+
+
+
+* Support for popular responses
+
+** NDLar format
+
+This format is used by the original NDLar simulation.  It comes in files named
+like:
+
+#+begin_src python
+>>> r = np.load("response_38_v2b_50ns_ndlar.npy")
+>>> r.shape
+(45, 45, 6400)
+#+end_src
+
+It covers one quadrant located starting from the central pixel of interest (PoI)
+and including two nearest neighbor pixels in both dimensions.
+
+Note, the following statements may need confirmation:
+
+- There are 10 paths per pitch and thus have a spacing of 4.4mm/10 = 0.44mm.
+
+- Even number of paths so no path is directly above center of the PoI.  
+
+- ~r[0,0]~ gives the path which is 1/2 the spacing (0.22mm) above the center of
+  the PoI.
+
+- The "38" refers to the size of the pixel, eg 3.8 mm.  The pitch is not encoded
+  but is 4.4 mm.
+
+- The step duration or "tick" is 50 ns.
+
+- 6400 ticks and nominal 1.6mm/us LAr drift speed at 500 V/cm implies the
+  response plane is no more than 512mm from the pixel surface.  Exact distance
+  can be estimated by finding the tick at which a response peaks and falls.
+
+TBD:
+
+- Absolute location of response plane in the coordinate system of the
+  depos/steps.
+
+
+  
+
+
+

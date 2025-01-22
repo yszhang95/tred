@@ -97,13 +97,13 @@ def file_xxx(filepath, dtype=torch.float32, device='cpu'):
 
     This detects underlying file format.
     '''
-    mt = mime_type(path)
+    mt = mime_type(filepath)
 
     if mt == "application/zip":
-        return NpzFile(path, dtype, device)
+        return NpzFile(filepath, dtype, device)
 
     if mt == "application/x-hdf5":
-        return HdfFile(path, dtype, device)
+        return HdfFile(filepath, dtype, device)
 
 
 class DepoLoader:
@@ -177,3 +177,4 @@ def load(path):
 
     data = file_xxx(path)
     return make_xxx(data)
+

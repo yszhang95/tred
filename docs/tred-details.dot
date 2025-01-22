@@ -1,0 +1,40 @@
+digraph tred {
+    steps
+    depos
+    raster
+    raster_envelope
+    full_chunks
+    impact_chunk
+    impact_current
+    pixel_waveforms
+    hits
+
+    node[shape=box]             // procs
+
+
+    tracking->steps
+    steps->depos
+    steps->step_rastering->raster
+    depos->depo_rastering->raster
+    raster->raster_aligning->raster_envelope
+    raster_envelope->raster_chunking->full_chunks
+    full_chunks->partioning
+    partioning->impact_chunk
+    partioning->impact_chunk
+    partioning->impact_chunk
+    partioning->impact_chunk
+    partioning->impact_chunk
+    impact_chunk->response_convo->impact_current
+    impact_chunk->response_convo->impact_current
+    impact_chunk->response_convo->impact_current
+    impact_chunk->response_convo->impact_current
+    impact_chunk->response_convo->impact_current
+    impact_current->current_sum
+    impact_current->current_sum
+    impact_current->current_sum
+    impact_current->current_sum
+    impact_current->current_sum
+    current_sum->pixel_waveforms
+    pixel_waveforms->readout_model
+    readout_model->hits
+}

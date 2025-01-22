@@ -1,5 +1,40 @@
 #+title: tred concepts and terms
 
+* Spatial and tensor dimensions
+
+*tred* enacts a multi-dimensional calculation where the dimensionality is
+parameterized.  For example, it can model charge distributions and apply a
+response model in 3D, 2D or even 1D.
+
+Most of *tred* operates on tensors which represent values on a rectangular region
+of a grid in real space.  We say "spatial grid" when we think of this grid in
+terms of real-world spacing measured in a unit of length (or time).  This grid
+is "rectilinear" in that the grid spacing along each dimension is uniform but
+the spacing may differ between the dimensions.
+
+Otherwise, *tred* considers an index grid that is mapped 1-to-1 to the spatial
+grid.  It has unity spacing.  An N-dimensional tensor represent values
+associated with a rectangular subset of this grid.  More distinction of the
+index grid is given in the following sections.
+
+The user must assure a few conventions are properly composed:
+
+- A affine (scale, translation, rotation) "space-index" transformation that
+  converts a spacial vector, eg as (x,y,z) to the index grid, eg (i,j,k),
+  modulo 1.
+
+- A tensor dimension identified to be along the nominal drift direction.
+
+- Ionization electron distribution data (depo or step points) must be provided
+  in the "spatial" coordinate system.
+
+- Detector response data must be provided as an N-dimensional tensor defined on
+  the index grid.
+
+  
+
+
+
 * Block-sparse binned
 
 tred provides a very specific "block-sparse binned" N-dimensional tensor
