@@ -116,7 +116,9 @@ class StepLoader:
 
     Random access is only available for batch dimension, not along feature dimension.
 
-    FIXME: advanced indexing may be supported in the future.
+    FIXME: Unsigned integers are implicitly converted to signed integers.
+
+    FIXME: Advanced indexing may be supported in the future.
 
     FIXME: A future version should decouple ND specific format to a transform function
            and make the function derived from PyTorch dataset.
