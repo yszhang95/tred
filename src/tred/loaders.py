@@ -106,6 +106,74 @@ def file_xxx(filepath, dtype=torch.float32, device='cpu'):
         return HdfFile(filepath, dtype, device)
 
 
+class StepLoader:
+    '''
+    Produce step tensors assuming data is in Step schema.
+    The supported data is in a foramt of h5py.File or numpy structured array.
+    The output data is a tuple of a tensor for float and a tensor for integer.
+    - The tensor in float type spans (N_batch, 8), by 'dE', 'dEdx', 'x_start', 'y_start', 'z_start', 'x_end', 'y_end', 'z_end'.
+    - the tensor in integer type spans (N_batch, 2), by 'pdg_id', 'event_id'.
+
+    Random access is only available for batch dimension, not along feature dimension.
+
+    FIXME: Unsigned integers are implicitly converted to signed integers.
+
+    FIXME: Advanced indexing may be supported in the future.
+
+    FIXME: A future version should decouple ND specific format to a transform function
+           and make the function derived from PyTorch dataset.
+    '''
+    DTYPE = {
+        'float32' : torch.float32,
+        'int32' : torch.int32,
+    }
+
+    def __init__(self, data):
+        # fixme: the following can be wraped in a transform function specialized to ND
+        if isinstance(data, h5py.File) and 'segments' in data.keys():
+            data = data['segments']
+        self._dkeys = {
+            'float32' : ['dE', 'dEdx', 'x_start', 'y_start', 'z_start', 'x_end', 'y_end', 'z_end'],
+            'int32' : ['pdg_id', 'event_id'] # fixme: event_id is in uint32 at ND
+        }
+
+        self._data = {}
+        for k, v in self._dkeys.items():
+            self._data[k] = torch.stack([torch.tensor(data[n], dtype=StepLoader.DTYPE[k], requires_grad=False) for n in v], dim=1) \
+                if isinstance(v, (list, tuple)) else torch.tensor(data[v], dtype=StepLoader.DTYPE[k], requires_grad=False)
+
+    def __len__(self):
+        return len(self._data['float32'])
+
+    def __getitem__(self, idx):
+        return self._data['float32'][idx], self._data['int32'][idx]
+
+    def get_column(self, key):
+        '''
+        Get a column by key.
+        Args:
+            key: the identifier of the column; tt is usually a string.
+        Returns:
+            A column tensor in a size of (N_batch, ); data type depends on the key.
+        Raises:
+            ValueError: key must be within available.
+        '''
+        v = None
+        for k, v in self._dkeys.items():
+            try:
+                idx = v.index(key)
+                if len(self._data[k].shape) > 1:
+                    v = self._data[k][:,idx]
+                    return v
+                else:
+                    v = self._data[k][:]
+                    return v
+            except ValueError:
+                pass
+        if v is None:
+            raise ValueError(f'key must be in {self._dkeys}')
+
+
 class DepoLoader:
     '''
     Produce depo tensors assuming data is in depo data/info schema.
@@ -150,8 +218,8 @@ def make_depos(data):
         if key.startswith("depo_info_"): ni += 1
     if nd == ni and nd > 0:
         return DepoLoader(data)
-    
-    
+
+
 
 def make_xxx(data):
     '''
