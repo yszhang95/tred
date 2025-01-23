@@ -114,6 +114,10 @@ class StepLoader:
     - The tensor in float type spans (N_batch, 8), by 'dE', 'dEdx', 'x_start', 'y_start', 'z_start', 'x_end', 'y_end', 'z_end'.
     - the tensor in integer type spans (N_batch, 2), by 'pdg_id', 'event_id'.
 
+    Random access is only available for batch dimension, not along feature dimension.
+
+    FIXME: advanced indexing may be supported in the future.
+
     FIXME: A future version should decouple ND specific format to a transform function
            and make the function derived from PyTorch dataset.
     '''
@@ -133,8 +137,8 @@ class StepLoader:
 
         self._data = {}
         for k, v in self._dkeys.items():
-            self._data[k] = torch.stack([torch.tensor(data[n], dtype=DTYPE[k], requires_grad=False) for n in v], dim=1) \
-                if isinstance(v, (list, tuple)) else torch.tensor(data[v], dtype=DTYPE[k], requires_grad=False)
+            self._data[k] = torch.stack([torch.tensor(data[n], dtype=StepLoader.DTYPE[k], requires_grad=False) for n in v], dim=1) \
+                if isinstance(v, (list, tuple)) else torch.tensor(data[v], dtype=StepLoader.DTYPE[k], requires_grad=False)
 
     def __len__(self):
         return len(self._data['float32'])
@@ -212,8 +216,8 @@ def make_depos(data):
         if key.startswith("depo_info_"): ni += 1
     if nd == ni and nd > 0:
         return DepoLoader(data)
-    
-    
+
+
 
 def make_xxx(data):
     '''
