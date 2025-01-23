@@ -956,17 +956,35 @@ class QEff3D():
         qeff = []
         nQ = len(Q)
         # print(nQ, shape, nbtensor, shape[0] * shape[1] *shape[2], lmn_prod, nbatch, batch_size)
-        zchunk = 400
+        xchunk = 100
+        ychunk = 200
+        zchunk = 100
+        argidx = np.argmax([x.size(2), y.size(2), z.size(2)])
+        usex = argidx == 0 and x.size(2) > xchunk
+        usey = argidx == 1 and y.size(2) > ychunk
+        usez = argidx == 2 and z.size(2) > zchunk
         for i in range(0, nQ, batch_size):
-            s = slice(i, min(i+batch_size, nQ))
+            s = slice(i, i+batch_size)
             # print(s, nQ, shape, nbatch, batch_size)
-            if z[s].size(2) > zchunk:
+            if usex:
+                qjs = []
+                for j in range(0, x[s].size(2), xchunk):
+                    qj = QEff3D.eval_qmodel(Q[s], X0[s], X1[s], Sigma[s], x[s][..., j:j+xchunk], y[s], z[s])
+                    qjs.append(qj)
+                charge = torch.cat(qjs, dim=-3)
+            if usey:
+                qjs = []
+                for j in range(0, y[s].size(2), ychunk):
+                    qj = QEff3D.eval_qmodel(Q[s], X0[s], X1[s], Sigma[s], x[s], y[s][..., j:j+ychunk], z[s])
+                    qjs.append(qj)
+                charge = torch.cat(qjs, dim=-2)
+            if usez:
                 qjs = []
                 for j in range(0, z[s].size(2), zchunk):
                     qj = QEff3D.eval_qmodel(Q[s], X0[s], X1[s], Sigma[s], x[s], y[s], z[s][:,:,j:j+zchunk])
                     qjs.append(qj)
                 charge = torch.cat(qjs, dim=-1)
-            else:
+            if not (usex or usez or usez):
                 charge = QEff3D.eval_qmodel(Q[s], X0[s], X1[s], Sigma[s], x[s], y[s], z[s], **kwargs)
 
             charge = charge.view(len(Q[s]), lmn_prod, shape[0], shape[1], shape[2]) # batch, channel, D1, D2, D3

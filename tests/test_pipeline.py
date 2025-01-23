@@ -28,7 +28,8 @@ k3t = 0.0486 # (g/MeV cm^2) (kV/cm); birks
 Wi = 23.6E-6 # MeV/pair
 
 origin = torch.tensor((0.,0.,0.), requires_grad=False, device='cuda:0')
-grid_spacing = (0.0443, 0.0443, 0.016)
+# grid_spacing = (0.0443, 0.0443, 0.016)
+grid_spacing = (0.016, 0.0443, 0.0443)
 
 n_sigma = torch.tensor((3., 3., 3.), requires_grad=False, device='cuda:0')
 
@@ -137,6 +138,12 @@ def main():
     memGPUs = []
     memCPUs = []
     for i, eventid in enumerate(eventids):
+        # if i<=50 or i>60:
+        #     continue
+        # if i>50:
+        #     continue
+        # if i <=60:
+        #     continue
         segments = fhdf5['segments'][ fhdf5['segments']['event_id'] == eventid ]
         dt, memGPU, memCPU = run_one_event(segments)
         dts.append(dt)
