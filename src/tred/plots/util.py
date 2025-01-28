@@ -7,7 +7,7 @@ except ImportError:
     print("\nNo matplotlib available, consider running 'uv sync --extra matplotlib'\n")
     raise
 from matplotlib.backends.backend_pdf import PdfPages
-from matplotlib.colors import LogNorm
+from matplotlib.colors import LogNorm, SymLogNorm
 
 def pages(name, fmt=None):
     '''

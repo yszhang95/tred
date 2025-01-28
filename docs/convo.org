@@ -1,0 +1,19 @@
+#+title tred convolution
+
+A core operation in *tred* is the convolution of signal and response $S*R$.
+
+This convolution is performed via the discrete Fourier transform method.  It is *dimensionaly precise* in how it handles the circular nature of this method.  It is *stable* in the sense that the response tensor is expected to be *centered* on its transverse spatial dimensions and *causal* in its temporal drift dimension (see [[file:response.org]]).
+
+The basic algorithm:
+
+- Select one relative impact position from signal and response.
+- Calculate target shape for the convolution based on each dimension being of length $N_{S,i}+N_{R,i}-1$.
+- Apply a forward "roll" to the spatial dimensions of $R$ by a shift $-\lfloor N_{R,i}/2 \rfloor$.  This pushes the later drift paths around to the front of the tensor.
+- Apply padding on all high-sides of $R$ to achieve desired shape.
+- Apply backward "roll" to push the later drift paths back into place.
+- Do same for $S$ taking care that $S$ may be batched.
+- Apply forward DFT to both, now common-shaped tensors.
+- Multiple in Fourier domain
+- Apply inverse DFT.
+- Fix normalization.
+- Accumulate across relative impact positions

@@ -2,10 +2,15 @@ from tred.response import ndlarsim
 from .util import make_figure
 from tred.web import download
 import numpy
+import torch
+
+def get_ndlarsim():
+    fname = download('https://www.phy.bnl.gov/~bviren/tmp/tred/response_38_v2b_50ns_ndlar.npy')
+    return ndlarsim(fname)
+
 
 def plot_ndlarsim(out):
-    fname = download('https://www.phy.bnl.gov/~bviren/tmp/tred/response_38_v2b_50ns_ndlar.npy')
-    r = ndlarsim(fname)
+    r = get_ndlarsim()
 
     fig, ax = make_figure('ND-Lar-sim response\nSelect points along the diagonal\nasymmetric colors imply a problem')
 
@@ -23,6 +28,7 @@ def plot_ndlarsim(out):
     ax.set_xlabel('field response tick near end')
     out.savefig()
     
+
 def plots(out):
     plot_ndlarsim(out)
     

@@ -1,0 +1,85 @@
+#+title: tred development
+
+This collects some guidance on developing tred internals
+
+* Constructing tensors
+
+** Use signed ~int32~ for tensors holding tensor indices, ~float32~ for physics values.
+
+** Do not hard-wire ~device~
+
+#+begin_src python
+  bad = torch.tensor(..., device='cpu') # bad
+  def better(ten : Tensor) -> Tensor:
+    return torch.tensor(..., dtype=ten.dtype)
+#+end_src
+
+** Do not specify ~requires_grad~
+
+#+begin_src python
+  bad = torch.tensor(..., requires_grad=False)
+
+  # good - at very high level such as cli.py
+  with torch.no_grad:
+      some_high_level_function()
+#+end_src
+
+
+* Function definitions
+
+** Function docstrings
+
+All functions should have a docstring that includes:
+
+- Brief, one line description.
+
+- Each argument described in terms of expected type, dimension and shape.
+
+- Likewise any return value
+
+- Detailed prose describing how the function works is welcome.
+
+** Type hinting is recommended
+
+Type hints are recommended but not required.  When they are used, prefer to hint
+using types provided by ~tred.types~, if applicable.
+
+#+begin_src python
+
+  # in a tred Python module
+  from .types import IntTensor, Shape, Tensor
+  def some_shape(values: Tensor, indices: IntTensor) -> Shape:
+      # ...
+      return indices.shape
+
+#+end_src
+
+** Tensor dimensionality
+
+- Allow for a variety of tensor dimensionality and return tensors correspondingly.
+
+  - Eg, scalar, batched vector shape ~(Nbatch,)~ and batched-scalar shape ~(Nbatch,1)~ can typically be handled symmetrically.
+
+- Batch dimension is the first tensor dimension unless there is a specific overriding need.
+
+
+** Avoid requiring bundling of feature dimensions.
+
+Prefer functions taking individual feature tensors over single bundled tensors.
+
+#+begin_src python
+  def bad(bundle):
+      '''
+      Pass bundle of shape (Nbatch,Nfeatures)
+      '''
+      feature0 = bundle.T[0]
+      feature1 = bundle.T[1]
+
+  def good(feature0, feature1):
+      '''
+      Pass tensors of shape (Nbatch,)
+      '''
+      pass
+#+end_src
+
+
