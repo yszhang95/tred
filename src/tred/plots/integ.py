@@ -280,7 +280,35 @@ def plot_simNd(out):
         print(f'{sig.shape=} (x) {res.shape=} = {c_shape=}')
 
         meas = convolve(sig, res)
-        print(f'{meas.location=} {meas.shape=}')
+        print(f'{meas.location=} {meas.shape=} {meas.data.shape=}')
+
+
+        if ndim == 1:
+            fig, ax = make_figure('1D impulses')
+            ax.plot(meas.data[0,6000:])
+
+        if ndim == 2:
+            fig, ax = make_figure('2D impulses')
+            ax.imshow(meas.data[0,:,6000:], interpolation='none', aspect='auto')
+
+        if ndim == 3:
+            fig = plt.figure()
+            ax = fig.add_subplot(projection="3d")
+            dat = meas.data[0]
+            vmin = dat.min()
+            vmax = dat.max()
+            amm = torch.abs(dat).max()
+            dat[torch.abs(dat) < amm/100.0] = 0
+            ind = dat.nonzero()
+            print(f'{ind.shape=}')
+            i,j,k = ind[:,0], ind[:,1], ind[:,2]
+            val = dat[i, j, k]
+            print(f'{len(val)}')
+            ax.scatter(i, j, k, c=(val+vmin)/(vmin+vmax), alpha=torch.abs(val)/amm)
+
+        out.savefig()
+            
+
 
 def plots(out):
     # plot_sim1d_time_byhand(out)
