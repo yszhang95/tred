@@ -120,3 +120,15 @@ def apply_slice(block: Block, space_slice) -> Block:
     return Block(location = block.location + offset,
                  data = block.data[:,*space_slice])
 
+def batchify(ten: Tensor, ndim: int) -> tuple:
+    '''
+    Return tuple of (tensor,bool).
+
+    The tensor is returned in batch form with ndim+1 dimensions.  True is
+    returned only if the batch dimension was added.  An added batch dimension is
+    dimension 0.
+    '''
+    if len(ten.shape) == ndim:
+        return ten.unsqueeze(0), True
+    return ten, False
+

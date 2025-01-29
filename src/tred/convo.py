@@ -6,22 +6,24 @@ Support for DFT-based convolutions.
 
 from .util import to_tuple, to_tensor
 from .types import Tensor, Shape
+from .blocking import Block, batchify
 import torch
 from torch.nn.functional import pad
 
-
-def dft_shape(ten, kern):
+def dft_shape(tshape: Shape, kshape: Shape) -> Shape:
     '''
-    Return the shape required to convolve tensor ten with kernel.
+    Return the shape required to convolve tensor of shape tshape with kernel of shape kshape.
 
-    The tensor ten may be batched.  The returned shape does not include a batch
-    dimension.
+    The tensor is considered batched in the first dimension if its size is one
+    more than the size of kshape.
+
+    A tuple is returned.
     '''
-    if len(ten.shape) == len(kern.shape):
-        tshape = to_tensor(ten.shape)
+    if len(tshape) == len(kshape):
+        tshape = to_tensor(tshape)
     else:
-        tshape = to_tensor(ten.shape[1:])
-    kshape = to_tensor(kern.shape)
+        tshape = to_tensor(tshape[1:])
+    kshape = to_tensor(kshape)
     return to_tuple(tshape + kshape - 1)
 
 
@@ -34,9 +36,7 @@ def zero_pad(ten : Tensor, shape: Shape|None = None) -> Tensor:
 
     Zero-padding is applied to the high-side of each non-batch dimension.
 
-    For padding dimensions that are "centered" consider to bracket a call to
-    zero_pad() with calls to torch.roll().  A positive shift, then the pad
-    followed by a negative shift.
+    See symmetric_pad() to apply padding in different per-dimension manners.
     '''
     batched = True
     if len(shape) == len(ten.shape):
@@ -56,13 +56,196 @@ def zero_pad(ten : Tensor, shape: Shape|None = None) -> Tensor:
     return padded
         
 
-def convolve(ten, kernel):
+def front_half(n):
     '''
-    Return the convolution of tensor ten with kernel.
-
-    Both input tensors are real-valued interval domain.
-
-    The ten tensor may be batched, but not the kernel.
+    Return "half" of n when used at the front of a dimension.
     '''
+    return torch.ceil(to_tensor(n, dtype=torch.int32)/2)
 
+def back_half(n):
+    '''
+    Return "half" of n when used at the back of a dimension.
+    '''
+    return torch.floor(to_tensor(n, dtype=torch.int32)/2)
+
+
+
+def symmetric_pad(ten: Tensor, shape: Shape, symmetry: tuple) -> Tensor:
+    '''
+    Zero-pad tensor to shape in a symmetric fashion.
+
+    - ten :: an N-dimensional tensor or N+1 if batched.
+
+    - shape :: an N-tensor giving desired sizes of the padded tensor.  Each
+      dimension size must at least that of the corresponding input size.
+
+    - symmetry :: a tuple of symmetry types corresponding to each (non-batch)
+      dimension.
+
+    Supported symmetry types that govern where the zero padding is placed
+    w.r.t. the input tensor dimension.  For tensor dimension size n_t and pad
+    dimension size n_p, the layouts are also given.
+
+    - prepend :: padding is inserted on the low side of the dimension.
+                 Layout: [n_p, n_t].
     
+
+    - append :: padding is inserted on the high side of the dimension.
+                Layout: [n_t, n_p].
+
+    - center :: padding is inserted between two "halves" of the dimension.
+                Layout: [front_half(n_t), n_p, back_half(n_t)]
+
+    - edge :: "half" the padding is prepended, "half" appended
+               Layout: [front_half(n_p), n_t, back_half(n_p)]
+
+    When the argument is odd, the front_half() and back_half() give the "extra"
+    element to the front.
+
+    Note, tred applies "center" padding for spatial dimensions to a "response"
+    and "edge" padding to spatial dimensions of a "signal" and "append" padding
+    to time/drift dimension of either.
+    '''
+
+    # input validation
+    if len(symmetry) != len(shape):
+        raise ValueError(f'symmetric_pad: shape and symmetry must be same size got {len(symmetry)} != {len(shape)}')
+
+    if not all([s in 'prepend append center edge'.split() for s in symmetry]):
+        raise ValueError(f'symmetric_pad: unsupported symmetries in {symmetry}')
+
+    ten, squeeze = batchify(ten, len(shape))
+    o_shape = to_tensor(ten.shape[1:])
+    vdim = len(o_shape)
+    if not all([t < s for t,s in zip(o_shape, shape)]):
+        raise ValueError(f'symmetric_pad: truncation {o_shape} to {shape} is not supported')
+        
+    # We will always apply the zero padding as an "append" and achieve the
+    # desired symmetry by rolling the dimension before and/or after the padding.
+    pre_shift = [0]*vdim
+    post_shift = [0]*vdim
+    for idim, sym in enumerate(symmetry): # iterate over volume dimensions
+
+        if sym == "append":
+            continue
+        # all others require some kind of shift
+        
+        # the original size of the dimension
+        o_siz = o_shape[idim]
+        # the final target size
+        f_siz = shape[idim]
+        # the amount of padding to add
+        p_siz = f_siz - o_siz
+
+        if sym == "prepend":
+            # shift the appended padding to the front
+            pre_shift[idim] = 0
+            post_shift[idim] = p_siz
+            continue
+
+        if sym == "center":
+            # Shift the latter half of the tensor to the front, pad, shift back.
+            # This leaves the "1+n//2" prior to the central padding.
+            half = o_siz//2
+            pre_shift[idim] = half
+            post_shift[idim] = -half
+            continue
+        
+        if sym == "edge":
+            # Append, then shift half the padding to the front.  This puts the
+            # tensor data following "1+n//2" padding.
+            half = 1+p_siz//2
+            pre_shift[idim] = 0
+            post_shift[idim] = half
+            continue
+
+    # Only apply shifts to non-batch dimensions
+    dims = to_tuple(torch.arange(vdim) + 1)
+
+    if any(pre_shift):
+        ten = torch.roll(ten, shifts=tuple(pre_shift), dims=dims)
+
+    ten = zero_pad(ten, shape)
+
+    if any(post_shift):
+        ten = torch.roll(ten, shifts=tuple(post_shift), dims=dims)
+
+    if squeeze:
+        ten = ten.squeeze(0)
+
+    return ten
+
+
+def response_pad(response: Tensor, shape: Shape, taxis: int = -1) -> Tensor:
+    '''
+    Apply tred "response style" padding to the tensor.
+    '''
+    sym = ["center"] * len(shape)
+    sym[taxis] = "append"
+    return symmetric_pad(response, shape, sym)
+
+
+def signal_pad(signal: Block, shape: Shape, taxis: int = -1) -> Block:
+    '''
+    Apply tred "signal style" padding to the block.
+
+    The returned block has its location adjusted to reflect the edge type
+    padding so that the original signal content remains at its original
+    location.
+    '''
+    sym = ["edge"] * len(shape)
+    sym[taxis] = "append"
+    data = symmetric_pad(signal.data, shape, sym)
+    return Block(signal.location - front_half(shape), data=data)
+
+
+def convolve_spec(signal: Block, response_spec: Tensor, taxis: int = -1) -> Block:
+    '''
+    As convolve() but provide response in padded, Fourier representation.
+    '''
+    signal = signal_pad(signal, response_spec.shape, taxis)
+
+    # exclude first batched dimension
+    dims = to_tuple(torch.arange(signal.vdim) + 1) 
+
+    signal_spec = torch.fft.fftn(signal.data, dim=dims)
+    measure_spec = signal_spec * response_spec
+    measure = torch.fft.ifftn(measure_spec, dim=dims).real
+    return Block(location = signal.location, data = measure) # fixme: normalization
+
+
+def convolve(signal: Block, response: Tensor, taxis: int = -1) -> Block:
+    '''
+    Return a tred convolution of signal and response.
+
+    Both are interval space representations and not padded.
+
+    This is NOT a general-purpose convolution.
+
+    - signal :: a data block providing signal (charge) on some rectangular span
+      of grid points.
+
+    - response :: an N-dimension tensor providing a response.  This response
+      must be "spatially centered" and "temporarily causal" (see docs).
+
+    - taxis :: the dimension of response that is interpreted as being along
+      drift time.
+
+    The non-batch signal dimensions must be coincident with the response
+    dimensions.
+
+    The convolved block is returned.  Its location reflects the size increase
+    induced by the convolution.  Along the spatial dimensions, the location is
+    reduced by "half" the size of the response dimensions.  Along the drift
+    dimension, the location is unchanged.
+
+    See tred/docs/response.org and tred/docs/convo.org for descriptions of
+    "spatially centered" and "temporarily causal" requirements and other
+    details.
+    '''
+    c_shape = dft_shape(signal.shape, response.shape)
+    response = response_pad(response, c_shape, taxis)
+    dims = to_tuple(torch.arange(len(c_shape)))
+    response_spec = torch.fft.fftn(response, dim=dims)
+    return convolve_spec(signal, response_spec, taxis)
+

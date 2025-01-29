@@ -5,17 +5,19 @@ Some "integration" level plots
 
 from .response import get_ndlarsim
 from .util import make_figure, SymLogNorm, Ellipse
-from tred.convo import dft_shape, zero_pad
+from tred.convo import dft_shape, zero_pad, convolve
 from tred.util import to_tuple, to_tensor
+from tred.blocking import Block
 
 from matplotlib.gridspec import GridSpec
 import matplotlib.pyplot as plt
 from matplotlib.patches import ConnectionPatch
 
-
 import torch
 
-def plot_sim1d_time(out):
+from collections import namedtuple
+
+def plot_sim1d_time_byhand(out):
     '''
     Simple 1D simulation along time dimension.
     '''
@@ -26,7 +28,7 @@ def plot_sim1d_time(out):
     sig_t=100
     sig = torch.zeros(sig_t+1)
     sig[sig_t] = 1.0
-    c_shape = dft_shape(sig, res)
+    c_shape = dft_shape(sig.shape, res.shape)
     print(f'{c_shape=}')
 
     def dopad(arr, c_shape=c_shape):
@@ -51,7 +53,7 @@ def plot_sim1d_time(out):
 
     out.savefig()
 
-def plot_sim1d_pitch(out):
+def plot_sim1d_pitch_byhand(out):
     '''
     Simple 1D simulation along pitch dimension.
     '''
@@ -67,7 +69,7 @@ def plot_sim1d_pitch(out):
     sig[-1] = 1.0
     sig_x = torch.arange(D)
 
-    c_shape = dft_shape(sig, res)
+    c_shape = dft_shape(sig.shape, res.shape)
     M = c_shape[0]              # measurement domain size
 
     print(f'{sig.shape} * {res.shape} -> {c_shape=}')
@@ -157,7 +159,7 @@ def plot_sim1d_pitch(out):
     out.savefig()
 
 
-def plot_sim2d(out):
+def plot_sim2d_byhand(out):
     '''
     Do a simple 2D sim, unbatched
     '''
@@ -171,7 +173,7 @@ def plot_sim2d(out):
     sig = torch.zeros((11,30))
     sig[sig_z, sig_t] = 1.0
 
-    c_shape = dft_shape(sig, res)
+    c_shape = dft_shape(sig.shape, res.shape)
     print(f'{c_shape=}')
     
     def do_res_pad(arr, c_shape=c_shape):
@@ -218,9 +220,71 @@ def plot_sim2d(out):
 
 
 
+
+
+def plot_simNd(out):
+    '''
+    Iterate over many simulation dimensions using tred
+    '''
+
+    alls = slice(0, None)       # slice over entire dimension
+    imps = slice(0, None, 10)   # slice over first impact
+    
+    sig_t_size = 100
+    sig_p_size = 31
+
+    Params = namedtuple("Params", "rslice dims sshape imps")
+    variants = [
+        # 1D over time
+        Params(rslice=(0,0,alls),
+               dims=(0,),
+               imps=[(0,), (sig_t_size//2,), (sig_t_size-1,)],
+               sshape=(sig_t_size,)),
+             
+        # 1D over pitch - lack of time/drift dimension is unsupported by convolve()
+        # Params(rslice=(0, imps, 6310),
+        #        dims=(0,),
+        #        imps=[(0,), (sig_p_size//2,), (sig_p_size-1,)],
+        #        sshape=(sig_p_size,)),
+             
+        # 2D
+        Params(rslice=(0, imps, alls),
+               dims=(0,1),
+               imps=[(0,0), (sig_p_size//2,sig_t_size//2), (sig_p_size-1,sig_t_size-1)],
+               sshape=(sig_p_size, sig_t_size)),
+        
+        # 3D
+        Params(rslice=(imps, imps, alls),
+               dims=(0,1,2),
+               imps=[(0,0,0), (sig_p_size//2,sig_p_size//2,sig_t_size//2), (sig_p_size-1,sig_p_size-1,sig_t_size-1)],
+               sshape=(sig_p_size, sig_p_size, sig_t_size))
+    ]
+
+
+    res_raw = get_ndlarsim()
+    print(f'{res_raw.shape=}')
+    for p in variants:
+        print(p)
+        res = res_raw[p.rslice]
+        print(f'{res.shape=}')
+        
+        sig_data = torch.zeros(p.sshape)
+        for imp in p.imps:
+            sig_data[imp] = 1
+
+        ndim = len(p.dims)
+        loc = to_tensor([0]*ndim)
+        sig = Block(location=loc, data=sig_data)
+
+        c_shape = dft_shape(sig.shape, res.shape)
+        print(f'{sig.shape=} (x) {res.shape=} = {c_shape=}')
+
+        meas = convolve(sig, res)
+        print(f'{meas.location=} {meas.shape=}')
+
 def plots(out):
-    plot_sim1d_time(out)
-    plot_sim1d_pitch(out)
-    plot_sim2d(out)
+    # plot_sim1d_time_byhand(out)
+    # plot_sim1d_pitch_byhand(out)
+    # plot_sim2d_byhand(out)
     
-    
+    plot_simNd(out)

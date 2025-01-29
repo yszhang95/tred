@@ -4,13 +4,13 @@ from tred.util import to_tensor, to_tuple
 import torch
 
 def test_dft_shape():
-    ten = torch.arange(2*3*4).reshape(2,3,4)
-    ker = torch.arange(1*2*3).reshape(1,2,3)
-    assert dft_shape(ten,ker) == (2, 4, 6)
+    tshape = (2,3,4)
+    kshape = (1,2,3)
+    cshape = (2, 4, 6)
+    assert dft_shape(tshape, kshape) == cshape
 
-    ten = torch.unsqueeze(ten, 0)
-    assert dft_shape(ten,ker) == (2, 4, 6)
-
+    tshape = (42, 2,3,4)        # batched
+    assert dft_shape(tshape, kshape) == cshape
 
 def test_zero_pad():
     numel = 2*3*4
