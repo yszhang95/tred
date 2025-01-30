@@ -23,17 +23,22 @@ def plots(output, categories):
     import tred.plots
     from tred.plots.util import pages
 
+    all_categories = [m for m in dir(tred.plots) if hasattr(getattr(tred.plots, m), "plots")]
+    
     if not categories:
-        categories = [meth.replace("_plots","") for meth in dir(tred.plots) if meth.endswith('_plots')]
+        categories = all_categories
+    categories = [c for c in categories if c in all_categories]
 
     if output is None:
         scat = '-'.join(categories)
-        if scat: scat = '-' + scat
+        if scat:
+            scat = '-' + scat
         output = f"tred-diagnostics{scat}.pdf"
+
     with pages(output) as out:
         for category in categories:
-            meth = getattr(tred.plots, f'{category}_plots')
-            meth(out)
+            mod = getattr(tred.plots, category)
+            mod.plots(out)
         
     print(output)
 

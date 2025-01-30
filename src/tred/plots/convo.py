@@ -1,6 +1,6 @@
-#!/usr/bin/env pytest
+#!/usr/bin/env python
 '''
-Some "integration" level plots
+Plots to exercise convo.py.
 '''
 
 from .response import get_ndlarsim
@@ -311,8 +311,8 @@ def plot_simNd(out):
 
 
 def plots(out):
-    # plot_sim1d_time_byhand(out)
-    # plot_sim1d_pitch_byhand(out)
-    # plot_sim2d_byhand(out)
+    plot_sim1d_time_byhand(out)
+    plot_sim1d_pitch_byhand(out)
+    plot_sim2d_byhand(out)
     
     plot_simNd(out)

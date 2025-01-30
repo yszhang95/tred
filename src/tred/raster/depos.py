@@ -1,4 +1,7 @@
 #!/usr/bin/env python
+
+# fixme: make these functions return blocking.Block
+
 '''
 Methods to raster point-like electron distributions (depos) to an N-dimensional grid.
 

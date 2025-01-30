@@ -88,7 +88,9 @@ def drift(locs, velocity, diffusion, lifetime, target=0,
     '''
     Apply drift models.
 
-    Returns tuple of post-drift quantities: (drifted, times, sigma, charges)
+    Returns tuple of post-drift quantities:
+
+      (locs, times, sigma, charges)
 
     Required arguments:
 
@@ -113,7 +115,7 @@ def drift(locs, velocity, diffusion, lifetime, target=0,
         locs = locs[:,None]
         squeeze = True
 
-    npts, vdim = locs.shape;
+    npts, vdim = locs.shape
 
     if vaxis < 0 or vaxis >= vdim:
         raise ValueError(f'illegal vector axis {vaxis} for vdim={vdim}')

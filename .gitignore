@@ -9,3 +9,5 @@ cut
 *.ipynb
 data/
 *.npy
+*.png
+

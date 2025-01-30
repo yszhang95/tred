@@ -101,6 +101,8 @@ class SGrid:
         return Block(minpts, shape=maxshape)
 
 
+    
+
 def fill_envelope(envelope: Block, block: Block) -> Block:
     '''
     Fill envelope with block.
