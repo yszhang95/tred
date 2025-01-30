@@ -133,14 +133,14 @@ def plot_full_3d(out):
     res = get_ndlarsim()
 
     # follows is still a sketch...
-    meas = None
-    for imp in list_of_impact_positions:
-        part = partition(sig, slice)...
-        if meas is None:
-            meas = convolve(sig_part, res_part)
-        else:
-            new_meas = convolve(sig_part, res_part)
-            meas.data += new_meas.data
+    # meas = None
+    # for imp in list_of_impact_positions:
+    #     part = partition(sig, slice)...
+    #     if meas is None:
+    #         meas = convolve(sig_part, res_part)
+    #     else:
+    #         new_meas = convolve(sig_part, res_part)
+    #         meas.data += new_meas.data
 
 
     #- [ ] make dense pixel waveforms...
