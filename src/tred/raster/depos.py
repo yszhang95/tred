@@ -56,7 +56,7 @@ A step object tensor has the following 3N+1 rows
 '''
 
 import torch
-
+from ..util import to_tensor
 
 def binned_1d(grid, centers, widths, q, nsigma=None, minbins=None):
     '''
@@ -138,9 +138,14 @@ def binned_nd(grid, centers, sigmas, charges, nsigma=None, minbins=None):
     Return tuple (raster, offset) 
 
     '''
+    if isinstance(grid, (tuple,list)):
+        grid = to_tensor(grid, dtype=torch.float32)
     if not isinstance(grid, torch.Tensor):
         grid = torch.tensor([grid]) # make 1D (vdim,)
-    vdims = len(grid)
+    if len(grid.shape) != 1:
+        raise ValueError(f'illegal grid spacing shape {grid.shape}, expect 1D vector')
+
+    vdims = grid.shape[-1]
     if len(centers.shape) == 1:
         centers = centers[:,None] # add 1D vector dimension
     if len(sigmas.shape) == 1:
@@ -150,15 +155,16 @@ def binned_nd(grid, centers, sigmas, charges, nsigma=None, minbins=None):
     if not isinstance(nsigma, torch.Tensor):
         nsigma = torch.tensor([nsigma]*vdims)
 
+    ndepos = centers.shape[0]
+
     if centers.shape[1] != vdims:
         raise ValueError(f'wrong shape: {centers.shape=} for {vdims} vector dims')
     if sigmas.shape[1] != vdims:
         raise ValueError(f'wrong shape: {sigmas.shape=} for {vdims} vector dims')
 
-
     # Find number of grid points that span half the largest Gaussian.
     # (ndepos, vdims)
-    n_half = torch.round(sigmas*(nsigma/grid))
+    n_half = torch.ceil(1 + sigmas*(nsigma/grid))
 
     if minbins is not None:
         # (ndepos+1, vdims)
@@ -176,6 +182,7 @@ def binned_nd(grid, centers, sigmas, charges, nsigma=None, minbins=None):
     # Location of grid point nearest center relative from start corner point.
     rel_gridc = gridc - grid0
 
+
     # Suffer per-dimension serialization.
     # We do it because linspace() is 1D only.
     # Perhaps can remove loop if refactor to use meshgrid. 
@@ -190,12 +197,15 @@ def binned_nd(grid, centers, sigmas, charges, nsigma=None, minbins=None):
         rel_grid_ind = torch.linspace(0, 2*dim_n_half, 2*dim_n_half+1)
 
         abs_grid_pts = ((grid0[:,dim][:,None] + rel_grid_ind[None,:]) - 0.5) * grid[dim]
+
         spikes = sigmas[:,dim] == 0 # depos with zero width
 
         normals = (abs_grid_pts - centers[:,dim][:,None])/sigmas[:,dim][:,None]
+
         normals[spikes] = 0     # remove inf
         erfs = torch.erf(normals)
         integ = 0.5*(erfs[:, 1:] - erfs[:, :-1])
+
         integ[spikes] = 0
         integ[spikes, rel_gridc[spikes, dim]] = 1.0
         integs.append(integ)
@@ -225,8 +235,5 @@ def binned(grid, centers, sigmas, charges, nsigma=None, minbins=None):
     nsigma is either scalar or N-dimensional giving the number of sigma over
     which to perform the integration.
     '''
-    # ngrid = len(grid)
-    # if ngrid == 1:              # special case for now
-    #     return binned_1d(grid, centers, sigmas, charges, nsigma, minbins)
     return binned_nd(grid, centers, sigmas, charges, nsigma, minbins)
 

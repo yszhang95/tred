@@ -24,9 +24,44 @@ For 2 transverse dimensions this would generate a 2D collection of 2D tensors.
 from itertools import product
 from .util import to_tensor, to_tuple
 from .blocking import Block
-from .types import Tensor
+from .types import Tensor, IntTensor
+from typing import Generator
+import torch
 
-def deinterlace(block: Block, spacing: Tensor, taxis: int = -1) -> Block:
+def deinterlace(ten: Tensor, steps: IntTensor) -> Generator[Tensor, None, None]:
+    '''
+    Yield tensors that have been interlaced in ten at given step.
+
+    - ten :: an N-dimensional interlaced tensor.
+
+    - steps :: an intenger N-tensor giving the per-dimension step size of the interlacing.
+
+    The shape of ten must be an integer multiple of steps
+
+    A dimension with step of 1 effectively means no interlacing and each "lace"
+    will have that dimension the same size as in ten.
+
+    In general, each "lace" will be of shape ten.shape/steps.  The total number
+    of "laces" yielded will be torch.prod(steps).
+    '''
+    if len(ten.shape) != len(steps):
+        raise ValueError(f'dimensionality mismatch {len(ten.shape)} != {len(steps)}')
+
+    if torch.any(torch.tensor(ten.shape) % steps):
+        raise ValueError(f'tensor of shape {ten.shape} not an integer multiple of {steps}')
+        
+    steps = to_tuple(steps)
+
+    all_imps = [list(range(s)) for s in steps]
+    for imps in product(*all_imps):
+        slcs = [slice(imp,None,step) for imp,step in zip(imps,steps)]
+        t = ten[slcs]
+        # print(f'deinterlace: {t.shape} {slcs}')
+        yield t
+
+
+
+def deinterlace_block(block: Block, spacing: Tensor, taxis: int = -1) -> Block:
     '''
     Iterate over impact de-interlace partitioning.
 

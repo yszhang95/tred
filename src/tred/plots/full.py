@@ -9,8 +9,10 @@ from tred import units
 from tred.drift import drift
 from tred.raster.depos import binned as raster_depos
 from .response import get_ndlarsim
-from tred.sparse import SGrid, fill_envelope, reshape_envelope
+from tred.sparse import chunkify
 from tred.blocking import Block
+from tred.partitioning import deinterlace
+from tred.convo import interlaced
 import torch
 
 def make_depos():
@@ -40,12 +42,13 @@ def do_drift(depos, velocity = -1.6 * units.mm/units.us):
     depos = depos.T
     t = depos[0]
     q = depos[1]
-    xyz = depos[2:5]
+    xyz = depos[2:5].T
 
     # some made up physics constants
-    DL = 7.2 * units.cm2/units.s,
-    DT = 12.0 * units.cm2/units.s,
+    DL = 7.2 * units.cm2/units.s
+    DT = 12.0 * units.cm2/units.s
     diffusion = torch.tensor([DL, DT, DT])
+
     lifetime = 8*units.ms
     
     centers, times, sigmas, charges = drift(xyz, velocity, diffusion, lifetime, times=t, charge=q)
@@ -72,11 +75,10 @@ def do_raster(drifted, velocity = -1.6 * units.mm/units.us, nimperpix=10):
     z = drifted[5]
     centers = torch.vstack((y,z,t)).T
 
-    sigmaL, sigmaT = drifted[6:]
-
+    sigmaL,sigmaT = drifted[6:]
     # Convert sigma_x to sigma_t
     sigmaL /= abs(velocity) 
-    sigmas = torch.vstack((sigmaT, sigmaT, sigmaL)).T
+    sigmas = torch.vstack((sigmaT,sigmaT,sigmaL)).T
 
     charges = drifted[1]
 
@@ -102,12 +104,14 @@ def do_raster(drifted, velocity = -1.6 * units.mm/units.us, nimperpix=10):
 def plot_full_3d(out):
 
     velocity = -1.6 * units.mm/units.us
+
+    # The number of impact positions per pixel aka the "interlace step size".
     nimperpix = 10
 
     # some initial depos as batched 7-tuples
-    depos = make_depos(velocity=velocity)
+    depos = make_depos()
     # same batched 7-tuple form after drifting
-    drifted = do_drift(depos)
+    drifted = do_drift(depos, velocity=velocity)
     # The variable name refers Yousen's name "universal block" which a batched
     # 1+3D tensor of arbitrary 3D shape and is unaligned to any pixels and holds
     # rastered ionization.  The volume dimensions are (y,z,t).
@@ -124,25 +128,16 @@ def plot_full_3d(out):
     # optimization to like above.  Nominally, we start with the same number of
     # grid points.
     ntickperslice = 100
-    sgrid = SGrid(npixpersuper * nimperpix, npixpersuper * nimperpix, ntickperslice)
 
-    envelope = sgrid.envelope(uniblock)
-    fill_envelope(envelope, uniblock)
-    sig = reshape_envelope(envelope, sgrid.spacing)
-    
+    chunk_size = (npixpersuper * nimperpix, npixpersuper * nimperpix, ntickperslice)
+
+    sig = chunkify(uniblock, chunk_size)
     res = get_ndlarsim()
 
-    # follows is still a sketch...
-    # meas = None
-    # for imp in list_of_impact_positions:
-    #     part = partition(sig, slice)...
-    #     if meas is None:
-    #         meas = convolve(sig_part, res_part)
-    #     else:
-    #         new_meas = convolve(sig_part, res_part)
-    #         meas.data += new_meas.data
-
-
+    lacing = torch.tensor([nimperpix, nimperpix, 1])
+    taxis = -1                  # the time axis
+    meas = interlaced(sig, res, lacing, taxis)
+    print(f'{meas.shape=}')
     #- [ ] make dense pixel waveforms...
     #- [ ] apply readout
 

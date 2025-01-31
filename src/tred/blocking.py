@@ -74,7 +74,7 @@ class Block:
             shape = self.to_tensor(shape, dtype=index_dtype)
 
         if len(shape.shape) != 1:
-            raise ValueError(f'Block: volume shape must not be batched: {shape}')
+            raise ValueError(f'Block: volume shape must not be batched: {shape.shape}')
         vdim = self.vdim
         if len(shape) != vdim:
             raise ValueError(f'Block: volume shape has wrong dimensions: {len(shape)} expected {vdim}')

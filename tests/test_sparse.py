@@ -1,7 +1,7 @@
 #!/usr/bin/env pytest
 import pytest
 import torch
-from tred.sparse import SGrid, fill_envelope, reshape_envelope
+from tred.sparse import SGrid, fill_envelope, reshape_envelope, chunkify
 from tred.util import to_tensor
 from tred.blocking import Block
 
@@ -63,6 +63,18 @@ def test_sparse_funcs_multichunk():
     chunks = reshape_envelope(envelope, sgrid.spacing)
 
     print(f'{chunks.shape=}')
+    for ichunk in range(chunks.nbatches):
+        print(f'{ichunk}: loc={chunks.location[ichunk]}: tot={torch.sum(chunks.data[ichunk])}')
+
+def test_sparse_chunkify():
+    '''
+    Test all in one chunkify() function
+    '''
+    loc = torch.tensor([-1,-1])
+    block = Block(loc, data=torch.ones([12,12]))
+    chunk_shape = (10,10)
+    chunks = chunkify(block, chunk_shape)
+    print(f'{chunks.shape=} {chunk_shape=}')
     for ichunk in range(chunks.nbatches):
         print(f'{ichunk}: loc={chunks.location[ichunk]}: tot={torch.sum(chunks.data[ichunk])}')
 

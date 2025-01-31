@@ -17,7 +17,7 @@ from .util import to_tensor, to_tuple
 from .blocking import Block
 from .types import IntTensor, Shape, Tensor
 
-
+# fixme: Does this REALLY deserve to be a class?
 class SGrid:
     '''
     A super-grid is a subset of points with a given spacing selected from an
@@ -100,8 +100,6 @@ class SGrid:
         maxshape = torch.max(shapes, dim=0).values
         return Block(minpts, shape=maxshape)
 
-
-    
 
 def fill_envelope(envelope: Block, block: Block) -> Block:
     '''
@@ -209,4 +207,14 @@ def index_chunks(sgrid: SGrid, chunk: Block) -> Block:
     cindex[*indices] = iota
     # Block assumes batches, so must make one even though it will only be one.
     return Block(location = minp[None,:], data = cindex[None,:])
+
+
+def chunkify(block: Block, shape: IntTensor) -> Block:
+    '''
+    Chunk the block into a new one with volume dimensions of given shape.
+    '''
+    sgrid = SGrid(shape)
+    envelope = sgrid.envelope(block)
+    fill_envelope(envelope, block)
+    return reshape_envelope(envelope, sgrid.spacing)
 

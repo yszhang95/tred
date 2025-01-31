@@ -5,8 +5,9 @@ Support for DFT-based convolutions.
 '''
 
 from .util import to_tuple, to_tensor
-from .types import Tensor, Shape
+from .types import IntTensor, Tensor, Shape
 from .blocking import Block, batchify
+from .partitioning import deinterlace
 import torch
 from torch.nn.functional import pad
 
@@ -216,9 +217,9 @@ def convolve_spec(signal: Block, response_spec: Tensor, taxis: int = -1) -> Bloc
 
 def convolve(signal: Block, response: Tensor, taxis: int = -1) -> Block:
     '''
-    Return a tred convolution of signal and response.
+    Return a tred simple convolution of signal and response.
 
-    Both are interval space representations and not padded.
+    Both are interval space representations, not padded nor interlaced.
 
     This is NOT a general-purpose convolution.
 
@@ -249,3 +250,38 @@ def convolve(signal: Block, response: Tensor, taxis: int = -1) -> Block:
     response_spec = torch.fft.fftn(response, dim=dims)
     return convolve_spec(signal, response_spec, taxis)
 
+
+def interlaced(signal: Block, response: Tensor, steps: IntTensor, taxis: int = -1) -> Block:
+    '''
+    Return a tred interlaced convolution of signal and response.
+
+    - signal :: an N-D block (holding batched 1+N-D tensor) holding signal
+    - response :: an N-D tensor holding response
+    - steps :: an integer N-tensor giving the number of steps performed by the interlacing.
+    - taxis :: the dimension of N that is considered the time/drift axis.
+
+    Both signal and response tensors represent interval-space samples.  They are
+    not padded but are interlaced.  The interlace spacing is given by steps.
+
+    The convolution() function is applied to each matching interlaced tensor in
+    signal and response and the sum over "laces" is returned as a Block.  The
+    Block.location of the returned Block positions the result in the
+    "super-grid" and is signal.location/steps.
+    '''
+    super_location = signal.location / steps
+
+    batched_steps = torch.cat([torch.tensor([1]), steps])
+    sig_laces = deinterlace(signal.data, batched_steps)
+    res_laces = deinterlace(response, steps)
+
+    meas = None
+    for sig_lace, res_lace in zip(sig_laces, res_laces):
+        sig_lace_block = Block(super_location, data=sig_lace)
+        meas_lace_block = convolve(sig_lace_block, res_lace)
+        if meas is None:
+            meas = meas_lace_block
+            continue
+        meas.data += meas_lace_block.data
+    return meas
+
+    

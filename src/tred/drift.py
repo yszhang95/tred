@@ -22,7 +22,7 @@ def transport(locs, target, velocity):
 
     - locs :: real 1D tensor (npts,)
     - target :: real scalar
-    - speed :: real scalar
+    - velocity :: real scalar
     '''
     return (target - locs)/velocity
 
@@ -46,6 +46,16 @@ def diffuse(dt, diffusion, sigma=None):
     if not isinstance(diffusion, torch.Tensor):
         diffusion = torch.tensor([diffusion])
         squeeze = True
+
+    if len(dt.shape) != 1:
+        raise ValueError(f'unsupported shape for dt: {dt.shape}')
+
+    if len(diffusion.shape) != 1:
+        raise ValueError(f'unsupported shape for diffusion: {diffusion.shape}')
+
+    vdim = len(diffusion.shape)
+    if sigma is not None and len(sigma.shape) != vdim:
+        raise ValueError(f'shape of sigma ({sigma.shape}) does not span {vdim} dimensions')
 
     diffusion = diffusion[None,:] # add npts dimension
     dt = dt[:,None]               # add vdim dimension
@@ -117,11 +127,19 @@ def drift(locs, velocity, diffusion, lifetime, target=0,
 
     npts, vdim = locs.shape
 
+    if vdim > 1 and len(diffusion.shape) != 1:
+        raise ValueError(f'illegal shape for diffusion coefficients: {diffusion.shape}, expect 1D')
+
+    if sigma is not None:
+        if len(sigma.shape) != vdim:
+            raise ValueError(f'diffusion sigma shape {sigma.shape} does not span {vdim} dimensions')
+
     if vaxis < 0 or vaxis >= vdim:
         raise ValueError(f'illegal vector axis {vaxis} for vdim={vdim}')
 
     dt = transport(locs[:,vaxis], target, velocity)
     locs[:,vaxis] = target + torch.zeros_like(locs[:,vaxis])
+
     if times is None:
         times = dt
     else:
