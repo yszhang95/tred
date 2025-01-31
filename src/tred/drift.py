@@ -31,7 +31,7 @@ def diffuse(dt, diffusion, sigma=None):
     '''
     Return new Gaussian diffusion sigma after drifting by time dt.
 
-    - dt :: real 1D tensor of drift times (npts,).
+    - dt :: scalar or real 1D tensor of drift times (npts,).
     - diffusion :: real scalar or 1D (vdim,) tensor of diffusion coefficients.
     - sigma :: real 1D (npts) or 2D (npts,vdim) tensor or None.
 
@@ -42,9 +42,10 @@ def diffuse(dt, diffusion, sigma=None):
     zero.
     '''
     squeeze = False
+
     # eg, diffusion is 5, [5] or [4,5,6]
     if not isinstance(diffusion, torch.Tensor):
-        diffusion = torch.tensor([diffusion])
+        diffusion = torch.tensor([diffusion], device=dt.device)
         squeeze = True
 
     if len(dt.shape) != 1:
