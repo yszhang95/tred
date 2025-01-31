@@ -84,7 +84,7 @@ def quadrant_copy(raw, axis=-1, even=True):
     return axis_last(full, axis)
     
 
-def ndlarsim(npy_path, device='cpu'):
+def ndlarsim(npy_path):#, device='cpu'):
     '''
     Load a response file from the original ND Lar simulation from a file named like:
 
@@ -95,6 +95,6 @@ def ndlarsim(npy_path, device='cpu'):
     raw = numpy.load(npy_path)
     if raw.shape != (45,45,6400):
         raise ValueError(f'unexpected shape {raw.shape} from {npy_path}')
-    raw = torch.from_numpy(raw.astype(numpy.float32)).to(device=device)
+    raw = torch.from_numpy(raw.astype(numpy.float32))# .to(device=device)
     return quadrant_copy(raw)
 

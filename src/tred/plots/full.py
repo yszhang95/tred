@@ -15,7 +15,7 @@ from tred.partitioning import deinterlace
 from tred.convo import interlaced
 import torch
 
-def make_depos():
+def make_depos(device='cpu'):
     '''
     This mocks up some file of depo sets.
     '''
@@ -28,7 +28,7 @@ def make_depos():
         [-20.0, -10.0, 0.0, 10.0, 20.0, 40.0], # 4,z
         [    0,     0,   0,    0,    0,    0], # 5,sigmaL
         [    0,     0,   0,    0,    0,    0], # 6,sigmaT
-    ])
+    ], device=device)
     depos[0] *= units.ms
     depos[1] *= 1000*units.eplus
     depos[2:] *= units.mm
@@ -99,9 +99,15 @@ def do_raster(drifted, velocity = -1.6 * units.mm/units.us, nimperpix=10):
 
     # fixme: make raster functions return Block
     rasters, offsets = raster_depos(grid_spacing, centers, sigmas, charges, nsigma=nsigma)
-    return Block(location = offsets, data=rasters)
+
+    block = Block(location = offsets, data=rasters)
+    print(f'rastered to {block.nbatches} blocks of shape {block.shape}')
+    return block
 
 def plot_full_3d(out):
+
+    # what is best practice to assure all tensors on are a desired device?
+    device = 'cpu'
 
     velocity = -1.6 * units.mm/units.us
 
@@ -109,9 +115,13 @@ def plot_full_3d(out):
     nimperpix = 10
 
     # some initial depos as batched 7-tuples
-    depos = make_depos()
+    depos = make_depos(device)
+    print(f'made {depos.shape[0]} depos on {depos.device}')
+
     # same batched 7-tuple form after drifting
     drifted = do_drift(depos, velocity=velocity)
+    print(f'drifted {drifted.shape[0]} depos on {depos.device}')
+
     # The variable name refers Yousen's name "universal block" which a batched
     # 1+3D tensor of arbitrary 3D shape and is unaligned to any pixels and holds
     # rastered ionization.  The volume dimensions are (y,z,t).
@@ -132,7 +142,10 @@ def plot_full_3d(out):
     chunk_size = (npixpersuper * nimperpix, npixpersuper * nimperpix, ntickperslice)
 
     sig = chunkify(uniblock, chunk_size)
+    print(f'chunked to {sig.nbatches} blocks of shape {sig.shape} on {sig.data.device}')
+
     res = get_ndlarsim()
+    print(f'response of shape {res.shape} on {res.device}')
 
     lacing = torch.tensor([nimperpix, nimperpix, 1])
     taxis = -1                  # the time axis
@@ -145,5 +158,6 @@ def plot_full_3d(out):
 
 
 def plots(out):
-    plot_full_3d(out)
+    with torch.no_grad():
+        plot_full_3d(out)
 
