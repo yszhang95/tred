@@ -95,7 +95,7 @@ class Block:
             raise ValueError(f'Block: illegal data shape: {data.shape} for volume {vdim}-dimension volumes')
         nbatch = self.nbatches
         if data.shape[0] != nbatch:
-            raise ValueError(f'Block: batch mismatch: got {data.shape[0]} want {nbatch}')
+            raise ValueError(f'Block: batch size mismatch: got {data.shape[0]} want {nbatch}')
 
         self.set_shape(data.shape[1:])
         self.data = data
