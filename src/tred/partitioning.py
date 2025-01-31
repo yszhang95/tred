@@ -56,7 +56,7 @@ def deinterlace(ten: Tensor, steps: IntTensor) -> Generator[Tensor, None, None]:
     for imps in product(*all_imps):
         slcs = [slice(imp,None,step) for imp,step in zip(imps,steps)]
         t = ten[slcs]
-        # print(f'deinterlace: {t.shape} {slcs}')
+        print(f'deinterlace: {t.device} {t.shape} {slcs}')
         yield t
 
 

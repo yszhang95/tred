@@ -26,7 +26,7 @@ def mime_type(path):
     return subprocess.check_output(f"file --brief --mime-type {file}", shell=True).decode().strip()
 
 
-def make_points(num, vdim, bb=None, device='cpu'):
+def make_points(num, vdim, bb=None):
     '''
     Return points as tensor shape (nums, vdim).
 
@@ -40,11 +40,11 @@ def make_points(num, vdim, bb=None, device='cpu'):
 
     '''
     if bb is None:
-        bb = torch.tensor([0,1]*dims, device=device).reshape(-1,2)
+        bb = torch.tensor([0,1]*dims).reshape(-1,2)
         
     dimpts = list()
     for pmin,pmax in bb:
-        uni = torch.rand(num, dtype=torch.float32, device=device)
+        uni = torch.rand(num, dtype=torch.float32)
         dimpts.append( uni*(pmax-pmin)+pmin )
     return torch.vstack(dimpts).T
 
@@ -68,7 +68,7 @@ def to_tensor(thing, dtype=None, device=None):
         dtype = dtype or thing.dtype
         device = device or thing.device
         return thing.to(device=device, dtype=dtype)
-    return torch.tensor(thing, device=device or 'cpu', dtype=dtype or torch.int32)
+    return torch.tensor(thing, device=device, dtype=dtype or torch.int32)
 
 
 def slice_first(slc):

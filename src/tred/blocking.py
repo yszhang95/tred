@@ -20,7 +20,7 @@ class Block:
 
         The `location` of the volumes may be 1D (unbatched) or 2D (batched)
         N-vector.  If unbatched, a single-batch version is stored.  If not
-        proved as a tensor, it is coerced to an IntTensor on the default device.
+        proved as a tensor, it is coerced to an IntTensor.
 
         The `shape` gives the common volume shape.
 
