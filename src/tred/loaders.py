@@ -1,6 +1,14 @@
 #!/usr/bin/env python
 '''
-Data loaders are iterators that yield tensors.
+Data loaders, more properly called "PyTorch Datasets" are iterators that
+yield tensors.
+
+Developers take note:
+
+- Do NOT mess with "device" here.  Load to torch.Tensor without specifying a
+"device" argument and no calls to Tensor.to().
+
+- It is not required to pass requires_grad=False, but okay to do so.
 
 '''
 import torch
@@ -27,26 +35,23 @@ class NpzFile:
     '''
     Dict-like object of tensors from an Numpy npz file.
     '''
-    def __init__(self, path, dtype=torch.float32, device='cpu'):
+    def __init__(self, path, dtype=torch.float32):
         self._path = path
         self._fp = numpy.load(path)
-        if device == 'gpu':
-            device = 'cuda'
-        self._device = device
         self._dtype = dtype
 
     def keys(self):
         return self._fp.keys()
 
     def __getitem__(self, key):
-        return torch.tensor(self._fp[key], dtype=self._dtype, device=self._device, requires_grad=False)
+        return torch.tensor(self._fp[key], dtype=self._dtype, requires_grad=False)
 
-    def get(self, key, default=None, dtype=torch.float32, device='cpu'):
+    def get(self, key, default=None, dtype=torch.float32):
         try:
             dat = self._fp[key]
         except KeyError:
             return default
-        return torch.tensor(dat, dtype=dtype, device=device, requires_grad=False)
+        return torch.tensor(dat, dtype=dtype, requires_grad=False)
 
 
 def hdf_keys(obj):
@@ -69,41 +74,40 @@ class HdfFile:
     '''
     Dict-like object of tensors from an HDF5 file.
     '''
-    def __init__(self, path, dtype=torch.float32, device='cpu'):
+    def __init__(self, path, dtype=torch.float32):
         self._path = path
         self._fp = h5py.File(path)
-        if device == 'gpu':
-            device = 'cuda'
-        self._device = device
         self._dtype = dtype
 
     def keys(self):
         return hdf_keys(self._fp)
 
     def __getitem__(self, key):
-        return torch.tensor(self._fp[key][:], dtype=self._dtype, device=self._device, requires_grad=False)
+        return torch.tensor(self._fp[key][:], dtype=self._dtype, requires_grad=False)
 
-    def get(self, key, default=None, dtype=torch.float32, device='cpu'):
+    def get(self, key, default=None, dtype=torch.float32):
         try:
             dat = self._fp[key][:]
         except KeyError:
             return default
-        return torch.tensor(dat, dtype=dtype, device=device, requires_grad=False)
+        return torch.tensor(dat, dtype=dtype, requires_grad=False)
 
 
-def file_xxx(filepath, dtype=torch.float32, device='cpu'):
+def file_xxx(filepath, dtype=torch.float32):
     '''
     Return a dict-like mapping from string to tensors.
 
     This detects underlying file format.
+
+    A default dtype may be given.
     '''
     mt = mime_type(filepath)
 
     if mt == "application/zip":
-        return NpzFile(filepath, dtype, device)
+        return NpzFile(filepath, dtype)
 
     if mt == "application/x-hdf5":
-        return HdfFile(filepath, dtype, device)
+        return HdfFile(filepath, dtype)
 
 
 class StepLoader:

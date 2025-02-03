@@ -83,3 +83,30 @@ Prefer functions taking individual feature tensors over single bundled tensors.
 #+end_src
 
 
+* Computation graph
+
+tred design is layered something like:
+
+|--------------------------------|
+| invocation of ~tred~             |
+| command and config parsing     |
+| computation graph construction |
+| graph nodes as ~torch.nn.Module~ |
+| composite graph nodes          |
+| primitive graph nodes          |
+| mid-level functions            |
+| low-level functions            |
+| tensor operations              |
+|--------------------------------|
+
+
+The computation graph layers merely serve to aggregate functions in a uniform manner.  Graph nodes (~torch.nn.Module~) should always have very brief and perform two duties:
+
+1. Define any parameters wrapped in ~torch.nn.Parameter~ inside ~__init__()~ that hold information that must live beyond a single forward execution.
+
+2. Implement ~.forward()~ with code to call tred functions or other nodes.
+
+All node implementations must remain brief with all "real" code placed in functions.
+
+In addition to providing a means to define a computation graph, the CLI layer
+will make use of ~Module.to(device)~ to place all parameters onto a given device.

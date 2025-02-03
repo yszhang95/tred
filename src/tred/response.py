@@ -17,16 +17,16 @@ class Response:
         '''
         Create response data.
 
-        - current :: a tred response current float valued N-dim tensor.  It must be on the desired device.
+        - current :: a tred response current float valued N-dim tensor.  
         - spacing :: a N-tuple giving grid spacing over N-1 spatial and 1 time dimensions.
         - start :: the absolute position along the nominal drift dimension of the response plane.
         - axis :: the drift time dimension, must be consistent with eg depo/step coordinate system.
         '''
         self.current = current
         if isinstance(spacing, torch.Tensor):
-            self.spacing = spacing.to(device=self.current.device)
+            self.spacing = spacing
         else:
-            self.spacing = to_tensor(spacing, device=self.current.device, dtype=torch.float32)
+            self.spacing = to_tensor(spacing, dtype=torch.float32)
         self.start = start
         self.axis = axis
 
@@ -70,7 +70,7 @@ def quadrant_copy(raw, axis=-1, even=True):
 
     shape = torch.tensor(raw.shape, dtype=torch.int32) * 2
     shape[-1] = shape[-1] // 2
-    full = torch.zeros(to_tuple(shape)).to(dtype=raw.dtype, device=raw.device)
+    full = torch.zeros(to_tuple(shape)).to(dtype=raw.dtype)
 
     h0 = raw.shape[0]
     h1 = raw.shape[1]
@@ -84,7 +84,7 @@ def quadrant_copy(raw, axis=-1, even=True):
     return axis_last(full, axis)
     
 
-def ndlarsim(npy_path):#, device='cpu'):
+def ndlarsim(npy_path):
     '''
     Load a response file from the original ND Lar simulation from a file named like:
 
@@ -95,6 +95,6 @@ def ndlarsim(npy_path):#, device='cpu'):
     raw = numpy.load(npy_path)
     if raw.shape != (45,45,6400):
         raise ValueError(f'unexpected shape {raw.shape} from {npy_path}')
-    raw = torch.from_numpy(raw.astype(numpy.float32))# .to(device=device)
+    raw = torch.from_numpy(raw.astype(numpy.float32))
     return quadrant_copy(raw)
 
