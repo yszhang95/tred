@@ -72,6 +72,8 @@ class Block:
 
         if not isinstance(shape, Tensor):
             shape = self.to_tensor(shape, dtype=index_dtype)
+        else:
+            shape = shape.to(device=self.location.device, dtype=index_dtype)
 
         if len(shape.shape) != 1:
             raise ValueError(f'Block: volume shape must not be batched: {shape.shape}')

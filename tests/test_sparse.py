@@ -54,7 +54,6 @@ def test_sparse_funcs_multichunk():
     sgrid = SGrid([10,10])
     loc = torch.tensor([-1,-1])
     block = Block(loc, data=torch.ones([12,12]))
-    #chunks = block_chunk(sgrid, b)
     envelope = sgrid.envelope(block)
     assert torch.all(envelope.location[0] == torch.tensor([-10,-10]))
     fill_envelope(envelope, block)

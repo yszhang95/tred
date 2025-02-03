@@ -143,14 +143,26 @@ def reshape_envelope(envelope: Block, chunk_shape:Shape):
     return Block( location=loc.flatten(0, vdim), data=dat.flatten(0, vdim) )
         
 
-def block_chunk(sgrid: SGrid, block: Block) -> Block:
+# def block_chunk(sgrid: SGrid, block: Block) -> Block:
+#     '''
+#     Break up block into aligned chunks.
+#     '''
+#     env = sgrid.envelope(block)
+#     fill_envelope(env, block)
+#     assert env.data is not None
+#     return reshape_envelope(env, sgrid.spacing)
+
+
+
+def chunkify(block: Block, shape: IntTensor) -> Block:
     '''
-    Break up block into aligned chunks.
+    Chunk the block into a new one with volume dimensions of given shape.
     '''
-    env = sgrid.envelope(block)
-    fill_envelope(env, block)
-    assert env.data is not None
-    return reshape_envelope(env, sgrid.spacing)
+    sgrid = SGrid(shape)
+    envelope = sgrid.envelope(block)
+    fill_envelope(envelope, block)
+    return reshape_envelope(envelope, sgrid.spacing)
+
 
 
 def index_chunks(sgrid: SGrid, chunk: Block) -> Block:
@@ -207,14 +219,4 @@ def index_chunks(sgrid: SGrid, chunk: Block) -> Block:
     cindex[*indices] = iota
     # Block assumes batches, so must make one even though it will only be one.
     return Block(location = minp[None,:], data = cindex[None,:])
-
-
-def chunkify(block: Block, shape: IntTensor) -> Block:
-    '''
-    Chunk the block into a new one with volume dimensions of given shape.
-    '''
-    sgrid = SGrid(shape)
-    envelope = sgrid.envelope(block)
-    fill_envelope(envelope, block)
-    return reshape_envelope(envelope, sgrid.spacing)
 

@@ -39,7 +39,7 @@ class BSB:
         if block.vdim != self.sgrid.vdim:
             raise ValueError(f'BSB.fill: dimension mismatch: {block.vdim=} != {self.sgrid.vdim}')
 
-        chunks = block_chunk(self.sgrid, block)
+        chunks = chunkify(block, self.sgrid.spacing)
         self.chunks = chunking.accumulate(chunks)
         self.cindex = index_chunks(self.sgrid, chunks)
 

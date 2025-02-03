@@ -10,6 +10,7 @@ from tred.drift import drift
 from tred.raster.depos import binned as raster_depos
 from .response import get_ndlarsim
 from tred.sparse import chunkify
+from tred.chunking import accumulate
 from tred.blocking import Block
 from tred.partitioning import deinterlace
 from tred.convo import interlaced
@@ -107,6 +108,9 @@ def do_raster(drifted, velocity = -1.6 * units.mm/units.us, nimperpix=10):
     print(f'rastered to {block.nbatches} blocks of shape {block.shape}')
     return block
 
+def dump_block(blk, name=""):
+    print(f'{blk.nbatches} blocks of shape {blk.shape} on {blk.data.device} {name}')
+
 def plot_full_3d(out):
 
     # what is best practice to assure all tensors on are a desired device?
@@ -129,6 +133,7 @@ def plot_full_3d(out):
     # 1+3D tensor of arbitrary 3D shape and is unaligned to any pixels and holds
     # rastered ionization.  The volume dimensions are (y,z,t).
     uniblock = do_raster(drifted, velocity=velocity, nimperpix=nimperpix)
+    dump_block(uniblock, "uniblock")
 
     # determine the super-grid.  To be pixel aligned, it must have a multiple of
     # the nimperpix on the space dimensions.  This choice can be optimized given
@@ -144,16 +149,24 @@ def plot_full_3d(out):
 
     chunk_size = (npixpersuper * nimperpix, npixpersuper * nimperpix, ntickperslice)
 
-    sig = chunkify(uniblock, chunk_size)
-    print(f'chunked to {sig.nbatches} blocks of shape {sig.shape} on {sig.data.device}')
+    unichunks = chunkify(uniblock, chunk_size)
+    dump_block(unichunks, "unichunks")
+
+    sig = accumulate(unichunks)
+    dump_block(sig, "sig")
 
     res = get_ndlarsim()
     print(f'response of shape {res.shape} on {res.device}')
 
     lacing = torch.tensor([nimperpix, nimperpix, 1])
     taxis = -1                  # the time axis
-    meas = interlaced(sig, res, lacing, taxis)
-    print(f'{meas.shape=}')
+    inter = interlaced(sig, res, lacing, taxis)
+    dump_block(inter, "inter")
+    mchunks = chunkify(inter, chunk_size)
+    dump_block(mchunks, "mchunks")
+    meas = accumulate(mchunks)
+    dump_block(meas, "meas")
+
     #- [ ] make dense pixel waveforms...
     #- [ ] apply readout
 

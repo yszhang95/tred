@@ -19,7 +19,7 @@ import numpy
 def voxels(arr):
     vmax = arr.max()
     v = (255*(arr/vmax)).astype(dtype=numpy.uint8)
-    vp = k3d.voxel(v, outlines=True, opacity=0.1)
+    vp = k3d.voxels(v, outlines=True, opacity=0.1)
     plot = k3d.plot()
     plot += vp
     plot.display()
