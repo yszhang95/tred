@@ -13,6 +13,9 @@ from tred.sparse import chunkify
 from tred.blocking import Block
 from tred.partitioning import deinterlace
 from tred.convo import interlaced
+from tred.util import to_tensor
+from tred.io import write_npz
+
 import torch
 
 def make_depos(device='cpu'):
@@ -154,7 +157,9 @@ def plot_full_3d(out):
     #- [ ] make dense pixel waveforms...
     #- [ ] apply readout
 
-
+    write_npz("full.npz", sig=sig, res=res, meas=meas, lacing=lacing,
+              depos=depos, drifted=drifted, uniblock=uniblock,
+              chunksize=to_tensor(chunk_size))
 
 
 def plots(out):
