@@ -24,9 +24,6 @@ try:
 except ImportError:
     h5py = None
 
-import logging
-log = logging.getLogger("tred")
-
 
 def npz_keys(path):
     return numpy.load(path).keys()

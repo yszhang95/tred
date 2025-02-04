@@ -43,6 +43,9 @@ class Block:
         else:
             self.set_data(data)
 
+    def __str__(self):
+        return f'<block {self.nbatches} of shape {self.shape}>'
+
     def size(self):
         '''
         Return torch.Size like a tensor.size() does. This includes batched dimension.
@@ -62,6 +65,13 @@ class Block:
         Return the number of batches.
         '''
         return self.location.shape[0]
+
+    @property
+    def device(self):
+        '''
+        Return device of location.
+        '''
+        return self.location.device
 
     def set_shape(self, shape:Shape):
         '''

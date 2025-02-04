@@ -4,8 +4,8 @@ Support for DFT-based convolutions.
 
 '''
 
-from .util import to_tuple, to_tensor
-from .types import IntTensor, Tensor, Shape
+from .util import to_tuple, to_tensor, debug, tenstr, getattr_first
+from .types import IntTensor, Tensor, Shape, index_dtype
 from .blocking import Block, batchify
 from .partitioning import deinterlace
 import torch
@@ -20,11 +20,17 @@ def dft_shape(tshape: Shape, kshape: Shape) -> Shape:
 
     A tuple is returned.
     '''
-    if len(tshape) == len(kshape):
-        tshape = to_tensor(tshape)
-    else:
-        tshape = to_tensor(tshape[1:])
-    kshape = to_tensor(kshape)
+    device = getattr_first("device", tshape, kshape)
+    tshape = to_tensor(tshape, device=device)
+    kshape = to_tensor(kshape, device=device)
+
+    if len(tshape) == len(kshape) + 1:
+        tshape = tshape[1:]     # remove batching
+
+    if len(tshape) != len(kshape):
+        raise ValueError(f'shape mismatch {tshape=} != {kshape=} (after possible unbatching of tshape)')
+
+
     return to_tuple(tshape + kshape - 1)
 
 
@@ -44,8 +50,8 @@ def zero_pad(ten : Tensor, shape: Shape|None = None) -> Tensor:
         batched = False
         ten = torch.unsqueeze(ten, 0) # add batch dim.
 
-    have = to_tensor(ten.shape[1:], dtype=torch.int32)
-    want = to_tensor(shape, dtype=torch.int32)
+    have = to_tensor(ten.shape[1:], dtype=index_dtype, device=ten.device)
+    want = to_tensor(shape, dtype=index_dtype, device=ten.device)
     zzzz = torch.zeros_like(want)
 
     diff = want - have
@@ -116,7 +122,7 @@ def symmetric_pad(ten: Tensor, shape: Shape, symmetry: tuple) -> Tensor:
         raise ValueError(f'symmetric_pad: unsupported symmetries in {symmetry}')
 
     ten, squeeze = batchify(ten, len(shape))
-    o_shape = to_tensor(ten.shape[1:])
+    o_shape = to_tensor(ten.shape[1:], device=ten.device)
     vdim = len(o_shape)
     if not all([t < s for t,s in zip(o_shape, shape)]):
         raise ValueError(f'symmetric_pad: truncation {o_shape} to {shape} is not supported')
@@ -197,7 +203,9 @@ def signal_pad(signal: Block, shape: Shape, taxis: int = -1) -> Block:
     sym = ["edge"] * len(shape)
     sym[taxis] = "append"
     data = symmetric_pad(signal.data, shape, sym)
-    return Block(signal.location - front_half(shape), data=data)
+    fh = front_half(shape).to(device=signal.device)
+    debug(f'{fh=}')
+    return Block(signal.location - fh, data=data)
 
 
 def convolve_spec(signal: Block, response_spec: Tensor, taxis: int = -1) -> Block:
@@ -244,7 +252,9 @@ def convolve(signal: Block, response: Tensor, taxis: int = -1) -> Block:
     "spatially centered" and "temporarily causal" requirements and other
     details.
     '''
+    debug(f'{signal} {tenstr(response)}')
     c_shape = dft_shape(signal.shape, response.shape)
+    debug(f'{c_shape=}')
     response = response_pad(response, c_shape, taxis)
     dims = to_tuple(torch.arange(len(c_shape)))
     response_spec = torch.fft.fftn(response, dim=dims)
@@ -268,9 +278,11 @@ def interlaced(signal: Block, response: Tensor, steps: IntTensor, taxis: int = -
     Block.location of the returned Block positions the result in the
     "super-grid" and is signal.location/steps.
     '''
+    debug(f'interlaced: signal:{signal} response:{tenstr(response)} steps:{tenstr(steps)}')
+
     super_location = signal.location / steps
 
-    batched_steps = torch.cat([torch.tensor([1]), steps])
+    batched_steps = torch.cat([torch.tensor([1], device=steps.device), steps])
     sig_laces = deinterlace(signal.data, batched_steps)
     res_laces = deinterlace(response, steps)
 

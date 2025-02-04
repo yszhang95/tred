@@ -24,7 +24,7 @@ Developer take note:
 
 from .blocking import Block
 from .drift import drift
-from .util import to_tensor
+from .util import debug, tenstr
 from .raster.depos import binned as raster_depos
 
 from .types import index_dtype
@@ -46,6 +46,12 @@ def param(thing, dtype=torch.float32):
 
     return nn.Parameter(torch.tensor(thing, dtype=dtype), requires_grad=False)
 
+def constant(node, name, thing, dtype=torch.float32):
+    if isinstance(thing, torch.Tensor):
+        thing = thing.to(dtype=dtype)
+    else:
+        thing = torch.tensor(thing, dtype=dtype)
+    node.register_buffer(name, thing)
 
 class Drifter(nn.Module):
     '''
@@ -67,13 +73,12 @@ class Drifter(nn.Module):
         if velocity is None:
             raise ValueError('a velocity value is required (units [distance]/[time])')
 
-        self.target = param(target)
-        self.diffusion = param(diffusion)
-        self.lifetime = param(lifetime)
-        self.velocity = param(velocity)
-        self.vaxis = param(vaxis, index_dtype)
-        self.fluctuate = param(fluctuate, bool)
-
+        constant(self, 'target', target)
+        constant(self, 'diffusion', diffusion)
+        constant(self, 'lifetime', lifetime)
+        constant(self, 'velocity', velocity)
+        constant(self, 'vaxis', vaxis, index_dtype)
+        constant(self, 'fluctuate', fluctuate, bool)
 
     def forward(self, time, charge, tail, head=None):
         '''
@@ -112,30 +117,29 @@ class Raster(nn.Module):
         if grid_spacing is None:
             raise ValueError('a real-valued grid spacing N-tensor is required (units [distance])')
 
-        self.velocity = param(velocity)
-        self.grid_spacing = param(grid_spacing)
-        self.nsigma = param(nsigma)
-        self.pdims = pdims or ()
-        self.tdim = tdim
+        constant(self, 'velocity', velocity)
+        constant(self, 'grid_spacing', grid_spacing)
+        constant(self, 'nsigma', nsigma)
+        self._pdims = pdims or ()
+        self._tdim = tdim
 
     def _transform(self, point, time):
         if point is None:
             return point
         nbatch = point.shape[0]
-        ndims = len(self.pdims) + 1
+        ndims = len(self._pdims) + 1
         new_point = torch.zeros((nbatch, ndims), device=point.device)
-        if self.pdims:
-            for ind, pdim in enumerate(self.pdims):
+        if self._pdims:
+            for ind, pdim in enumerate(self._pdims):
                 new_point[:,ind] = point[:,pdim]
 
         # FIXME: This is a bug! We need to set tail/head time dimension slightly
         # differently to preserve the step "angle" in the pitch-vs-time
         # dimensions.
-        new_point[:,self.tdim] = time
+        new_point[:,self._tdim] = time
 
         return new_point
         
-
     def forward(self, sigma, time, charge, tail, head=None):
         '''
         Raster the input depos, return block.
@@ -147,6 +151,7 @@ class Raster(nn.Module):
         '''
         tail = self._transform(tail, time)
 
+        debug(f'grid:{tenstr(self.grid_spacing)} tail:{tenstr(tail)} sigma:{tenstr(sigma)} charge:{tenstr(charge)}')
         if head is None:        # depos, not steps
             rasters, offsets = raster_depos(self.grid_spacing, tail, sigma, charge, nsigma=self.nsigma)
             return Block(location = offsets, data=rasters)
@@ -168,7 +173,7 @@ class ChunkSum(nn.Module):
         super().__init__()
         if chunk_shape is None:
             raise ValueError('a unitless, integer N-tensor chunk shape is required')
-        self.chunk_shape = param(chunk_shape, index_dtype)
+        constant(self, 'chunk_shape', chunk_shape, index_dtype)
 
     def forward(self, block: Block) -> Block:
         '''
@@ -186,15 +191,15 @@ class LacedConvo(nn.Module):
         super().__init__()
         if lacing is None:
             raise ValueError('a unitless, integer N-tensor lacing is required')
-        self.lacing = param(lacing, index_dtype)
-        self.taxis = param(taxis, index_dtype)
+        constant(self, 'lacing', lacing, index_dtype)
+        self._taxis = taxis
 
     def forward(self, signal, response):
         '''
         Apply laced convolution.
         '''
         # fixme: allow for response to be pre-FFT'ed
-        return interlaced(signal, response, self.lacing, self.taxis)
+        return interlaced(signal, response, self.lacing, self._taxis)
 
         
 class Charge(nn.Module):
@@ -209,6 +214,7 @@ class Charge(nn.Module):
         qblock = self.raster(*drifted)
         return self.chunksum(qblock)
 
+
 class Current(nn.Module):
 
     def __init__(self, convo, chunksum):
@@ -219,6 +225,7 @@ class Current(nn.Module):
     def forward(self, signal, response):
         iblock = self.convo(signal, response)
         return self.chunksum(iblock)
+
 
 class Sim(nn.Module):
     def __init__(self, charge, current):

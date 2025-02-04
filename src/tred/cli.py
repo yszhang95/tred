@@ -2,14 +2,27 @@
 
 import click
 
+from .util import setup_logging, debug, info
+
+cmddef = dict(context_settings = dict(auto_envvar_prefix='TRED',
+                                      help_option_names=['-h', '--help']))
 
 @click.group()
+@click.option("-c", "--config", default=None, type=str,
+              help="Specify a config file")
+@click.option("-l","--log-output", multiple=True,
+              help="log to a file [default:stdout]")
+@click.option("-L","--log-level", default="info",
+              help="set logging level [default:info]")
 @click.version_option()
-def cli():
+@click.pass_context
+def cli(ctx, config, log_output, log_level):
     '''
     Command line interface to the tred simulation.
     '''
-    pass
+    setup_logging(log_output, log_level)
+    # ... make context object
+
 
 @cli.command('plots')
 @click.option('-o','--output',default=None)
@@ -40,7 +53,7 @@ def plots(output, categories):
             mod = getattr(tred.plots, category)
             mod.plots(out)
         
-    print(output)
+    info(output)
 
 
 @cli.command('dummy')
@@ -49,10 +62,15 @@ def plots(output, categories):
 def dummy(output, response):
     '''
     This command does not exist.
-
-    Temporary harness to drive S*R step 
     '''
-    import tred.ndlar
-    r = tred.ndlar.response(response)
-    
+    from .web import download
+    from .response import ndlarsim
+
+    # fixme: eventually need to abstract away different response formats/locations.
+    if not response:
+        response = 'https://www.phy.bnl.gov/~bviren/tmp/tred/response_38_v2b_50ns_ndlar.npy'
+    fname = download(response)
+    debug(f'Loading {fname} from {response}')
+    r = ndlarsim(fname)
+    print(f'response of shape {r.shape}')
     

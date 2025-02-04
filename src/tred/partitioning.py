@@ -47,7 +47,7 @@ def deinterlace(ten: Tensor, steps: IntTensor) -> Generator[Tensor, None, None]:
     if len(ten.shape) != len(steps):
         raise ValueError(f'dimensionality mismatch {len(ten.shape)} != {len(steps)}')
 
-    if torch.any(torch.tensor(ten.shape) % steps):
+    if torch.any(torch.tensor(ten.shape, device=steps.device) % steps):
         raise ValueError(f'tensor of shape {ten.shape} not an integer multiple of {steps}')
         
     steps = to_tuple(steps)

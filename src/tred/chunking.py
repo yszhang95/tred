@@ -64,7 +64,7 @@ def location(envelope: Block, chunk_shape:Shape):
     for o,c in zip(orig_shape, chunk_shape):
         r = torch.arange(start=0, end=o, step=c)
         grids.append(r)
-    mg = torch.meshgrid(*grids, indexing='ij')
+    mg = tuple([one.to(device=envelope.device) for one in torch.meshgrid(*grids, indexing='ij')])
 
     off_mg = list()
     for idim in range(vdim):

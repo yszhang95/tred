@@ -3,16 +3,10 @@ from tred.graph import Drifter, Raster, ChunkSum, LacedConvo, Charge, Current, S
 from tred import units
 from .response import get_ndlarsim
 from tred.io import write_npz
+from tred.util import debug, info, tenstr
 
 import torch
 import time
-
-def dump(blk, name=""):
-    if isinstance(blk, torch.Tensor):
-        print(f'{blk.shape[0]} batchs of shape {blk.shape[1:]} on {blk.device} {name}')
-        return
-
-    print(f'{blk.nbatches} blocks of shape {blk.shape} on {blk.data.device} {name}')
 
 def make_depos(device='cpu'):
     '''
@@ -66,34 +60,41 @@ def runit(device='cpu'):
     sim = Sim(Charge(drifter, raster, chunksum),
               Current(convo, chunksum)) 
     t1 = time.time()
-    sim.to(device=device)
+
+    sim = sim.to(device=device)
+
+    debug(f'diffusion:{tenstr(sim.charge.drifter.diffusion)}')
+
     t2 = time.time()
     depos = make_depos(device)
-    dump(depos['tail'], "initial depo points")
+    
+    debug(f'depos:{tenstr(depos["tail"])}')
     t3 = time.time()
     response = get_ndlarsim().to(device=device)
-    dump(response, "detector response")
+    debug(f'response:{tenstr(response)}')
     t4 = time.time()
     current = sim(response, **depos)
-    dump(current, "induced current")
+    debug(f'current:{current}')
     t5 = time.time()
-    print(current.shape)
+
     write_npz("graph.npz", current = current, depos=depos)
     t6 = time.time()
 
-    print(f'{t1-t0} construct')
-    print(f'{t2-t1} to device')
-    print(f'{t3-t2} make depos')
-    print(f'{t4-t3} get response')
-    print(f'{t5-t4} run sim')
-    print(f'{t6-t5} save data')
+    info(f'{t1-t0} construct')
+    info(f'{t2-t1} to device')
+    info(f'{t3-t2} make depos')
+    info(f'{t4-t3} get response')
+    info(f'{t5-t4} run sim')
+    info(f'{t6-t5} save data')
+    info(f'{t6-t0} TOTAL')
 
 def plots(out):
     with torch.no_grad():
         runit('cpu')
-        print('FINISHED CPU')
+        info('FINISHED CPU')
+        # torch.set_default_device('cuda')
         runit('cuda')    
-        print('FINISHED CUDA')
+        info('FINISHED CUDA')
 
 
         

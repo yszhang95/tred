@@ -5,7 +5,7 @@ Functions to help calculate indices
 
 import torch
 
-def shape_meshgrid(shape):
+def shape_meshgrid(shape, device=None):
     '''
     Return a meshgrid of indices spanning the shape.
 
@@ -15,7 +15,11 @@ def shape_meshgrid(shape):
     '''
     vdim = len(shape)
     odims = [torch.arange(o) for o in shape]
-    return torch.meshgrid(*odims, indexing='ij')
+    mg = torch.meshgrid(*odims, indexing='ij')
+    if not device:
+        return mg
+    return tuple([one.to(device=device) for one in mg])
+        
 
     
 def crop(offset, inner, outer):
@@ -59,7 +63,7 @@ def crop_batched(offsets, inner, outer):
     if isinstance(outer, torch.Tensor):
         outer = tuple(outer.tolist())
 
-    omesh = shape_meshgrid(outer)
+    omesh = shape_meshgrid(outer, offsets.device)
     vdim = len(omesh)
 
     boff = omesh[0].numel()

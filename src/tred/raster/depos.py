@@ -56,7 +56,8 @@ A step object tensor has the following 3N+1 rows
 '''
 
 import torch
-from ..util import to_tensor
+from ..util import to_tensor, debug, tenstr
+from ..types import index_dtype
 
 def binned_1d(grid, centers, widths, q, nsigma=None, minbins=None):
     '''
@@ -138,10 +139,12 @@ def binned_nd(grid, centers, sigmas, charges, nsigma=None, minbins=None):
     Return tuple (raster, offset) 
 
     '''
+    device = centers.device
+
     if isinstance(grid, (tuple,list)):
-        grid = to_tensor(grid, dtype=torch.float32)
+        grid = to_tensor(grid, dtype=torch.float32, device=device)
     if not isinstance(grid, torch.Tensor):
-        grid = torch.tensor([grid]) # make 1D (vdim,)
+        grid = torch.tensor([grid], dtype=index_dtype, device=device) # make 1D (vdim,)
     if len(grid.shape) != 1:
         raise ValueError(f'illegal grid spacing shape {grid.shape}, expect 1D vector')
 
@@ -153,7 +156,7 @@ def binned_nd(grid, centers, sigmas, charges, nsigma=None, minbins=None):
     if nsigma is None:
         nsigma = 3.0
     if not isinstance(nsigma, torch.Tensor):
-        nsigma = torch.tensor([nsigma]*vdims)
+        nsigma = torch.tensor([nsigma]*vdims, device=device)
 
     ndepos = centers.shape[0]
 
@@ -170,11 +173,11 @@ def binned_nd(grid, centers, sigmas, charges, nsigma=None, minbins=None):
         # (ndepos+1, vdims)
         n_half = torch.vstack((n_half, minbins))
     # (vdims, )
-    n_half = torch.max(n_half.to(dtype=torch.int32), dim=0).values
+    n_half = torch.max(n_half.to(dtype=index_dtype, device=device), dim=0).values
 
     # Grid index nearest each center.
     # (ndepos, vdims)
-    gridc = torch.round(centers/grid).to(dtype=torch.int32)
+    gridc = torch.round(centers/grid).to(dtype=index_dtype, device=device)
 
     # Grid index at the starting point (lowest corner grid point) for each region.
     grid0 = gridc - n_half
@@ -194,7 +197,7 @@ def binned_nd(grid, centers, sigmas, charges, nsigma=None, minbins=None):
         # Enumerate the grid points covering the two halves of this dim's Gaussian
         # Note, add 1 as we do a shift-by-one subtraction after erf()'s below
         # (npts,)
-        rel_grid_ind = torch.linspace(0, 2*dim_n_half, 2*dim_n_half+1)
+        rel_grid_ind = torch.linspace(0, 2*dim_n_half, 2*dim_n_half+1).to(device=device)
 
         abs_grid_pts = ((grid0[:,dim][:,None] + rel_grid_ind[None,:]) - 0.5) * grid[dim]
 

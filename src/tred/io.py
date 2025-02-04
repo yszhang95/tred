@@ -4,8 +4,9 @@ Functions for file I/O
 '''
 
 from .blocking import Block
-
+import torch
 import numpy
+
 def write_npz(path, **tensors_or_blocks):
     '''
     Write tensors or blocks to .npz file at path.
@@ -18,9 +19,11 @@ def write_npz(path, **tensors_or_blocks):
     arrays = dict()
     for key, val in tensors_or_blocks.items():
         if isinstance(val, Block):
-            arrays[f'{key}_location'] = val.location
-            arrays[f'{key}_data'] = val.data
+            arrays[f'{key}_location'] = val.location.cpu().numpy()
+            arrays[f'{key}_data'] = val.data.cpu().numpy()
+        elif isinstance(val, torch.Tensor):
+            arrays[key] = val.cpu().numpy()            
         else:
-            arrays[key] = val
+            arrays[key] = val   # hail mary
     numpy.savez_compressed(path, **arrays)
 

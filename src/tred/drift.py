@@ -11,6 +11,8 @@ Eg: (npts=5,vdim=3) is 5 points in 3-space.
 
 '''
 
+from .util import debug, tenstr
+
 import torch
 from torch.distributions.binomial import Binomial
 
@@ -146,6 +148,7 @@ def drift(locs, velocity, diffusion, lifetime, target=0,
     else:
         times = times + dt
 
+    debug(f'dt:{tenstr(dt)} diffusion:{tenstr(diffusion)}')
     sigma = diffuse(dt, diffusion=diffusion, sigma=sigma)
 
     default_charge = 1000

@@ -2,6 +2,7 @@
 '''
 Some basic utility functions
 '''
+import sys
 import subprocess
 from pathlib import Path
 import torch
@@ -11,6 +12,48 @@ try:
     import magic
 except ImportError:
     magic = None
+
+
+import logging
+
+log = logging.getLogger("tred")
+debug = log.debug
+info = log.info
+
+def tenstr(ten):
+    '''
+    Return short string rep of a tensor
+    '''
+    s = to_tuple(ten.shape)
+    return f'<tensor {s} {ten.device} {ten.dtype}>'
+
+def setup_logging(log_output, log_level, log_format=None):
+
+    try:
+        level = int(log_level)      # try for number
+    except ValueError:
+        level = log_level.upper()   # else assume label
+    log.setLevel(level)
+
+    if log_format is None:
+        log_format = '%(levelname)s %(message)s (%(filename)s:%(funcName)s)'
+    log_formatter = logging.Formatter(log_format)
+
+    def setup_handler(h):
+        h.setLevel(level)
+        h.setFormatter(log_formatter)
+        log.addHandler(h)
+
+
+    if not log_output:
+        log_output = ["stderr"]
+    for one in log_output:
+        if one in ("stdout", "stderr"):
+            setup_handler(logging.StreamHandler(getattr(sys, one)))
+            continue
+        setup_handler(logging.FileHandler(one))
+
+    debug(f'logging to {log_output} at level {log_level}')
 
 
 def mime_type(path):
@@ -23,7 +66,7 @@ def mime_type(path):
 
     if magic:
         return magic.from_file(path, mime=True)
-    return subprocess.check_output(f"file --brief --mime-type {file}", shell=True).decode().strip()
+    return subprocess.check_output(f"file --brief --mime-type {path}", shell=True).decode().strip()
 
 
 def make_points(num, vdim, bb=None):
@@ -83,3 +126,13 @@ def slice_length(slc, tensor_length):
     stop = min(slc.stop if slc.stop is not None else tensor_length, tensor_length)
     return max(0, 1+(stop - start) // abs(slc.step))
 
+
+
+def getattr_first(attr, *things):
+    '''
+    Return the first .device found
+    '''
+    for thing in things:
+        got = getattr(thing, attr, None)
+        if got is not None:
+            return got
