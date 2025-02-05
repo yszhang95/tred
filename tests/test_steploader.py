@@ -1,4 +1,4 @@
-from tred.loaders import StepLoader, _equal_div_script
+from tred.loaders import StepLoader, _equal_div_script, steps_from_ndh5
 
 import h5py
 import matplotlib
@@ -14,7 +14,7 @@ import time
 def plot_segments(fpath):
     f = h5py.File(fpath, 'r')
     segments = f['segments']
-    steploader = StepLoader(f)
+    steploader = StepLoader(f, transform=steps_from_ndh5)
     # test for-loop
     x = {
         '_getitem__' : [],
@@ -120,7 +120,7 @@ def test_special_numbers():
     assert dEdx_.allclose(_dEdx)
     assert intids_.allclose(_intids)
 
-    data = StepLoader(data, step_limit=step_limit)
+    data = StepLoader(data, step_limit=step_limit, transform=steps_from_ndh5)
     print('New length', len(data))
     for i in range(len(data)):
         X0 = data[i][0][2:5]
