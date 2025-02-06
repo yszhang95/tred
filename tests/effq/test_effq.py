@@ -1,7 +1,7 @@
 import tred.raster.steps as ts
 from tred.raster.steps import (
     compute_index, compute_coordinate, compute_charge_box,
-    qline_diff3D,
+    qline_diff3D, roots_legendre,
 )
 
 import json
@@ -40,9 +40,27 @@ def test_QModel():
                 assert torch.isclose(testq[0,i,j,k], torch.tensor(exact[i][j][k], dtype=torch.float64),
                                      atol=1E-12, rtol=1E-12), msg
 
+def test_roots_legendre():
+    local_logger = logger.getChild('test_roots_legendre')
+    local_logger.debug('Testing roots_legendre')
+    for i in range(1, 5):
+        roots, weights = roots_legendre(i)
+        rstr = 'roots = (' + ', '.join(f'{x:.16f}' for x in roots) + ')'
+        wstr = 'weights = (' + ', '.join(f'{x:.16f}' for x in weights) + ')'
+        local_logger.debug(f'{i}-th order, {rstr}, {wstr}')
+    try:
+        roots, weights = roots_legendre(10)
+    except ValueError as e:
+        local_logger.debug('Does not support order 10')
+        local_logger.debug(repr(e))
+
 def main():
     print('------ test_QModel ------')
     test_QModel()
+
+    print('-------- test_roots_legendre ---------')
+    test_roots_legendre()
+
 
 if __name__ == '__main__':
     try:
