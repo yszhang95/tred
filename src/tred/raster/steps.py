@@ -431,3 +431,23 @@ def create_u_block(method, npoints, device='cpu'):
     u1ds = _create_u1ds(method, npoints, device)
     return _create_u_block(u1ds)
 
+
+def _create_wu_block(w, u):
+    '''
+    Args:
+        w3d (L,M,N,...)
+        u3d (L,M,N,...,2,2,2,...)
+    Return:
+        return w3d[i,j,k,...] * u3d{i,j,k,...,:,:,:,...]
+    '''
+    ndim = w.ndim
+    shape = tuple(w.size()) + ndim * (1,)
+    if w.ndim * 2 != u.ndim:
+        raise ValueError('w and u does not match on their dimensions;'
+                         f' w size: {w.size()}, u size: {u.size()}')
+    return w.view(shape) * u
+
+def create_wu_block(method, npoints, grid_spacing, device='cpu'):
+    w = create_w_block(method, npoints, grid_spacing, device)
+    u = create_u_block(method, npoints, device)
+    return _create_wu_block(w, u)

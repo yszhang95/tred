@@ -243,6 +243,61 @@ def test_create_u_block(level=None):
     local_logger.debug('pass rel assertion with rel. delta <1E-5')
 
 
+def test_create_wu_block(level=None):
+    test_create_w_block(logging.CRITICAL)
+    test_create_u_block(logging.CRITICAL)
+
+    local_logger = logger.getChild('test_create_wu_block')
+    if level:
+        local_logger.setLevel(level)
+
+    method = 'gauss_legendre'
+    npoints = (1, 2, 1)
+    spacing = (1., 1., 1.)
+    local_logger.debug(f'Testing {npoints}-point wu block calculation in {len(npoints)}D,'
+                       f' interval width == {spacing}')
+
+    w = ts.create_w_block(method, npoints, spacing)
+    u = ts.create_u_block(method, npoints)
+    wu = ts.create_wu_block(method, npoints, spacing)
+    for l in range(npoints[0]):
+        for m in range(npoints[1]):
+            for n in range(npoints[2]):
+                for r in range(2):
+                    for s in range(2):
+                        for t in range(2):
+                            assert torch.allclose(wu[l,m,n,r,s,t],
+                                                  w[l,m,n]*u[l,m,n,r,s,t], atol=1E-10, rtol=1E-5)
+    npoints = (2, 2)
+    spacing = (1., 0.5)
+    local_logger.debug(f'Testing {npoints}-point wu block calculation in {len(npoints)}D,'
+                       f' interval width == {spacing}')
+
+    w = ts.create_w_block(method, npoints, spacing)
+    u = ts.create_u_block(method, npoints)
+    wu = ts.create_wu_block(method, npoints, spacing)
+    for l in range(npoints[0]):
+        for m in range(npoints[1]):
+            for r in range(2):
+                for s in range(2):
+                    assert torch.allclose(wu[l,m,r,s],
+                                          w[l,m]*u[l,m,r,s], atol=1E-10, rtol=1E-5)
+    npoints = (3,)
+    spacing = (1.,)
+    local_logger.debug(f'Testing {npoints}-point wu block calculation in {len(npoints)}D,'
+                       f' interval width == {spacing}')
+
+    w = ts.create_w_block(method, npoints, spacing)
+    u = ts.create_u_block(method, npoints)
+    wu = ts.create_wu_block(method, npoints, spacing)
+    for l in range(npoints[0]):
+        for r in range(2):
+            assert torch.allclose(wu[l,r],
+                                  w[l]*u[l,r], atol=1E-10, rtol=1E-5)
+
+    local_logger.debug('pass rel assertion with rel. delta <1E-5')
+
+
 def main():
     print('------ test_QModel ------')
     test_QModel()
@@ -267,6 +322,9 @@ def main():
 
     print('-------- test_create_u_block ---------')
     test_create_u_block()
+
+    print('-------- test_create_wu_block ---------')
+    test_create_wu_block()
 
 if __name__ == '__main__':
     try:
