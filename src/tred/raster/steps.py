@@ -179,3 +179,92 @@ def compute_charge_box(X0: Tensor, X1: Tensor, Sigma: Tensor,
     else:
         raise NotImplementedError('Only support comparation by index and coordinate')
     return offset, universal_shape
+
+
+def qline_diff3D(Q, X0, X1, Sigma, x, y, z):
+    """
+    Args:
+        Q (N,)
+        X0 (N, 3)
+        X1 (N, 3)
+        Sigma (N, 3)
+        x (N, other shape)
+        y (N, other shape)
+        z (N, other shape)
+    return:
+        q (N, othter shape)
+    """
+    num_dims_to_add = x.ndim - 1
+    shape_new = [-1] + num_dims_to_add * [1] # TorchScript does NOT support (-1,) + dynamic tuples
+
+    # Prepare for broadcasting
+    x0, y0, z0 = tuple(X0[:,i].view(shape_new) for i in range(3))
+    x1, y1, z1 = tuple(X1[:,i].view(shape_new) for i in range(3))
+    sx, sy, sz = tuple(Sigma[:,i].view(shape_new) for i in range(3))
+    Q = Q.view(shape_new)
+    args = (Q, x0, y0, z0, x1, y1, z1, sx, sy, sz, x, y, z)
+    return qline_diff3D_script(*args)
+
+
+@torch.jit.script
+def qline_diff3D_script(
+        Q: Tensor, x0: Tensor, y0: Tensor, z0: Tensor,
+        x1: Tensor, y1: Tensor, z1: Tensor,
+        sx: Tensor, sy: Tensor, sz: Tensor,
+        x, y, z
+) -> Tensor:
+    '''
+    Args:
+        Q: (N, 1, 1, 1, ...)
+        x0, y0, z0, x1, y1, z1, sx, sy, sz: (N, 1, 1, 1, ...)
+        x (N, other shape)
+        y (N, other shape)
+        z (N, other shape)
+    return:
+        q (N, othter shape)
+    '''
+    sqrt2 = 1.4142135623730951
+
+    # Calculate differences
+    dx01 = x0 - x1
+    dy01 = y0 - y1
+    dz01 = z0 - z1
+
+    # Calculate squared terms
+    sxsy2 = (sx*sy)**2
+    sxsz2 = (sx*sz)**2
+    sysz2 = (sy*sz)**2
+    sx2 = sx**2
+    sy2 = sy**2
+    sz2 = sz**2
+
+    # Calculate delta terms
+    deltaSquare = (
+        sysz2 * dx01**2 +
+        sxsy2 * dz01**2 +
+        sxsz2 * dy01**2
+    )
+    deltaSquareSqrt = torch.sqrt(deltaSquare)
+
+    # Calculate charge distribution
+    QoverDeltaSquareSqrt4pi = Q / (deltaSquareSqrt * 4 * torch.pi)
+    erfArgDenominator = sqrt2 * deltaSquareSqrt * sx * sy * sz
+
+    charge = ((-QoverDeltaSquareSqrt4pi * torch.exp(
+        -sy2 * torch.pow(x * dz01 + (z1*x0 - z0*x1) - z * dx01, 2) *0.5/deltaSquare ))
+              * torch.exp(
+        -sx2 * torch.pow(y * dz01 + (z1*y0 - z0*y1) - z * dy01, 2) *0.5/deltaSquare)
+              * torch.exp(
+        -sz2 * torch.pow(y * dx01 + (x1*y0 - x0*y1) - x * dy01, 2) *0.5/deltaSquare)) * (
+        torch.erf((
+            sysz2 * (x - x0) * dx01 +
+            sxsy2 * (z - z0) * dz01 +
+            sxsz2 * (y - y0) * dy01
+        )/erfArgDenominator) -
+        torch.erf((
+            sysz2 * (x - x1) * dx01 +
+            sxsy2 * (z - z1) * dz01 +
+            sxsz2 * (y - y1) * dy01
+        )/erfArgDenominator)
+    )
+    return charge
