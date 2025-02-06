@@ -146,6 +146,103 @@ def test_create_wblock(level=None):
 
     local_logger.debug('pass rel assertion with rel. delta <1E-5')
 
+
+def test_create_u1d_GL(level=None):
+    local_logger = logger.getChild('test_create_u1d_GL')
+    if level:
+        local_logger.setLevel(level)
+
+    npt = 4
+    local_logger.debug(
+        'Testing coefficient calculations of linear interpolations '
+        f'on {npt}-point GL roots.'
+    )
+
+    import scipy as sp
+
+    sp_u = (sp.special.roots_legendre(npt)[0]+1)/2
+    sp_u = torch.tensor(sp_u, dtype=torch.float32)
+    u1d = ts._create_u1d_GL(npt)
+    assert torch.allclose(u1d[:,1], sp_u, atol=1E-10, rtol=1E-5)
+    assert torch.allclose(u1d[:,0], 1-sp_u, atol=1E-10, rtol=1E-5)
+    local_logger.debug(f'pass assertion at rel. delta < 1E-5, given {npt}-point GL')
+
+def test_create_u1ds(level=None):
+    test_create_u1d_GL(logging.CRITICAL)
+
+    local_logger = logger.getChild('test_create_u1ds')
+    if level:
+        local_logger.setLevel(level)
+    npoints = (4, 4, 4)
+    out3d = ts._create_u1ds('gauss_legendre', npoints)
+    local_logger.debug(
+        f'Testing coefficient calculation of linear interpolations in 1D {npoints}-point GL roots '
+        f'for {len(npoints)} dims'
+    )
+
+    for i in range(len(out3d)):
+        assert torch.allclose(ts._create_u1d_GL(npoints[i]),
+                              out3d[i], atol=1E-10, rtol=1E-5)
+
+    npoints = (4, 4,)
+    out3d = ts._create_u1ds('gauss_legendre', npoints)
+    local_logger.debug(
+        f'Testing coefficient calculation of linear interpolations in 1D {npoints}-point GL roots '
+        f'for {len(npoints)} dims'
+    )
+
+    for i in range(len(out3d)):
+        assert torch.allclose(ts._create_u1d_GL(npoints[i]),
+                              out3d[i], atol=1E-10, rtol=1E-5)
+
+    local_logger.debug('pass assertion with rel. delta <1E-5')
+
+def test_create_ublock(level=None):
+    test_create_u1ds(logging.CRITICAL)
+
+    local_logger = logger.getChild('test_create_ublock')
+    if level:
+        local_logger.setLevel(level)
+
+    npoints = (3, 2, 1)
+    local_logger.debug(
+        f'Testing u block calculation in {len(npoints)}D on {npoints}-point GL'
+    )
+    ublock  = ts.create_ublock('gauss_legendre', npoints)
+    u1ds = ts._create_u1ds('gauss_legendre', npoints)
+    for i in range(npoints[0]):
+        for j in range(npoints[1]):
+            for k in range(npoints[2]):
+                assert torch.allclose(u1ds[0][i][:,None,None] * u1ds[1][j][None,:,None]
+                                      * u1ds[2][k][None,None,:],
+                                      ublock[i,j,k], atol=1E-10, rtol=1E-5)
+    npoints = (3, 2,)
+    spacing = (2., 2.,)
+    local_logger.debug(
+        f'Testing u block calculation in {len(npoints)}D on {npoints}-point GL'
+    )
+    ublock  = ts.create_ublock('gauss_legendre', npoints)
+    u1ds = ts._create_u1ds('gauss_legendre', npoints)
+    for i in range(npoints[0]):
+        for j in range(npoints[1]):
+            assert torch.allclose(u1ds[0][i][:,None] * u1ds[1][j][None,:],
+                                  ublock[i,j], atol=1E-10, rtol=1E-5)
+
+    npoints = (3, )
+    spacing = (2.,)
+    local_logger.debug(
+        f'Testing u block calculation in {len(npoints)}D on {npoints}-point GL'
+    )
+
+    ublock  = ts.create_ublock('gauss_legendre', npoints)
+    u1ds = ts._create_u1ds('gauss_legendre', npoints)
+    for i in range(npoints[0]):
+        assert torch.allclose(u1ds[0][i],
+                              ublock[i], atol=1E-10, rtol=1E-5)
+
+    local_logger.debug('pass rel assertion with rel. delta <1E-5')
+
+
 def main():
     print('------ test_QModel ------')
     test_QModel()
@@ -161,6 +258,15 @@ def main():
 
     print('-------- test_create_wblock() --------')
     test_create_wblock()
+
+    print('-------- test_create_u1d_GL() --------')
+    test_create_u1d_GL()
+
+    print('-------- test_create_u1ds() ---------')
+    test_create_u1ds()
+
+    print('-------- test_create_ublock ---------')
+    test_create_ublock()
 
 if __name__ == '__main__':
     try:

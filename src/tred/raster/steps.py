@@ -362,3 +362,71 @@ def create_wblock(method, npoints, grid_spacing, device='cpu'):
     w1ds = _create_w1ds(method, npoints, grid_spacing, device)
     return _create_wblock(w1ds)
 
+
+def _create_u1d_GL(npt, device='cpu'):
+    '''
+    Args:
+        npt : integer
+    Returns:
+        a tensor of coefficients for interpolations at roots of npt-order GL polynomials
+    '''
+    roots, _ = roots_legendre(npt)
+    roots = torch.tensor(roots, dtype=torch.float32, requires_grad=False, device=device)
+    u = (roots+1)/2
+    u1d = torch.empty([npt, 2], dtype=torch.float32, requires_grad=False, device=device)
+    u1d[:, 0] = 1-u
+    u1d[:, 1] = u
+    return u1d
+
+def _create_u1ds(method, npoints, device='cpu'):
+    '''
+    Arguments:
+        method : str
+        npoints : (vdim, ) integers
+    Return:
+        (Tensor_1, Tensor_2, Tensor_3), a list in which each elment is
+          a tensor of coefficients for linear interpolations.
+    '''
+    u1ds = []
+    for ipt, npt in enumerate(npoints):
+        u1ds.append(_create_u1d_GL(npt, device))
+    return u1ds
+
+def _create_ublock(u1ds):
+    '''
+    To create a weight block for u in 3D
+    Requirements:
+        u1d in u1ds is Tensor with a shape of (npt, 2) where npt means n-point GL quad rule.
+    Args:
+        u1ds: list, (Tensor_1, Tensor_2, ..., Tensor_i, ...)
+    Return:
+        A tesnor in a shape of (N_1, N_2, ..., N_i, ..., 2, 2, ..., 2_i, ...)
+    '''
+    ndim = len(u1ds)
+    for i in range(ndim):
+        if u1ds[i].shape[1] != 2:
+            raise ValueError('u1d must have a shape of (npt, 2)')
+    # [-1, 1, ..., 2, 1, ...]
+    shape_new = [-1,] + (ndim-1) * [1,] + [2,] + (ndim-1) * [1]
+    ublock = u1ds[0].view(shape_new)
+    for i in range(1, ndim, 1):
+        shape_new = [1, ] * ndim + [1, ] * ndim
+        shape_new[i] = -1
+        shape_new[ndim+i] = 2
+        ublock = ublock * u1ds[i].view(shape_new)
+
+    return ublock
+
+def create_ublock(method, npoints, device='cpu'):
+    '''
+    To create a weight block for u in 3D
+    Args:
+        method: string
+        npoints: tuple[int], (vdim, )
+        device
+    Return:
+        A tesnor in a shape of (N_1, N_2, ..., N_i, ..., 2, 2, ..., 2_i, ...)
+
+    '''
+    u1ds = _create_u1ds(method, npoints, device)
+    return _create_ublock(u1ds)
