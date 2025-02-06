@@ -298,6 +298,96 @@ def test_create_wu_block(level=None):
     local_logger.debug('pass rel assertion with rel. delta <1E-5')
 
 
+def test_create_grid1d(level=None):
+    local_logger = logger.getChild('test_create_grid1d')
+    if level:
+        local_logger.setLevel(level)
+    origin = 1
+    spacing = 0.1
+    shape = 10
+    offset = (15, 20)
+    local_logger.debug(
+        f'Testing test_create_grid1d, origin={origin}, '
+        f'spacing={spacing}, shape={shape}, '
+        f'offset={offset}'
+                       )
+    grid = ts.create_grid1d(origin, spacing,
+                            torch.tensor(offset, dtype=torch.int32),
+                            shape)
+    for i in range(len(offset)):
+        for j in range(shape):
+            coord = origin + spacing * offset[i] + spacing * j
+            assert torch.allclose(torch.tensor(coord),
+                                  grid[i,j], atol=1E-10, rtol=1E-5)
+    local_logger.debug(
+        'pass assertion with rel. delta < 1E-5'
+    )
+
+def test_create_node1d_GL(level=None):
+    test_create_grid1d(logging.CRITICAL)
+
+    local_logger = logger.getChild('test_create_node1d_GL')
+    if level:
+        local_logger.setLevel(level)
+    origin = 0
+    spacing = 2
+    shape = 3
+    offset = (-1, 1)
+    npt = 2
+    local_logger.debug(
+        f'Testing test_create_node1d_GL,  origin={origin}, '
+        f'spacing={spacing}, shape={shape}, '
+        f'offset={offset}, npoints={npt}'
+                       )
+    node1d = ts._create_node1d_GL(npt, origin, spacing,
+                                  torch.tensor(offset, dtype=torch.int32),
+                                  shape)
+    roots, _ = roots_legendre(npt)
+    for i in range(len(offset)):
+        for j in range(npt):
+            for k in range(shape-1):
+                x0 = (offset[i] + k) * spacing + origin
+                x1 = (offset[i] + k+1) * spacing + origin
+                x = (x1-x0) * (roots[j]+1)/2 + x0
+                x = torch.tensor(x, dtype=torch.float32)
+                assert torch.allclose(node1d[i,j,k], x, atol=1E-10, rtol=1E-5)
+    local_logger.debug(
+        'pass assertion with rel. delta < 1E-5'
+    )
+
+def test_create_node1ds(level=None):
+    test_create_node1d_GL(logging.CRITICAL)
+
+    local_logger = logger.getChild('test_create_node1ds')
+    if level:
+        local_logger.setLevel(level)
+    origin = (0, 0, 0)
+    spacing = (2, 2, 2)
+    shape = (3, 3, 3)
+    offset = ((-1, 1, 0), (0, 0, 0))
+    npt = (2, 3, 4)
+    local_logger.debug(
+        f'Testing test_create_node1d_GL,  origin={origin}, '
+        f'spacing={spacing}, shape={shape}, '
+        f'offset={offset}, npoints={npt}'
+                       )
+    node1ds = ts.create_node1ds('gauss_legendre', npt, origin, spacing,
+                                  torch.tensor(offset, dtype=torch.int32),
+                                  shape)
+
+    for i in range(len(origin)):
+        assert torch.allclose(node1ds[i],
+                              ts._create_node1d_GL(npt[i],
+                                                   origin[i], spacing[i],
+                                                   torch.tensor(offset,
+                                                                dtype=torch.int32)[:,i],
+                                                   torch.tensor(shape[i],
+                                                                dtype=torch.int32))
+                              , atol=1E-10, rtol=1E-5)
+    local_logger.debug(
+        'pass assertion with rel. delta < 1E-5'
+    )
+
 def main():
     print('------ test_QModel ------')
     test_QModel()
@@ -325,6 +415,15 @@ def main():
 
     print('-------- test_create_wu_block ---------')
     test_create_wu_block()
+
+    print('-------- test_create_grid1d ---------')
+    test_create_grid1d()
+
+    print('-------- test_create_node1d_GL ---------')
+    test_create_node1d_GL()
+
+    print('-------- test_create_node1ds ---------')
+    test_create_node1ds()
 
 if __name__ == '__main__':
     try:
