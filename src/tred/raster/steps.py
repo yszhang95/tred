@@ -334,7 +334,7 @@ def _create_w1ds(method, npoints, grid_spacing, device='cpu'):
         w1ds.append(_create_w1d_GL(npt, grid_spacing[ipt], device))
     return w1ds
 
-def _create_wblock(w1ds):
+def _create_w_block(w1ds):
     '''create a weight block
     Args:
         w1ds: tuple[Tensor, Tensor, ...], (Tensor_1, Tensor_2, ...), length of tuple is vdim,
@@ -350,7 +350,7 @@ def _create_wblock(w1ds):
         wblock = wblock * w1ds[i].view(shape_new)
     return wblock
 
-def create_wblock(method, npoints, grid_spacing, device='cpu'):
+def create_w_block(method, npoints, grid_spacing, device='cpu'):
     '''create a weight block
     Args:
         method : str
@@ -360,7 +360,7 @@ def create_wblock(method, npoints, grid_spacing, device='cpu'):
         weights: Tensor, in a shape of (N_1, N_2, ..., N_i, ...) for i from 1 to vdim
     '''
     w1ds = _create_w1ds(method, npoints, grid_spacing, device)
-    return _create_wblock(w1ds)
+    return _create_w_block(w1ds)
 
 
 def _create_u1d_GL(npt, device='cpu'):
@@ -392,7 +392,7 @@ def _create_u1ds(method, npoints, device='cpu'):
         u1ds.append(_create_u1d_GL(npt, device))
     return u1ds
 
-def _create_ublock(u1ds):
+def _create_u_block(u1ds):
     '''
     To create a weight block for u in 3D
     Requirements:
@@ -417,7 +417,7 @@ def _create_ublock(u1ds):
 
     return ublock
 
-def create_ublock(method, npoints, device='cpu'):
+def create_u_block(method, npoints, device='cpu'):
     '''
     To create a weight block for u in 3D
     Args:
@@ -429,4 +429,5 @@ def create_ublock(method, npoints, device='cpu'):
 
     '''
     u1ds = _create_u1ds(method, npoints, device)
-    return _create_ublock(u1ds)
+    return _create_u_block(u1ds)
+

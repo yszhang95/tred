@@ -100,10 +100,10 @@ def test_create_w1ds(level=None):
                               )
     local_logger.debug('pass assertion with rel. delta <1E-5')
 
-def test_create_wblock(level=None):
+def test_create_w_block(level=None):
     test_create_w1ds(logging.CRITICAL)
 
-    local_logger = logger.getChild('test_create_wblock')
+    local_logger = logger.getChild('test_create_w_block')
     if level:
         local_logger.setLevel(level)
     npoints = (3, 2, 1)
@@ -112,7 +112,7 @@ def test_create_wblock(level=None):
         f'Testing {npoints}-point weight block calculation in {len(npoints)}D,'
         f' interval width == {spacing}'
     )
-    wblock  = ts.create_wblock('gauss_legendre', npoints, spacing)
+    wblock  = ts.create_w_block('gauss_legendre', npoints, spacing)
     w1ds = ts._create_w1ds('gauss_legendre', npoints, spacing)
     for i in range(npoints[0]):
         for j in range(npoints[1]):
@@ -125,7 +125,7 @@ def test_create_wblock(level=None):
         f'Testing {npoints}-point weight block calculation in {len(npoints)}D,'
         f' interval width == {spacing}'
     )
-    wblock  = ts.create_wblock('gauss_legendre', npoints, spacing)
+    wblock  = ts.create_w_block('gauss_legendre', npoints, spacing)
     w1ds = ts._create_w1ds('gauss_legendre', npoints, spacing)
     for i in range(npoints[0]):
         for j in range(npoints[1]):
@@ -138,7 +138,7 @@ def test_create_wblock(level=None):
         f'Testing {npoints}-point weight block calculation in {len(npoints)}D,'
         f' interval width == {spacing}'
     )
-    wblock  = ts.create_wblock('gauss_legendre', npoints, spacing)
+    wblock  = ts.create_w_block('gauss_legendre', npoints, spacing)
     w1ds = ts._create_w1ds('gauss_legendre', npoints, spacing)
     for i in range(npoints[0]):
         assert torch.allclose(w1ds[0][i],
@@ -197,10 +197,10 @@ def test_create_u1ds(level=None):
 
     local_logger.debug('pass assertion with rel. delta <1E-5')
 
-def test_create_ublock(level=None):
+def test_create_u_block(level=None):
     test_create_u1ds(logging.CRITICAL)
 
-    local_logger = logger.getChild('test_create_ublock')
+    local_logger = logger.getChild('test_create_u_block')
     if level:
         local_logger.setLevel(level)
 
@@ -208,7 +208,7 @@ def test_create_ublock(level=None):
     local_logger.debug(
         f'Testing u block calculation in {len(npoints)}D on {npoints}-point GL'
     )
-    ublock  = ts.create_ublock('gauss_legendre', npoints)
+    ublock  = ts.create_u_block('gauss_legendre', npoints)
     u1ds = ts._create_u1ds('gauss_legendre', npoints)
     for i in range(npoints[0]):
         for j in range(npoints[1]):
@@ -221,7 +221,7 @@ def test_create_ublock(level=None):
     local_logger.debug(
         f'Testing u block calculation in {len(npoints)}D on {npoints}-point GL'
     )
-    ublock  = ts.create_ublock('gauss_legendre', npoints)
+    ublock  = ts.create_u_block('gauss_legendre', npoints)
     u1ds = ts._create_u1ds('gauss_legendre', npoints)
     for i in range(npoints[0]):
         for j in range(npoints[1]):
@@ -234,7 +234,7 @@ def test_create_ublock(level=None):
         f'Testing u block calculation in {len(npoints)}D on {npoints}-point GL'
     )
 
-    ublock  = ts.create_ublock('gauss_legendre', npoints)
+    ublock  = ts.create_u_block('gauss_legendre', npoints)
     u1ds = ts._create_u1ds('gauss_legendre', npoints)
     for i in range(npoints[0]):
         assert torch.allclose(u1ds[0][i],
@@ -256,8 +256,8 @@ def main():
     print('-------- test_create_w1ds() ----------')
     test_create_w1ds()
 
-    print('-------- test_create_wblock() --------')
-    test_create_wblock()
+    print('-------- test_create_w_block() --------')
+    test_create_w_block()
 
     print('-------- test_create_u1d_GL() --------')
     test_create_u1d_GL()
@@ -265,8 +265,8 @@ def main():
     print('-------- test_create_u1ds() ---------')
     test_create_u1ds()
 
-    print('-------- test_create_ublock ---------')
-    test_create_ublock()
+    print('-------- test_create_u_block ---------')
+    test_create_u_block()
 
 if __name__ == '__main__':
     try:
