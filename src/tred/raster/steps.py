@@ -304,3 +304,60 @@ except:
                 (0.1713244923791695, 0.3607615730481392, 0.4679139345726914, 0.4679139345726914, 0.3607615730481392, 0.1713244923791695)
         raise ValueError(f"customized roots_legendre does not support n = {n}"\
                      " (must be 1 <= n <= 6)")
+
+def _create_w1d_GL(npt, spacing, device='cpu'):
+    '''
+    Args:
+        npt : integer
+        spacing : float
+    Return:
+        a tensor of weights of n-point GL quadrature after correcting for length of intervals
+    '''
+    _, weights = roots_legendre(npt)
+    w1d = torch.tensor(weights, dtype=torch.float32, requires_grad=False, device=device) * spacing/2
+    return w1d
+
+def _create_w1ds(method, npoints, grid_spacing, device='cpu'):
+    '''
+    Args:
+        method : str
+        npoints : (vdim, ), integers
+        grid_spacing : (vdim, ), float
+    return
+        (vdim, ), a list in which each element is a tensor of weights of
+        n-point GL quadrature after correcting for length of intervals
+    '''
+    if method != 'gauss_legendre':
+        raise NotImplementedError('Not implemented method but gauss legendre quadrature')
+    w1ds = []
+    for ipt, npt in enumerate(npoints):
+        w1ds.append(_create_w1d_GL(npt, grid_spacing[ipt], device))
+    return w1ds
+
+def _create_weight_block(w1ds):
+    '''create a weight block
+    Args:
+        w1ds: tuple[Tensor, Tensor, ...], (Tensor_1, Tensor_2, ...), length of tuple is vdim,
+    Return:
+        weights: Tensor, in a shape of (N_1, N_2, ..., N_i, ...) for i from 1 to vdim
+    '''
+    ndim = len(w1ds)
+    shape_0 = [-1,] + (ndim-1) * [1,] # special case [-1] + 0 * [1] --> [-1]
+    wblock = w1ds[0].view(shape_0)
+    for i in range(1, ndim, 1):
+        shape_new = [1,] * ndim
+        shape_new[i] = -1
+        wblock = wblock * w1ds[i].view(shape_new)
+    return wblock
+
+def create_weight_block(method, npoints, grid_spacing, device='cpu'):
+    '''create a weight block
+    Args:
+        method : str
+        npoints : (vdim, ), integers
+        grid_spacing : (vdim, ), float
+    Returns:
+        weights: Tensor, in a shape of (N_1, N_2, ..., N_i, ...) for i from 1 to vdim
+    '''
+    w1ds = _create_w1ds(method, npoints, grid_spacing, device)
+    return _create_weight_block(w1ds)

@@ -54,6 +54,98 @@ def test_roots_legendre():
         local_logger.debug('Does not support order 10')
         local_logger.debug(repr(e))
 
+
+def test_create_w1d_GL(level=None):
+    local_logger = logger.getChild('test_create_w1d_GL')
+    if level:
+        local_logger.setLevel(level)
+    try:
+        import numpy as np
+        import scipy as sp
+        assert np.all(np.abs(np.array(ts._create_w1d_GL(4, 0.1)) - sp.special.roots_legendre(4)[1] * 0.05)/
+                      np.abs(np.array(ts._create_w1d_GL(4, 0.1))) < 1E-5)
+        local_logger.debug('pass assertion at rel. delta < 1E-5, given 4-point GL, spacing = 0.1')
+    except ImportError as e:
+        local_logger.warning('Numpy or scipy is not available. Bypass test_create_w1d_GL')
+        local_logger.warning(repr(e))
+
+def test_create_w1ds(level=None):
+    local_logger = logger.getChild('test_create_w1ds')
+    if level:
+        local_logger.setLevel(level)
+    test_create_w1d_GL(logging.CRITICAL)
+    spacing = (0.1, 0.1, 0.1)
+    npoints = (4, 4, 4)
+    out3d = ts._create_w1ds('gauss_legendre', npoints, spacing)
+    local_logger.debug(
+        f'Testing {npoints} weights calculation in 1D for {len(npoints)} dims,'\
+        f' interval width == {spacing}'
+    )
+
+    for i in range(len(out3d)):
+        assert torch.allclose(ts._create_w1d_GL(npoints[i], spacing[i]),
+                              out3d[i], atol=1E-5, rtol=1E-5)
+
+    spacing = (0.1, 0.1,)
+    npoints = (4, 4,)
+    out3d = ts._create_w1ds('gauss_legendre', npoints, spacing)
+    local_logger.debug(
+        f'Testing {npoints} weights calculation in 1D for {len(npoints)} dims,'\
+        f' interval width == {spacing}'
+    )
+
+    for i in range(len(out3d)):
+        assert torch.allclose(ts._create_w1d_GL(npoints[i], spacing[i]),
+                              out3d[i], atol=1E-5, rtol=1E-5
+                              )
+    local_logger.debug('pass assertion with rel. delta <1E-5')
+
+def test_create_weight_block(level=None):
+    test_create_w1ds(logging.CRITICAL)
+
+    local_logger = logger.getChild('test_create_weight_block')
+    if level:
+        local_logger.setLevel(level)
+    npoints = (3, 2, 1)
+    spacing = (2., 2., 2.)
+    local_logger.debug(
+        f'Testing {npoints}-point weight block calculation in {len(npoints)}D,'
+        f' interval width == {spacing}'
+    )
+    wblock  = ts.create_weight_block('gauss_legendre', npoints, spacing)
+    w1ds = ts._create_w1ds('gauss_legendre', npoints, spacing)
+    for i in range(npoints[0]):
+        for j in range(npoints[1]):
+            for k in range(npoints[2]):
+                assert torch.allclose(w1ds[0][i] * w1ds[1][j] * w1ds[2][k],
+                                      wblock[i,j,k], atol=1E-5, rtol=1E-5)
+    npoints = (3, 2,)
+    spacing = (2., 2.,)
+    local_logger.debug(
+        f'Testing {npoints}-point weight block calculation in {len(npoints)}D,'
+        f' interval width == {spacing}'
+    )
+    wblock  = ts.create_weight_block('gauss_legendre', npoints, spacing)
+    w1ds = ts._create_w1ds('gauss_legendre', npoints, spacing)
+    for i in range(npoints[0]):
+        for j in range(npoints[1]):
+            assert torch.allclose(w1ds[0][i] * w1ds[1][j],
+                                  wblock[i,j], atol=1E-5, rtol=1E-5)
+
+    npoints = (3, )
+    spacing = (2.,)
+    local_logger.debug(
+        f'Testing {npoints}-point weight block calculation in {len(npoints)}D,'
+        f' interval width == {spacing}'
+    )
+    wblock  = ts.create_weight_block('gauss_legendre', npoints, spacing)
+    w1ds = ts._create_w1ds('gauss_legendre', npoints, spacing)
+    for i in range(npoints[0]):
+        assert torch.allclose(w1ds[0][i],
+                              wblock[i], atol=1E-5, rtol=1E-5)
+
+    local_logger.debug('pass rel assertion with rel. delta <1E-5')
+
 def main():
     print('------ test_QModel ------')
     test_QModel()
@@ -61,6 +153,14 @@ def main():
     print('-------- test_roots_legendre ---------')
     test_roots_legendre()
 
+    print('-------- test_create_w1d_GL() ----------')
+    test_create_w1d_GL()
+
+    print('-------- test_create_w1ds() ----------')
+    test_create_w1ds()
+
+    print('-------- test_create_weight_block() --------')
+    test_create_weight_block()
 
 if __name__ == '__main__':
     try:
