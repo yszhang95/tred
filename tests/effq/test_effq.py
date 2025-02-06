@@ -62,8 +62,8 @@ def test_create_w1d_GL(level=None):
     try:
         import numpy as np
         import scipy as sp
-        assert np.all(np.abs(np.array(ts._create_w1d_GL(4, 0.1)) - sp.special.roots_legendre(4)[1] * 0.05)/
-                      np.abs(np.array(ts._create_w1d_GL(4, 0.1))) < 1E-5)
+        assert np.allclose(np.array(ts._create_w1d_GL(4, 0.1)), sp.special.roots_legendre(4)[1] * 0.05,
+                           atol=1E-10, rtol=1E-5)
         local_logger.debug('pass assertion at rel. delta < 1E-5, given 4-point GL, spacing = 0.1')
     except ImportError as e:
         local_logger.warning('Numpy or scipy is not available. Bypass test_create_w1d_GL')
@@ -84,7 +84,7 @@ def test_create_w1ds(level=None):
 
     for i in range(len(out3d)):
         assert torch.allclose(ts._create_w1d_GL(npoints[i], spacing[i]),
-                              out3d[i], atol=1E-5, rtol=1E-5)
+                              out3d[i], atol=1E-10, rtol=1E-5)
 
     spacing = (0.1, 0.1,)
     npoints = (4, 4,)
@@ -96,14 +96,14 @@ def test_create_w1ds(level=None):
 
     for i in range(len(out3d)):
         assert torch.allclose(ts._create_w1d_GL(npoints[i], spacing[i]),
-                              out3d[i], atol=1E-5, rtol=1E-5
+                              out3d[i], atol=1E-10, rtol=1E-5
                               )
     local_logger.debug('pass assertion with rel. delta <1E-5')
 
-def test_create_weight_block(level=None):
+def test_create_wblock(level=None):
     test_create_w1ds(logging.CRITICAL)
 
-    local_logger = logger.getChild('test_create_weight_block')
+    local_logger = logger.getChild('test_create_wblock')
     if level:
         local_logger.setLevel(level)
     npoints = (3, 2, 1)
@@ -112,25 +112,25 @@ def test_create_weight_block(level=None):
         f'Testing {npoints}-point weight block calculation in {len(npoints)}D,'
         f' interval width == {spacing}'
     )
-    wblock  = ts.create_weight_block('gauss_legendre', npoints, spacing)
+    wblock  = ts.create_wblock('gauss_legendre', npoints, spacing)
     w1ds = ts._create_w1ds('gauss_legendre', npoints, spacing)
     for i in range(npoints[0]):
         for j in range(npoints[1]):
             for k in range(npoints[2]):
                 assert torch.allclose(w1ds[0][i] * w1ds[1][j] * w1ds[2][k],
-                                      wblock[i,j,k], atol=1E-5, rtol=1E-5)
+                                      wblock[i,j,k], atol=1E-10, rtol=1E-5)
     npoints = (3, 2,)
     spacing = (2., 2.,)
     local_logger.debug(
         f'Testing {npoints}-point weight block calculation in {len(npoints)}D,'
         f' interval width == {spacing}'
     )
-    wblock  = ts.create_weight_block('gauss_legendre', npoints, spacing)
+    wblock  = ts.create_wblock('gauss_legendre', npoints, spacing)
     w1ds = ts._create_w1ds('gauss_legendre', npoints, spacing)
     for i in range(npoints[0]):
         for j in range(npoints[1]):
             assert torch.allclose(w1ds[0][i] * w1ds[1][j],
-                                  wblock[i,j], atol=1E-5, rtol=1E-5)
+                                  wblock[i,j], atol=1E-10, rtol=1E-5)
 
     npoints = (3, )
     spacing = (2.,)
@@ -138,11 +138,11 @@ def test_create_weight_block(level=None):
         f'Testing {npoints}-point weight block calculation in {len(npoints)}D,'
         f' interval width == {spacing}'
     )
-    wblock  = ts.create_weight_block('gauss_legendre', npoints, spacing)
+    wblock  = ts.create_wblock('gauss_legendre', npoints, spacing)
     w1ds = ts._create_w1ds('gauss_legendre', npoints, spacing)
     for i in range(npoints[0]):
         assert torch.allclose(w1ds[0][i],
-                              wblock[i], atol=1E-5, rtol=1E-5)
+                              wblock[i], atol=1E-10, rtol=1E-5)
 
     local_logger.debug('pass rel assertion with rel. delta <1E-5')
 
@@ -159,8 +159,8 @@ def main():
     print('-------- test_create_w1ds() ----------')
     test_create_w1ds()
 
-    print('-------- test_create_weight_block() --------')
-    test_create_weight_block()
+    print('-------- test_create_wblock() --------')
+    test_create_wblock()
 
 if __name__ == '__main__':
     try:

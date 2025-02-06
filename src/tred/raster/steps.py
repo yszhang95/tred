@@ -334,7 +334,7 @@ def _create_w1ds(method, npoints, grid_spacing, device='cpu'):
         w1ds.append(_create_w1d_GL(npt, grid_spacing[ipt], device))
     return w1ds
 
-def _create_weight_block(w1ds):
+def _create_wblock(w1ds):
     '''create a weight block
     Args:
         w1ds: tuple[Tensor, Tensor, ...], (Tensor_1, Tensor_2, ...), length of tuple is vdim,
@@ -350,14 +350,15 @@ def _create_weight_block(w1ds):
         wblock = wblock * w1ds[i].view(shape_new)
     return wblock
 
-def create_weight_block(method, npoints, grid_spacing, device='cpu'):
+def create_wblock(method, npoints, grid_spacing, device='cpu'):
     '''create a weight block
     Args:
         method : str
-        npoints : (vdim, ), integers
-        grid_spacing : (vdim, ), float
+        npoints : tuple[int], (vdim, ),
+        grid_spacing : tuple[float], (vdim, )
     Returns:
         weights: Tensor, in a shape of (N_1, N_2, ..., N_i, ...) for i from 1 to vdim
     '''
     w1ds = _create_w1ds(method, npoints, grid_spacing, device)
-    return _create_weight_block(w1ds)
+    return _create_wblock(w1ds)
+
