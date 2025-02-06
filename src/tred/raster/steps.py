@@ -150,11 +150,23 @@ def compute_charge_box(X0: Tensor, X1: Tensor, Sigma: Tensor,
         min_limit = compute_index(min_limit, origin, grid_spacing, device=device)
         max_limit = compute_index(max_limit, origin, grid_spacing, device=device)
         offset = min_limit
+
         shape = max_limit - min_limit + 1
+        universal_shape = reduce_to_universal(shape)
+
         if recenter:
-            raise NotImplementedError('Recentering does not work yet.')
-        shape = reduce_to_universal(shape)
-        shape = shape.to(torch.int32)
+            # center moved to half the universal shape,
+            # so the lower corner shifts by center - half_shape, which are negative values.
+            # The new lower corner is smaller than old lower corner by |center - half_shape|
+            # offset = offset + (center - half_shape)
+            shift = (
+                (shape - universal_shape)/2
+            ).floor().to(index_dtype)
+            offset = offset + shift
+            assert torch.all(shift <= 0)
+
+        universal_shape = universal_shape.to(index_dtype)
+
     elif compare_key == 'coordinate':
         raise NotImplementedError('Not support comparation by coordinate')
         '''
@@ -166,4 +178,4 @@ def compute_charge_box(X0: Tensor, X1: Tensor, Sigma: Tensor,
         '''
     else:
         raise NotImplementedError('Only support comparation by index and coordinate')
-    return offset, shape
+    return offset, universal_shape

@@ -95,16 +95,21 @@ def test_compute_charge_box():
             # check bounds follows in between X0,X1,+/-Sigma*nsigma
             x0 = min(X0X1[i,j,0], X0X1[i,j,1])
             x1 = max(X0X1[i,j,0], X0X1[i,j,1])
-            msg = f'Index, ({i},{j}), lower bound {bounds[i,j,0]}, lower point {x0}, '\
-                f'upper bound {bounds[i,j,1]}, upper point {x1}, ' \
+            exact_bounds = (x0 - n_sigma[j] * Sigma[i,j],
+                            x1 + n_sigma[j] * Sigma[i,j])
+            msg = f'Index, ({i},{j}), lower bound {bounds[i,j,0]}, '\
+                f'upper bound {bounds[i,j,1]}, ' \
                 f'X0 {X0X1[i,j,0]}, X1 {X0X1[i,j,1]}, '\
-                f'n_sigma {n_sigma[j]}, Sigma {Sigma[i,j]}'
+                f'n_sigma {n_sigma[j]}, Sigma {Sigma[i,j]}, '\
+                f'lower X0X1: {x0}, upper X0X1: {x1}, '\
+                f'exact lower bound: {exact_bounds[0]}, exact upper bound: {exact_bounds[1]}'
             local_logger.debug(msg)
-            assert (bounds[i,j,0] <= (x0 - n_sigma[j] * Sigma[i,j]) and
-                        bounds[i,j,1] >= (x1 + n_sigma[j] * Sigma[i,j])), \
+            assert bounds[i,j,0] <= exact_bounds[0] and \
+                        bounds[i,j,1] >= exact_bounds[1], \
                         f'compute_bounds_X0X1 failed at X0={X0X1[i,j,0]}, '\
                         f'X1={X0X1[i,j,1]}, Sigma={Sigma[i,j]}, , n_sigma={n_sigma[j]}, '\
-                        f'lower bound={x0}, upper bound={x1}'
+                        f'exact lower bound: {exact_bounds[0]}, exact upper bound: {exact_bounds[1]}, '\
+                        f'lower bound: {bounds[i,j,0]}, upper bound: {bounds[i,j,1]}'
 
     local_logger.debug('compute_bounds_X0_X1')
     bounds = compute_bounds_X0_X1(X0, X1, Sigma, n_sigma)
@@ -113,16 +118,21 @@ def test_compute_charge_box():
             # check bounds follows in between X0,X1,+/-Sigma*nsigma
             x0 = min(X0[i,j], X1[i,j])
             x1 = max(X0[i,j], X1[i,j])
-            msg = f'Index, ({i},{j}), lower bound {bounds[i,j,0]}, lower point {x0}, '\
-                f'upper bound {bounds[i,j,1]}, upper point {x1}, ' \
+            exact_bounds = (x0 - n_sigma[j] * Sigma[i,j],
+                            x1 + n_sigma[j] * Sigma[i,j])
+            msg = f'Index, ({i},{j}), lower bound {bounds[i,j,0]}, '\
+                f'upper bound {bounds[i,j,1]}, ' \
                 f'X0 {X0[i,j]}, X1 {X1[i,j]}, '\
-                f'n_sigma {n_sigma[j]}, Sigma {Sigma[i,j]}'
+                f'n_sigma {n_sigma[j]}, Sigma {Sigma[i,j]},'\
+                f'lower X0X1: {x0}, upper X0X1: {x1}, '\
+                f'exact lower bound: {exact_bounds[0]}, exact upper bound: {exact_bounds[1]}'
             local_logger.debug(msg)
-            assert (bounds[i,j,0] <= (x0 - n_sigma[j] * Sigma[i,j]) and
-                        bounds[i,j,1] >= (x1 + n_sigma[j] * Sigma[i,j])), \
-                        f'compute_bounds_X0X1 failed at X0={X0[i,j]}, '\
+            assert bounds[i,j,0] <= exact_bounds[0] and \
+                        bounds[i,j,1] >= exact_bounds[1], \
+                        f'compute_bounds_X0_X1 failed at X0={X0[i,j]}, '\
                         f'X1={X1[i,j]}, Sigma={Sigma[i,j]}, , n_sigma={n_sigma[j]}, '\
-                        f'lower bound={x0}, upper bound={x1}'
+                        f'exact lower bound: {exact_bounds[0]}, exact upper bound: {exact_bounds[1]}, '\
+                        f'lower bound: {bounds[i,j,0]}, upper bound: {bounds[i,j,1]}'
 
     # Compute charge box
     local_logger.debug('compute_charge_box, without recentering')
@@ -134,11 +144,52 @@ def test_compute_charge_box():
         for j in range(X0.size(1)):
             lower = min(X0[i,j], X1[i,j])
             upper = max(X0[i,j], X1[i,j])
-            msg = f'Index ({i}, {j}), lower bound {bounds_lw[i,j]}, lower point {lower}, '\
-                f'upper bound {bounds_up[i,j]}, upper point {upper}, ' \
+            x0 = lower
+            x1 = upper
+            exact_bounds = (x0 - n_sigma[j] * Sigma[i,j],
+                            x1 + n_sigma[j] * Sigma[i,j])
+            msg = f'Index, ({i},{j}), lower bound {bounds_lw[i,j]}, '\
+                f'upper bound {bounds_up[i,j]}, ' \
                 f'X0 {X0[i,j]}, X1 {X1[i,j]}, '\
-                f'n_sigma {n_sigma[j]}, Sigma {Sigma[i,j]}'
+                f'n_sigma {n_sigma[j]}, Sigma {Sigma[i,j]},'\
+                f'lower X0X1: {x0}, upper X0X1: {x1}, '\
+                f'exact lower bound: {exact_bounds[0]}, exact upper bound: {exact_bounds[1]}'
             local_logger.debug(msg)
+            assert (bounds_lw[i,j] <= exact_bounds[0] and
+                        bounds_up[i,j] >= exact_bounds[1]), \
+                        f'compute_charge_box without recentering failed at X0={X0[i,j]}, '\
+                        f'X1={X1[i,j]}, Sigma={Sigma[i,j]}, , n_sigma={n_sigma[j]}, '\
+                        f'exact lower bound: {exact_bounds[0]}, exact upper bound: {exact_bounds[1]}, '\
+                        f'lower bound={bounds_lw[i,j]}, upper bound={bounds_up[i,j]}'
+
+
+    # Compute charge box
+    local_logger.debug('compute_charge_box, with recentering')
+    result = compute_charge_box(X0, X1, Sigma, n_sigma, origin, grid_spacing, recenter=True)
+    idx_bounds_up = result[0] + result[1].unsqueeze(0)
+    bounds_lw = compute_coordinate(result[0], origin, grid_spacing)
+    bounds_up = compute_coordinate(idx_bounds_up, origin, grid_spacing)
+    for i in range(X0.size(0)):
+        for j in range(X0.size(1)):
+            lower = min(X0[i,j], X1[i,j])
+            upper = max(X0[i,j], X1[i,j])
+            x0 = lower
+            x1 = upper
+            exact_bounds = (x0 - n_sigma[j] * Sigma[i,j],
+                            x1 + n_sigma[j] * Sigma[i,j])
+            msg = f'Index ({i}, {j}), lower bound {bounds_lw[i,j]}, '\
+                f'upper bound {bounds_up[i,j]}, ' \
+                f'X0 {X0[i,j]}, X1 {X1[i,j]}, '\
+                f'n_sigma {n_sigma[j]}, Sigma {Sigma[i,j]}, '\
+                f'lower X0X1: {x0}, upper X0X1: {x1}, '\
+                f'exact lower bound: {exact_bounds[0]}, exact upper bound: {exact_bounds[1]}'
+            local_logger.debug(msg)
+            assert (bounds_lw[i,j] <= exact_bounds[0] and
+                        bounds_up[i,j] >= exact_bounds[1]), \
+                        f'compute_charge_box with recentering failed at X0={X0[i,j]}, '\
+                        f'X1={X1[i,j]}, Sigma={Sigma[i,j]}, , n_sigma={n_sigma[j]}, '\
+                        f'exact lower bound: {exact_bounds[0]}, exact upper bound: {exact_bounds[1]}, '\
+                        f'lower bound={bounds_lw[i,j]}, upper bound={bounds_up[i,j]}'
 
 def main():
     print('----- test_grid() ------')
