@@ -68,7 +68,7 @@ if __name__ == '__main__':
         if opt.lower() == 'debug':
             logging.basicConfig(level=logging.DEBUG)
         elif opt.lower() == 'warning':
-            logging.basicConfig(level=logging.WARNIGN)
+            logging.basicConfig(level=logging.WARNING)
         elif opt.lower() == 'info':
             logging.basicConfig(level=logging.INFO)
         else:
