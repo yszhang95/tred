@@ -530,3 +530,147 @@ def create_node1ds(method, npoints, origin, grid_spacing, offset, shape, device=
                               offset[:,i], shape[i], device)
         )
     return node1ds
+
+def eval_qmodel(Q, X0, X1, Sigma, x, y, z, qmodel=qline_diff3D, **kwargs):
+    '''
+    Args:
+        Q (Nsteps, )
+        X0 (Nsteps, 3)
+        X1 (Nsteps, 3)
+        Sigma (Nsteps, 3)
+        x, y, z are in a shape of (Nsteps, L/M/N, I/J/K-1)
+    Return:
+        q
+
+    FIXME: to support axes with no nodes
+    '''
+
+    #FIXME: each axis must be associated with nodes of quadrature rules for now...
+    charge = qmodel(Q, X0, X1, Sigma, x[:, :, None, None, :, None, None], # (Nsteps, L, 1, 1, I-1, 1, 1)
+                    y[:, None, :, None, None, :, None], # (Nsteps, 1, M, 1, 1, J-1, 1)
+                    z[:, None, None, :, None, None, :]) # (Nsteps, 1, 1, N, 1, 1, K-1)
+
+    return charge
+
+
+def eval_qeff(Q, X0, X1, Sigma, offset, shape, origin, grid_spacing, method, npoints, **kwargs):
+    '''
+    Args:
+        Q (Nsteps, )
+        X0 (Nsteps, 3)
+        X1 (Nsteps, 3)
+        Sigma (Nsteps, 3)
+        offset (Nsteps, vdim)
+        shape (vdim,)
+        origin (vdim,)
+        grid_spacing (vdim,)
+        npoints (vdim, )
+        kwargs:
+            usemask: not used
+            n_sigma: for usemask, not used
+            quaddim: not used
+            skippad: not used
+            mem_limit: maximum limit of memory, in MB
+            xyz_limit: limit of x, y, z shape
+            shape_limit: limit of shape, used together with xyz_limit
+    Return:
+        effective charge
+
+    FIXME:
+       w block, u blocks supports vdim = any number,
+       offset, shape, origin, they also support vdim = any number,
+       Q, X0, X1, Sigma, their vdim is always 3.
+    FIXME:
+       vdim of npoints in principle can be different from offset, shape, origin, spacing.
+       Now it is fixed to the same as others.
+    '''
+    if not isinstance(Q, torch.Tensor):
+        raise ValueError('Q must be a torch.Tensor')
+    device = Q.device
+
+    # FIXME: not support
+    usemask = kwargs.get('usemask', False)
+    # FIXME: not support
+    n_sigma = kwargs.get('n_sigma', False)
+    if usemask and not n_sigma:
+        raise ValueError('n_sigma must be given when using masks')
+
+    # FIXME: not used yet; place holder for future extension
+    quaddim = kwargs.get('quad_dim', (0,1,2))
+    if quaddim:
+        usequad = True
+    else:
+        usequad = False
+
+    skippad = kwargs.get('skippad', False)
+    # FIXME: Not friendly to jit
+    mem_limit = kwargs.get('mem_limit', 10*1024) # MB
+
+    # FIXME: not friendly to JIT
+    # FIXME: only support 3D
+    # at most 100 elements per axis by default
+    xyz_limit = kwargs.get('xyz_limit', torch.tensor([100, 100, 100], requires_grad=False,
+                                                     dtype=index_dtype, device=device))
+    shape_limit = kwargs.get('shape_limit', 1000_000) # 1000_000 elements by default
+    xyzchunk = (xyz_limit > shape) & (torch.prod(shape) > shape_limit) # check the axis
+    xyzchunkidx = torch.argmax(shape) # which one to use later
+    usex, usey, usez = xyzchunk & (torch.arange(3, device=device) == xyzchunkidx)
+    xchunk, ychunk, zchunk = xyz_limit[0], xyz_limit[1], xyz_limit[2]
+
+    # FIXME: dimensions are hard coded
+    kernel = create_wu_block(method, npoints, grid_spacing, device)
+    kernel = torch.flip(kernel, [3, 4, 5]) # it does not matter we flip at first or we multiply w and u at first
+    lmn = kernel.size()[:3]
+    lmn_prod = lmn[0] * lmn[1] *lmn[2]
+    rst = kernel.size()[3:]
+    kernel = kernel.view(lmn_prod, 1, rst[0], rst[1], rst[2]) # out_channel, in_channel/groups, R, S, T
+
+    # FIXME: Not friendly to jit
+    nbtensor = Q.size(0) * torch.prod(shape) * lmn_prod * 4 / 1024**2 # MB
+    nbtensor = nbtensor * 5 # intermediate states inflate memory by 5.
+    nchunk = int(nbtensor // mem_limit) + 1
+
+    x, y, z = create_node1ds(method, npoints, origin, grid_spacing, offset, shape, device)
+    qeff = []
+
+    # FIXME: may update batch dimension in the future
+    chunks = [v.chunk(nchunk, dim=0) for v in [Q, X0, X1, Sigma, x, y, z]]
+
+    for Qi, X0i, X1i, Sigmai, xi, yi, zi in zip(*chunks):
+        if usex:
+            qjs = []
+            for j in range(0, xi.size(-1), xchunk):
+                qj = eval_qmodel(Qi, X0i, X1i, Sigmai, xi[..., j:j+xchunk], yi, zi)
+                qjs.append(qj)
+            charge = torch.cat(qjs, dim=-3)
+        elif usey:
+            qjs = []
+            for j in range(0, yi.size(-1), ychunk):
+                qj = eval_qmodel(Qi, X0i, X1i, Sigmai, xi, yi[..., j:j+ychunk], zi)
+                qjs.append(qj)
+            charge = torch.cat(qjs, dim=-2)
+        elif usez:
+            qjs = []
+            for j in range(0, zi.size(-1), zchunk):
+                qj = eval_qmodel(Qi, X0i, X1i, Sigmai, xi, yi, zi[..., j:j+zchunk])
+                qjs.append(qj)
+            charge = torch.cat(qjs, dim=-1)
+        else:
+            charge = eval_qmodel(Qi, X0i, X1i, Sigmai, xi, yi, zi, **kwargs)
+
+        charge = charge.view(Qi.size(0), lmn_prod, shape[0]-1, shape[1]-1, shape[2]-1) # batch, channel, D1, D2, D3
+        if skippad:
+            # charge = torch.nn.functional.pad(charge, pad=(rst[2]-1, rst[2]-1, rst[1]-1, rst[1]-1,
+            #                                               rst[0]-1, rst[0]-1), mode="constant", value=0)
+            shape = shape - 1
+            charge = torch.nn.functional.conv3d(charge, kernel, padding='valid',
+                                                    groups=lmn_prod)
+        else:
+            charge = torch.nn.functional.pad(charge, pad=(rst[2]-1, rst[2]-1, rst[1]-1, rst[1]-1,
+                                                          rst[0]-1, rst[0]-1), mode="constant", value=0)
+            charge = torch.nn.functional.conv3d(charge, kernel, padding='valid',
+                                                groups=lmn_prod)
+
+        qeff.append(torch.sum(charge, dim=[1])) # 1 for merged l,m,n
+
+    return torch.cat(qeff, dim=0), shape

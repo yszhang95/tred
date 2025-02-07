@@ -388,6 +388,140 @@ def test_create_node1ds(level=None):
         'pass assertion with rel. delta < 1E-5'
     )
 
+def prod_xcub_ycub_zcub(Q, X0, X1, Sigma, x, y, z):
+    local_logger = logger.getChild('prod_xcub_ycub_zcub=x^3*y^3*z^3')
+    local_logger.debug('Ignoring Q, X0, X1, Sigma')
+    output = x**3 * y**3 * z**3
+    return output
+
+def prod_xcub_ycub_zcub_margin0(Q, X0, X1, Sigma, x, y, z):
+    local_logger = logger.getChild('prod_xcub_ycub_zcub=x^3*y^3*z^3, margins are 0')
+    local_logger.debug('Ignoring Q, X0, X1, Sigma')
+    output = x**3 * y**3 * z**3
+    output[...,0,:,:] = 0
+    output[...,-1,:,:] = 0
+    output[...,0,:] = 0
+    output[...,-1,:] = 0
+    output[...,0] = 0
+    output[...,-1] = 0
+    return output
+
+def test_eval_qmodel(level=None):
+    local_logger = logger.getChild('test_eval_qmodel')
+    if level:
+        local_logger.setLevel(level)
+
+    # npt = (4, 4, 4)
+    npt = (2, 2, 2)
+    method='gauss_legendre'
+    origin=(0,0,0)
+    grid_spacing=(0.1, 0.1, 0.1)
+    offset=[(0,20,30)]
+    shape=(11, 11, 11)
+
+
+    local_logger.debug(f'Testing {npt}-point GL rule using {repr(prod_xcub_ycub_zcub)};'
+                       ' Contributions from Q, X0, X1, Sigma, are ignored')
+
+    x, y, z = [ts.create_grid1d(orig, spacing, off, shp) for orig, spacing, off, shp in zip(origin, grid_spacing, torch.tensor(offset).T, shape)]
+    x0, x1 = x[0], x[-1]
+    y0, y1 = y[0], y[-1]
+    z0, z1 = z[0], z[-1]
+    local_logger.debug(f'Setup, x in [{x0},{x1}], '
+                       f'y in [{y0},{y1}], z in [{z0},{z1}]')
+
+    x, y, z = ts.create_node1ds(method, npt, origin, grid_spacing, torch.tensor(offset), shape)
+    q = ts.eval_qmodel(None, None, None, None, x, y, z, qmodel=prod_xcub_ycub_zcub)
+    w = ts.create_w_block(method, npt, grid_spacing)
+
+    effq = w[None,...,None,None,None]*q
+
+    # effq = qeff.create_qeff(None, dummy, None, None, qmodel=mymodel)
+    msg = f'output shape {q.shape}, sum of fn values at nodes {torch.sum(q).item()}. Preknown value for integral of (xyz)^3 is 177.7344'
+    local_logger.debug(msg)
+    assert abs(torch.sum(effq).item() - 177.7344)/177.7344 < 1E-5, msg
+    local_logger.debug('Pass assertion for x^3 * y^3 * t^3 at relative delta 1E-5')
+
+def test_eval_qeff(level=None):
+    local_logger = logger.getChild('test_eval_qeff')
+    if level:
+        local_logger.setLevel(level)
+
+    # npt = (4, 4, 4)
+    npt = (2, 2, 2)
+    method='gauss_legendre'
+    origin=(0,0,0)
+    grid_spacing=(0.1, 0.1, 0.1)
+    offset=[(0,20,30)]
+    shape=(11, 11, 11)
+
+    local_logger.debug(f'Testing {npt}-point GL rule using {repr(prod_xcub_ycub_zcub)};'
+                       ' Contributions from Q, X0, X1, Sigma, are ignored')
+
+    x, y, z = [ts.create_grid1d(orig, spacing, off, shp) for orig, spacing, off, shp in zip(origin, grid_spacing, torch.tensor(offset).T, shape)]
+    x0, x1 = x[0], x[-1]
+    y0, y1 = y[0], y[-1]
+    z0, z1 = z[0], z[-1]
+    local_logger.debug(f'Setup, x in [{x0},{x1}], '
+                       f'y in [{y0},{y1}], z in [{z0},{z1}]')
+
+    dummyQ = torch.arange(1).view(len(offset),-1)
+    dummyX0 = torch.arange(3).view(len(offset),-1)
+    dummyX1 = torch.arange(3).view(len(offset),-1)
+    dummySigma = torch.arange(3).view(len(offset),-1)
+
+    effq, _ = ts.eval_qeff(dummyQ, dummyX0, dummyX1, dummySigma,
+                     torch.tensor(offset), torch.tensor(shape), origin, grid_spacing, method, npt,
+                     qmodel=prod_xcub_ycub_zcub)
+
+    msg = f'output shape {effq.shape}, sum of fn values at nodes {torch.sum(effq).item()}. Preknown value for integral of (xyz)^3 is 177.7344'
+    local_logger.debug(msg)
+    assert abs(torch.sum(effq).item() - 177.7344)/177.7344 < 1E-5, msg
+    local_logger.debug('Pass assertion for x^3 * y^3 * t^3 at relative delta 1E-5')
+
+    # test skipad
+    effq, _ = ts.eval_qeff(dummyQ, dummyX0, dummyX1, dummySigma,
+                               torch.tensor(offset)-1, torch.tensor(shape)+2, origin, grid_spacing, method, npt,
+                               qmodel=prod_xcub_ycub_zcub_margin0, skippad=True)
+    msg = f'output shape {effq.shape}, sum of fn values at nodes {torch.sum(effq).item()}. Preknown value for integral of (xyz)^3 is 177.7344'
+    local_logger.debug(msg)
+    assert abs(torch.sum(effq).item() - 177.7344)/177.7344 < 1E-5, msg
+    local_logger.debug('Pass assertion for x^3 * y^3 * t^3 at relative delta 1E-5, skippad=True')
+
+    ilinear = lambda x, y, t : x * y * t
+    x = torch.linspace(0, 1, 11)
+    y = torch.linspace(2, 3, 11)
+    t = torch.linspace(3, 4, 11)
+    xgrid, ygrid, tgrid = torch.meshgrid(x, y, t, indexing='ij')
+    I = ilinear(xgrid, ygrid, tgrid)
+    Y = effq
+    assert abs((torch.sum(Y * I) - 1318.3282).item())/1318.3282 <1E-5
+    local_logger.debug('Pass assertion for x^4 * y^4 * t^4 after multiplying linear model x*y*t')
+
+    # # Asserted
+
+    Q=(1,)
+    X0=[(0.4,2.4,3.4)]
+    X1=[(0.6, 2.6, 3.6)]
+    Sigma=[(0.5, 0.5, 0.5)]
+    local_logger.debug(
+        f'Setup, Q={Q}, X0={X0}, X1={X1}, Sigma={Sigma}, Origin={origin}, GridSpacing={grid_spacing}, Offset={offset}, Shape={shape}'
+    )
+    Q = torch.tensor(Q)
+    X0 = torch.tensor(X0)
+    X1 = torch.tensor(X1)
+    Sigma = torch.tensor(Sigma)
+    effq2, _ = ts.eval_qeff(Q=Q, X0=X0, X1=X1,
+                        Sigma=Sigma, method=method, origin=origin, grid_spacing=grid_spacing,
+                         offset=torch.tensor(offset), shape=torch.tensor(shape), npoints=npt)
+    # print('Sum of Line conv Gaus', torch.sum(effq2))
+    qint = 0.3137
+    msg = f'Sum of qline_diff3D {torch.sum(effq2)}, predefined value for comparison {qint}'
+    assert torch.isclose(torch.sum(effq2), torch.tensor([qint,]), atol=1E-4, rtol=1E-5), msg
+
+    local_logger.debug('Pass assertion for qline_diff3D')
+
+
 def main():
     print('------ test_QModel ------')
     test_QModel()
@@ -424,6 +558,12 @@ def main():
 
     print('-------- test_create_node1ds ---------')
     test_create_node1ds()
+
+    print('-------- test_eval_qmodel ---------')
+    test_eval_qmodel(level=None)
+
+    print('-------- test_eval_qeff ---------')
+    test_eval_qeff(level=None)
 
 if __name__ == '__main__':
     try:
