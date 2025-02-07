@@ -424,9 +424,9 @@ def test_eval_qmodel(level=None):
                        ' Contributions from Q, X0, X1, Sigma, are ignored')
 
     x, y, z = [ts.create_grid1d(orig, spacing, off, shp) for orig, spacing, off, shp in zip(origin, grid_spacing, torch.tensor(offset).T, shape)]
-    x0, x1 = x[0], x[-1]
-    y0, y1 = y[0], y[-1]
-    z0, z1 = z[0], z[-1]
+    x0, x1 = x[0,0], x[0,-1]
+    y0, y1 = y[0,0], y[0,-1]
+    z0, z1 = z[0,0], z[0,-1]
     local_logger.debug(f'Setup, x in [{x0},{x1}], '
                        f'y in [{y0},{y1}], z in [{z0},{z1}]')
 
@@ -447,8 +447,8 @@ def test_eval_qeff(level=None):
     if level:
         local_logger.setLevel(level)
 
-    # npt = (4, 4, 4)
-    npt = (2, 2, 2)
+    npt = (4, 4, 4)
+    # npt = (2, 2, 2)
     method='gauss_legendre'
     origin=(0,0,0)
     grid_spacing=(0.1, 0.1, 0.1)
@@ -459,9 +459,9 @@ def test_eval_qeff(level=None):
                        ' Contributions from Q, X0, X1, Sigma, are ignored')
 
     x, y, z = [ts.create_grid1d(orig, spacing, off, shp) for orig, spacing, off, shp in zip(origin, grid_spacing, torch.tensor(offset).T, shape)]
-    x0, x1 = x[0], x[-1]
-    y0, y1 = y[0], y[-1]
-    z0, z1 = z[0], z[-1]
+    x0, x1 = x[0,0], x[0,-1]
+    y0, y1 = y[0,0], y[0,-1]
+    z0, z1 = z[0,0], z[0,-1]
     local_logger.debug(f'Setup, x in [{x0},{x1}], '
                        f'y in [{y0},{y1}], z in [{z0},{z1}]')
 
@@ -569,9 +569,37 @@ def test_eval_qeff(level=None):
                             offset=torch.tensor(offset6), shape=torch.tensor(shape6), npoints=npt,
                             shape_limit=torch.tensor(shape_limit))
     assert torch.isclose(torch.sum(effq6), torch.tensor([qint,]), atol=1E-4, rtol=1E-5), msg
-
+    local_logger.debug('Chunking on x, y, z passes tests.')
 
     # test mem_limit
+    batch_size = 20_000
+    Q=(1,) * batch_size
+    X0=[(0.4,2.4,3.4)] * batch_size
+    X1=[(0.6, 2.6, 3.6)] * batch_size
+    Sigma=[(0.5, 0.5, 0.5)] * batch_size
+    npt = (4, 4, 4)
+    # npt = (2, 2, 2)
+    method='gauss_legendre'
+    origin=(0,0,0)
+    grid_spacing=(0.1, 0.1, 0.1)
+    offset=[(0,20,30)] *batch_size
+    shape=(11, 11, 11)
+
+    torch.cuda.reset_peak_memory_stats()
+    Q = torch.tensor(Q).to('cuda')
+    X0 = torch.tensor(X0).to('cuda')
+    X1 = torch.tensor(X1).to('cuda')
+    Sigma = torch.tensor(Sigma).to('cuda')
+    mem_limit = 1024 # MB
+    effq7, _ = ts.eval_qeff(Q=Q, X0=X0, X1=X1,
+                            Sigma=Sigma, method=method, origin=origin, grid_spacing=grid_spacing,
+                            offset=torch.tensor(offset, device='cuda'),
+                            shape=torch.tensor(shape, device='cuda'), npoints=npt,
+                            mem_limit = mem_limit)
+    msg = f'Sum of qline_diff3D {torch.sum(effq7)}, predefined value for comparison {qint}'
+    assert torch.allclose(torch.sum(effq7, dim=(1,2,3)), torch.tensor([qint,],device='cuda').repeat(batch_size), atol=1E-4, rtol=1E-5), msg
+    assert torch.cuda.max_memory_allocated() / 1024**2 < mem_limit
+    local_logger.debug('Passed the test. Peak memory is under control.')
 
 
 def main():

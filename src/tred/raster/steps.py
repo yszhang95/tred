@@ -570,7 +570,8 @@ def eval_qeff(Q, X0, X1, Sigma, offset, shape, origin, grid_spacing, method, npo
             n_sigma: for usemask, not used
             quaddim: not used
             skippad: not used
-            mem_limit: maximum limit of memory, in MB
+            mem_limit: a soft maximum limit of memory, in MB,
+                       this paramter does not function when size per step is too large
             xyz_limit: limit of x, y, z shape
             shape_limit: limit of shape, used together with xyz_limit
     Return:
