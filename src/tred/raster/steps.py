@@ -612,7 +612,7 @@ def eval_qeff(Q, X0, X1, Sigma, offset, shape, origin, grid_spacing, method, npo
     xyz_limit = kwargs.get('xyz_limit', torch.tensor([100, 100, 100], requires_grad=False,
                                                      dtype=index_dtype, device=device))
     shape_limit = kwargs.get('shape_limit', 1000_000) # 1000_000 elements by default
-    xyzchunk = (xyz_limit > shape) & (torch.prod(shape) > shape_limit) # check the axis
+    xyzchunk = (xyz_limit < shape) & (torch.prod(shape) > shape_limit) # check the axis
     xyzchunkidx = torch.argmax(shape) # which one to use later
     usex, usey, usez = xyzchunk & (torch.arange(3, device=device) == xyzchunkidx)
     xchunk, ychunk, zchunk = xyz_limit[0], xyz_limit[1], xyz_limit[2]
