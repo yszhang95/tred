@@ -469,7 +469,7 @@ def test_eval_qeff(level=None):
     dummyX1 = torch.arange(3).view(len(offset),-1)
     dummySigma = torch.arange(3).view(len(offset),-1)
 
-    effq = ts.eval_qeff(dummyQ, dummyX0, dummyX1, dummySigma,
+    effq, _ = ts.eval_qeff(dummyQ, dummyX0, dummyX1, dummySigma,
                      torch.tensor(offset), torch.tensor(shape), origin, grid_spacing, method, npt,
                      qmodel=prod_xcub_ycub_zcub)
 
@@ -479,12 +479,22 @@ def test_eval_qeff(level=None):
     local_logger.debug('Pass assertion for x^3 * y^3 * t^3 at relative delta 1E-5')
 
     # test skipad
-    effq = ts.eval_qeff(dummyQ, dummyX0, dummyX1, dummySigma,
+    effq, offset_new = ts.eval_qeff(dummyQ, dummyX0, dummyX1, dummySigma,
                            torch.tensor(offset)-1, torch.tensor(shape)+2, origin, grid_spacing, method, npt,
                            qmodel=prod_xcub_ycub_zcub_margin0, skippad=True)
+    coord_new = ts.compute_coordinate(offset_new, origin, grid_spacing)
+    coord_old = ts.compute_coordinate(torch.tensor(offset)-1, origin, grid_spacing)
+    coord = ts.compute_coordinate(torch.tensor(offset), origin, grid_spacing)
     msg = f'output shape {effq.shape}, sum of fn values at nodes {torch.sum(effq).item()}. Preknown value for integral of (xyz)^3 is 177.7344'
     local_logger.debug(msg)
     assert abs(torch.sum(effq).item() - 177.7344)/177.7344 < 1E-5, msg
+    assert torch.allclose(torch.tensor(effq.shape[1:]), torch.tensor(shape)+1)
+    msg = f'Coordinate after skipping padding is {coord_new[0]}, '\
+        f'coordinate before skipping pad is {coord_old[0]}, '\
+        f'desired coordinate is {coord[0]}.'
+    local_logger.debug(msg)
+    assert torch.allclose(coord_new, coord, atol=1E-5, rtol=1E-5) # I have shift by one unit before I test.
+
     local_logger.debug('Pass assertion for x^3 * y^3 * t^3 at relative delta 1E-5, skippad=True')
 
     ilinear = lambda x, y, t : x * y * t
@@ -510,7 +520,7 @@ def test_eval_qeff(level=None):
     X0 = torch.tensor(X0)
     X1 = torch.tensor(X1)
     Sigma = torch.tensor(Sigma)
-    effq2 = ts.eval_qeff(Q=Q, X0=X0, X1=X1,
+    effq2, _ = ts.eval_qeff(Q=Q, X0=X0, X1=X1,
                             Sigma=Sigma, method=method, origin=origin, grid_spacing=grid_spacing,
                             offset=torch.tensor(offset), shape=torch.tensor(shape), npoints=npt)
     # print('Sum of Line conv Gaus', torch.sum(effq2))
@@ -526,53 +536,58 @@ def test_eval_qeff(level=None):
     shape2 = (1000, 10, 10)
     offset2 = (0, 20, 30)
     shape_limit = 10000000000
-    effq3 = ts.eval_qeff(Q=Q, X0=X0, X1=X1,
+    effq3, _ = ts.eval_qeff(Q=Q, X0=X0, X1=X1,
                             Sigma=Sigma, method=method, origin=origin, grid_spacing=grid_spacing2,
                             offset=torch.tensor(offset), shape=torch.tensor(shape2), npoints=npt,
                             shape_limit=torch.tensor(shape_limit))
     msg = f'Sum of qline_diff3D {torch.sum(effq3)}, predefined value for comparison {qint}'
     assert torch.isclose(torch.sum(effq3), torch.tensor([qint,]), atol=1E-4, rtol=1E-5), msg
+    assert torch.allclose(torch.tensor(effq3.shape[1:]), torch.tensor(shape2)+1)
 
     shape_limit = 100
-    effq3 = ts.eval_qeff(Q=Q, X0=X0, X1=X1,
+    effq3, _ = ts.eval_qeff(Q=Q, X0=X0, X1=X1,
                             Sigma=Sigma, method=method, origin=origin, grid_spacing=grid_spacing2,
                             offset=torch.tensor(offset), shape=torch.tensor(shape2), npoints=npt,
                             shape_limit=torch.tensor(shape_limit))
     msg = f'Sum of qline_diff3D {torch.sum(effq3)}, predefined value for comparison {qint}'
     assert torch.isclose(torch.sum(effq3), torch.tensor([qint,]), atol=1E-4, rtol=1E-5), msg
+    assert torch.allclose(torch.tensor(effq3.shape[1:]), torch.tensor(shape2)+1)
 
     grid_spacing4 = (0.1, 0.001, 0.1)
     shape4 = (10, 1000, 10)
     offset4 = [(0, 2000, 30),]
     shape_limit4 = 100
-    effq4 = ts.eval_qeff(Q=Q, X0=X0, X1=X1,
+    effq4, _ = ts.eval_qeff(Q=Q, X0=X0, X1=X1,
                             Sigma=Sigma, method=method, origin=origin, grid_spacing=grid_spacing4,
                             offset=torch.tensor(offset4), shape=torch.tensor(shape4), npoints=npt,
                             shape_limit=torch.tensor(shape_limit))
     msg = f'Sum of qline_diff3D {torch.sum(effq4)}, predefined value for comparison {qint}'
     assert torch.isclose(torch.sum(effq4), torch.tensor([qint,]), atol=1E-4, rtol=1E-5), msg
+    assert torch.allclose(torch.tensor(effq4.shape[1:]), torch.tensor(shape4)+1)
 
     grid_spacing5 = (0.1, 0.1, 0.001)
     shape5 = (10, 10, 1000)
     offset5 = [(0, 20, 3000),]
     shape_limit5 = 100
-    effq5 = ts.eval_qeff(Q=Q, X0=X0, X1=X1,
+    effq5, _ = ts.eval_qeff(Q=Q, X0=X0, X1=X1,
                             Sigma=Sigma, method=method, origin=origin, grid_spacing=grid_spacing5,
                             offset=torch.tensor(offset5), shape=torch.tensor(shape5), npoints=npt,
                             shape_limit=torch.tensor(shape_limit))
     msg = f'Sum of qline_diff3D {torch.sum(effq5)}, predefined value for comparison {qint}'
     assert torch.isclose(torch.sum(effq5), torch.tensor([qint,]), atol=1E-4, rtol=1E-5), msg
+    assert torch.allclose(torch.tensor(effq5.shape[1:]), torch.tensor(shape5)+1)
 
     grid_spacing6 = (0.1, 0.005, 0.001)
     shape6 = (10, 200, 1000)
     offset6 = [(0, 400, 3000),]
     shape_limit6 = 100
-    effq6 = ts.eval_qeff(Q=Q, X0=X0, X1=X1,
+    effq6, _ = ts.eval_qeff(Q=Q, X0=X0, X1=X1,
                             Sigma=Sigma, method=method, origin=origin, grid_spacing=grid_spacing6,
                             offset=torch.tensor(offset6), shape=torch.tensor(shape6), npoints=npt,
                             shape_limit=torch.tensor(shape_limit))
     msg = f'Sum of qline_diff3D {torch.sum(effq6)}, predefined value for comparison {qint}'
     assert torch.isclose(torch.sum(effq6), torch.tensor([qint,]), atol=1E-4, rtol=1E-5), msg
+    assert torch.allclose(torch.tensor(effq6.shape[1:]), torch.tensor(shape6)+1)
     local_logger.debug('Chunking on x, y, z passes tests.')
 
     # test mem_limit
@@ -595,7 +610,7 @@ def test_eval_qeff(level=None):
     X1 = torch.tensor(X1).to('cuda')
     Sigma = torch.tensor(Sigma).to('cuda')
     mem_limit = 1024 # MB
-    effq7 = ts.eval_qeff(Q=Q, X0=X0, X1=X1,
+    effq7, _ = ts.eval_qeff(Q=Q, X0=X0, X1=X1,
                             Sigma=Sigma, method=method, origin=origin, grid_spacing=grid_spacing,
                             offset=torch.tensor(offset, device='cuda'),
                             shape=torch.tensor(shape, device='cuda'), npoints=npt,

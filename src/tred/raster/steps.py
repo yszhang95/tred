@@ -661,12 +661,13 @@ def eval_qeff(Q, X0, X1, Sigma, offset, shape, origin, grid_spacing, method, npo
             charge = eval_qmodel(Qi, X0i, X1i, Sigmai, xi, yi, zi, **kwargs)
 
         charge = charge.view(Qi.size(0), lmn_prod, shape[0], shape[1], shape[2]) # batch, channel, D1, D2, D3
+
         if skippad:
-            # charge = torch.nn.functional.pad(charge, pad=(rst[2]-1, rst[2]-1, rst[1]-1, rst[1]-1,
-            #                                               rst[0]-1, rst[0]-1), mode="constant", value=0)
-            shape = shape - 1
+            # shape = shape - 1 # this line lead to wrong shape in the line above and may be due to wrong synchronization.
+            # need to recompute offset...
             charge = torch.nn.functional.conv3d(charge, kernel, padding='valid',
                                                     groups=lmn_prod)
+            offset = offset + 1
         else:
             charge = torch.nn.functional.pad(charge, pad=(rst[2]-1, rst[2]-1, rst[1]-1, rst[1]-1,
                                                           rst[0]-1, rst[0]-1), mode="constant", value=0)
@@ -675,7 +676,7 @@ def eval_qeff(Q, X0, X1, Sigma, offset, shape, origin, grid_spacing, method, npo
 
         qeff.append(torch.sum(charge, dim=[1])) # 1 for merged l,m,n
 
-    return torch.cat(qeff, dim=0)
+    return torch.cat(qeff, dim=0), offset
 
 
 def compute_qeff(Q, X0, X1, Sigma, n_sigma, origin, grid_spacing, method, npoints, **kwargs):
@@ -684,6 +685,6 @@ def compute_qeff(Q, X0, X1, Sigma, n_sigma, origin, grid_spacing, method, npoint
     Return:
         qeff, offset
     '''
-    offset, shape = compute_charge_box(X0, X1, Sigma, n_sigma, origin, grid_spacing)
-    qeff = eval_qeff(Q, X0, X1, Sigma, offset, shape, origin, grid_spacing, method, npoints, **kwargs)
+    offset, shape = compute_charge_box(X0, X1, Sigma, n_sigma, origin, grid_spacing, **kwargs)
+    qeff, offset = eval_qeff(Q, X0, X1, Sigma, offset, shape, origin, grid_spacing, method, npoints, **kwargs)
     return qeff, offset
