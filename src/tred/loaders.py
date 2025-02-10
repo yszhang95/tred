@@ -12,6 +12,10 @@ Developers take note:
 
 '''
 import torch
+from torch import Tensor
+
+from typing import Tuple
+
 from .util import mime_type
 
 # I/O techs are optional.  If not installed, delay error until use
@@ -106,6 +110,93 @@ def file_xxx(filepath, dtype=torch.float32):
     if mt == "application/x-hdf5":
         return HdfFile(filepath, dtype)
 
+# FIXME: to use torch.jit.script
+def _equal_div(X0X1: Tensor, ExtensiveFloat: Tensor,
+               IntensiveFloat: Tensor, IntensiveInt: Tensor,
+               Ns: Tensor) -> Tuple[Tensor, Tensor, Tensor, Tensor]:
+    '''
+    Divide X0X1[i] to Ns[i] sub-segments.
+    Divide ExtensiveFloat[i] by Ns[i].
+    Repeat IntensiveFloat[i] and IntensiveInt[i] by Ns[i] times.
+
+    FIXME: To find a way couple this function with class StepLoader.
+           Now it is outside the class as it requires compilation.
+    '''
+    batch_size = X0X1.shape[0]
+    device = X0X1.device
+
+    # Find the max segment count to unify tensor sizes
+    max_size = Ns.max()
+    N_LIMIT = 1000
+    MIN_STEP = 1/N_LIMIT
+    assert max_size + 1 < N_LIMIT
+
+    # Create a common index tensor (0 to max_size)
+    idxs = torch.arange(max_size + 0.1, device=device).float()  # Shape: (max_size + 1,)
+
+    # Normalize indices based on Ns (broadcasting)
+    frac_steps = idxs[None, :] / Ns[:, None]  # Shape: (batch_size, max_size+1)
+
+    # Compute interpolated values using broadcasting
+    xs = (1 - frac_steps) * X0X1[:, 0, None] + frac_steps * X0X1[:, 3, None]
+    ys = (1 - frac_steps) * X0X1[:, 1, None] + frac_steps * X0X1[:, 4, None]
+    zs = (1 - frac_steps) * X0X1[:, 2, None] + frac_steps * X0X1[:, 5, None]
+
+    # Mask to ignore extra indices for each row
+    mask = frac_steps < (1-MIN_STEP) # discard the last point as the lenght of output is less than the lenght of linspace by 1.
+    selected = mask[:, :-1]
+
+    # Stack and reshape for output format
+    X0X1 = torch.stack([xs[:, :-1], ys[:, :-1], zs[:, :-1], xs[:, 1:], ys[:, 1:], zs[:, 1:]], dim=-1)
+    X0X1 = X0X1[selected].view(-1, 6)  # Remove invalid entries
+
+    if ExtensiveFloat.dim() == 1:
+        ExtensiveFloat = ExtensiveFloat.unsqueeze(1)
+    if IntensiveFloat.dim() == 1:
+        IntensiveFloat = IntensiveFloat.unsqueeze(1)
+    if IntensiveInt.dim() == 1:
+        IntensiveInt = IntensiveInt.unsqueeze(1)
+
+    ExtensiveFloat = ExtensiveFloat / Ns[:,None]
+    ExtensiveFloat = ExtensiveFloat.repeat(1,max_size).view(batch_size,
+                                                            max_size, -1)[selected]
+    IntensiveFloat = IntensiveFloat.repeat(1,max_size).view(batch_size, max_size, -1)[selected]
+    IntensiveInt = IntensiveInt.repeat(1,max_size).view(batch_size, max_size, -1)[selected]
+
+    return X0X1, ExtensiveFloat, IntensiveFloat, IntensiveInt
+
+_equal_div_script = torch.jit.script(_equal_div)
+
+def steps_from_ndh5(data, type_map=None):
+    '''
+    Arguments:
+        data: The supported data is in a foramt of h5py.File or numpy structured array.
+        type_map: type string to data type in pytorch
+    Output:
+        The output data is a tuple of a tensor for float and a tensor for integer.
+        - The tensor in float type spans (N_batch, 8), by 'dE', 'dEdx', 'x_start', 'y_start', 'z_start', 'x_end', 'y_end', 'z_end'.
+        - the tensor in integer type spans (N_batch, 2), by 'pdg_id', 'event_id'.
+
+    FIXME: Unsigned integers are implicitly converted to signed integers.
+    '''
+    if type_map is None:
+        type_map = {
+            'float32' : torch.float32,
+            'int32' : torch.int32,
+        }
+    if isinstance(data, h5py.File) and 'segments' in data.keys():
+        data = data['segments']
+    _dkeys = {
+            'float32' : ['dE', 'dEdx', 'x_start', 'y_start', 'z_start', 'x_end', 'y_end', 'z_end'],
+            'int32' : ['pdg_id', 'event_id'] # fixme: event_id is in uint32 at ND
+    }
+
+    _data = {}
+    for k, v in _dkeys.items():
+        _data[k] = torch.stack([torch.tensor(data[n], dtype=type_map[k], requires_grad=False) for n in v], dim=1) \
+            if isinstance(v, (list, tuple)) else torch.tensor(data[v], dtype=type_map[k], requires_grad=False)
+
+    return _dkeys, _data
 
 class StepLoader:
     '''
@@ -117,31 +208,73 @@ class StepLoader:
 
     Random access is only available for batch dimension, not along feature dimension.
 
-    FIXME: Unsigned integers are implicitly converted to signed integers.
-
     FIXME: Advanced indexing may be supported in the future.
-
-    FIXME: A future version should decouple ND specific format to a transform function
-           and make the function derived from PyTorch dataset.
     '''
     DTYPE = {
         'float32' : torch.float32,
         'int32' : torch.int32,
     }
 
-    def __init__(self, data):
+    def __init__(self, data, transform, **kwargs):
         # fixme: the following can be wraped in a transform function specialized to ND
-        if isinstance(data, h5py.File) and 'segments' in data.keys():
-            data = data['segments']
-        self._dkeys = {
-            'float32' : ['dE', 'dEdx', 'x_start', 'y_start', 'z_start', 'x_end', 'y_end', 'z_end'],
-            'int32' : ['pdg_id', 'event_id'] # fixme: event_id is in uint32 at ND
-        }
+        self._dkeys, self._data = transform(data, StepLoader.DTYPE)
 
-        self._data = {}
-        for k, v in self._dkeys.items():
-            self._data[k] = torch.stack([torch.tensor(data[n], dtype=StepLoader.DTYPE[k], requires_grad=False) for n in v], dim=1) \
-                if isinstance(v, (list, tuple)) else torch.tensor(data[v], dtype=StepLoader.DTYPE[k], requires_grad=False)
+        # preprocessing
+        step_limit = kwargs.get('step_limit', 1)
+        mem_limit = kwargs.get('mem_limit', 1024) # MB
+        device = kwargs.get('device', 'cpu')
+        fn = kwargs.get('preprocesing', _equal_div_script)
+
+        X0X1 = self._data['float32'][:,2:8]
+        dE = self._data['float32'][:,0]
+        dEdx = self._data['float32'][:,1]
+        IntensiveInt = self._data['int32']
+        X0X1, dE, dEdx, IntensiveInt = (
+            StepLoader._batch_equal_div(X0X1, dE, dEdx,
+                                        IntensiveInt,
+                                        step_limit, mem_limit, device, fn
+                                        )
+        )
+
+        self._data['float32'] = torch.cat([dE.view(-1,1), dEdx.view(-1,1), X0X1], dim=1)
+        self._data['int32'] = IntensiveInt
+
+    @staticmethod
+    def _batch_equal_div(X0X1, ExtensiveFloat, IntensiveFloat, IntensiveInt,
+                         step_limit, mem_limit, device='cpu', fn=_equal_div_script):
+        old_device = X0X1.device
+        X0X1 = X0X1.to(device)
+        ExtensiveFloat = ExtensiveFloat.to(device)
+        IntensiveFloat = IntensiveFloat.to(device)
+        IntensiveInt = IntensiveInt.to(device)
+
+        n_limit = mem_limit * 1024 * 1024 # Bytes
+        LdX = torch.linalg.norm(X0X1[:,3:]-X0X1[:,:3], dim=1)
+        Ns = (LdX//step_limit + 1).to(torch.int32)
+        max_size = Ns.max().item()
+        nextf = 1 if len(ExtensiveFloat.shape) == 1 else ExtensiveFloat.size(1)
+        nintf = 1 if len(IntensiveFloat.shape) == 1 else IntensiveFloat.size(1)
+        ninti = 1 if len(IntensiveInt.shape) == 1 else IntensiveInt.size(1)
+        nbytes = max_size * X0X1.size(0) * (X0X1.size(1) + nextf + nintf + ninti) * 4 # Bytes
+        n_chunk = int(nbytes // n_limit) + 1
+
+        Nss = Ns.chunk(n_chunk)
+        X0X1s = X0X1.chunk(n_chunk)
+        ExtensiveFloats = ExtensiveFloat.chunk(n_chunk)
+        IntensiveFloats = IntensiveFloat.chunk(n_chunk)
+        IntensiveInts = IntensiveInt.chunk(n_chunk)
+
+        tensors = []
+        for _x0x1, _extf, _intf, _inti, _ns in zip(X0X1s, ExtensiveFloats,
+                                              IntensiveFloats, IntensiveInts,
+                                              Nss):
+            args = (_x0x1, _extf, _intf, _inti, _ns)
+            tensors.append(
+                fn(*args)
+            )
+            tensors[-1] = tuple(t.to(old_device) for t in tensors[-1])
+        return tuple(torch.cat([tensors[i][j] for i in range(len(tensors))], dim=0)
+                     for j in range(len(tensors[0])))
 
     def __len__(self):
         return len(self._data['float32'])
