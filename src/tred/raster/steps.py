@@ -677,3 +677,13 @@ def eval_qeff(Q, X0, X1, Sigma, offset, shape, origin, grid_spacing, method, npo
 
     return torch.cat(qeff, dim=0)
 
+
+def compute_qeff(Q, X0, X1, Sigma, n_sigma, origin, grid_spacing, method, npoints, **kwargs):
+    '''
+    See compute_charge_box, eval_qeff,
+    Return:
+        qeff, offset
+    '''
+    offset, shape = compute_charge_box(X0, X1, Sigma, n_sigma, origin, grid_spacing)
+    qeff = eval_qeff(Q, X0, X1, Sigma, offset, shape, origin, grid_spacing, method, npoints, **kwargs)
+    return qeff, offset

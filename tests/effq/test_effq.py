@@ -606,6 +606,34 @@ def test_eval_qeff(level=None):
     assert torch.cuda.max_memory_allocated() / 1024**2 < mem_limit, msg
     local_logger.debug('Passed the test. Peak memory is under control.')
 
+def test_compute_qeff(level=None):
+    local_logger = logger.getChild('test_eval_qeff')
+    if level:
+        local_logger.setLevel(level)
+
+    npt = (4, 4, 4)
+    method='gauss_legendre'
+    origin=(0,0,0)
+    grid_spacing=(0.1, 0.1, 0.1)
+    Q=[(1,)]
+    X0=[(0.4,2.4,3.4)]
+    X1=[(0.6, 2.6, 3.6)]
+    Sigma=[(0.5, 0.5, 0.5)]
+    n_sigma = (0.7, 0.7, 0.7)
+    Q = torch.tensor(Q)
+    X0 = torch.tensor(X0)
+    X1 = torch.tensor(X1)
+    Sigma = torch.tensor(Sigma)
+    effq, offset = ts.compute_qeff(Q=Q, X0=X0, X1=X1,
+                               Sigma=Sigma, n_sigma=n_sigma, method=method,
+                               origin=origin, grid_spacing=grid_spacing,
+                               npoints=npt)
+
+    qint = 0.3137
+    msg = f'Integral value from effq is {torch.sum(effq).item()}, desired value is {qint}'
+    assert torch.isclose(torch.sum(effq), torch.tensor([qint,]), atol=1E-4, rtol=1E-5), msg
+    local_logger.debug('Passed tests')
+
 
 def main():
     print('------ test_QModel ------')
@@ -649,6 +677,10 @@ def main():
 
     print('-------- test_eval_qeff ---------')
     test_eval_qeff(level=None)
+
+    print('-------- test_compute_qeff ---------')
+    test_compute_qeff(level=None)
+
 
 if __name__ == '__main__':
     try:
