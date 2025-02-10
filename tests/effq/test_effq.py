@@ -649,6 +649,25 @@ def test_compute_qeff(level=None):
     assert torch.isclose(torch.sum(effq), torch.tensor([qint,]), atol=1E-4, rtol=1E-5), msg
     local_logger.debug('Passed tests')
 
+    n_sigma = (4, 4, 4)
+    effq1, offset = ts.compute_qeff(Q=Q, X0=X0, X1=X1,
+                                   Sigma=Sigma, n_sigma=n_sigma, method=method,
+                                   origin=origin, grid_spacing=grid_spacing,
+                                   npoints=npt,
+                                   recenter=True)
+    effq2, offset = ts.compute_qeff(Q=Q, X0=X0, X1=X1,
+                                   Sigma=Sigma, n_sigma=n_sigma, method=method,
+                                   origin=origin, grid_spacing=grid_spacing,
+                                   npoints=npt,
+                                    skippad=True)
+    effq3, offset = ts.compute_qeff(Q=Q, X0=X0, X1=X1,
+                                    Sigma=Sigma, n_sigma=n_sigma, method=method,
+                                    origin=origin, grid_spacing=grid_spacing,
+                                    npoints=npt)
+
+    assert torch.isclose(effq1.sum(), effq2.sum(), atol=1E-4, rtol=1E-5)
+    assert torch.isclose(effq1.sum(), effq3.sum(), atol=1E-4, rtol=1E-5)
+    logger.debug('The relative difference when setting 4 sigma band is roughly 1E-4')
 
 def main():
     print('------ test_QModel ------')

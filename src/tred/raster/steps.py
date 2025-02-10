@@ -4,6 +4,9 @@ from torch import Tensor
 from ..types import index_dtype, MAX_INDEX, MIN_INDEX
 # from ..utils import to_tensor
 
+import logging
+
+logger = logging.getLogger('tred.raster.steps')
 
 def to_tensor(source, device, dtype=torch.float32):
     '''Aliasing or create a tensor if not existing.
@@ -568,13 +571,20 @@ def eval_qeff(Q, X0, X1, Sigma, offset, shape, origin, grid_spacing, method, npo
         npoints (vdim, )
         kwargs:
             usemask: not used
-            n_sigma: for usemask, not used
+            n_sigma_band: for usemask, not used
             quaddim: not used
-            skippad: not used
+            skippad: skip padding when converting from intervals to grid points.
+                     Number of grid points will be smaller by one than padding.
+                     Offset of the box containing effective charegs is shifted to
+                     larger value by one unit.
+                     It is users' responsibility to make sure results are desired.
             mem_limit: a soft maximum limit of memory, in MB,
                        this paramter does not function when size per step is too large
             xyz_limit: limit of x, y, z shape
             shape_limit: limit of shape, used together with xyz_limit
+            qmodel: method to calculate charges, taking (Q, X0, X1, Sigma, x, y, z)
+                    as arguments. This argument will be passed to eval_qmodel
+                    so that broadcasting is done properly.
     Return:
         effective charge
 
@@ -593,9 +603,9 @@ def eval_qeff(Q, X0, X1, Sigma, offset, shape, origin, grid_spacing, method, npo
     # FIXME: not support
     usemask = kwargs.get('usemask', False)
     # FIXME: not support
-    n_sigma = kwargs.get('n_sigma', False)
+    n_sigma_band = kwargs.get('n_sigma_band', False)
     if usemask and not n_sigma:
-        raise ValueError('n_sigma must be given when using masks')
+        raise ValueError('n_sigma_band must be given when using masks')
 
     # FIXME: not used yet; place holder for future extension
     quaddim = kwargs.get('quad_dim', (0,1,2))
@@ -685,6 +695,13 @@ def compute_qeff(Q, X0, X1, Sigma, n_sigma, origin, grid_spacing, method, npoint
     Return:
         qeff, offset
     '''
+    if kwargs.get('recenter', False) or kwargs.get('skippad', False):
+        if not kwargs.get('recenter', False):
+            kwargs['recenter'] = True
+            logger.warning('Option "recenter" is overwritten to True, complying with option "skippad"')
+        if not kwargs.get('skippad', False):
+            kwargs['skippad'] = True
+            logger.warning('Option "skippad" is overwritten to True, complying with option "recenter"')
     offset, shape = compute_charge_box(X0, X1, Sigma, n_sigma, origin, grid_spacing, **kwargs)
     qeff, offset = eval_qeff(Q, X0, X1, Sigma, offset, shape, origin, grid_spacing, method, npoints, **kwargs)
     return qeff, offset
