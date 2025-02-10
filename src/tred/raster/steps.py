@@ -454,13 +454,13 @@ def create_wu_block(method, npoints, grid_spacing, device='cpu'):
     return _create_wu_block(w, u)
 
 
-def create_grid1d(origin_1d, grid_spacing_1d, offset_1d, shp_1d : int, device='cpu'):
+def create_grid1d(origin_1d, grid_spacing_1d, offset_1d, ngrid_1d : int, device='cpu'):
     '''
     Args:
         origin: float or 0-dimensional Tensor
         grid_spacing: float or 0-dimensional Tensor
         offset: Tensor of index_type, (N, )
-        shp: integer
+        ngrid_1d: integer, number of grid points
     Returns:
         grid points
 
@@ -471,9 +471,9 @@ def create_grid1d(origin_1d, grid_spacing_1d, offset_1d, shp_1d : int, device='c
     # if shp_1d > MAX_INDEX:
     #     raise ValueError(f'shp_1d={shp_1d} is larger than MAX_INDEX {MAX_INDEX}.')
 
-    shp_idx_1d = torch.arange(shp_1d, dtype=index_dtype, requires_grad=False,
+    ngrid_idx_1d = torch.arange(ngrid_1d, dtype=index_dtype, requires_grad=False,
                               device=device) # (shp_1d, )
-    idx_2d = offset_1d[:,None] + shp_idx_1d[None, :]
+    idx_2d = offset_1d[:,None] + ngrid_idx_1d[None, :]
     grid_1d = compute_coordinate(idx_2d, (origin_1d,), (grid_spacing_1d,),
                                  device=device)
     return grid_1d
@@ -484,7 +484,7 @@ def _create_node1d_GL(npt, origin_1d, grid_spacing_1d, offset_1d, shp_1d, device
         origin_1d : float or 0-dimensional Tensor
         grid_spacing_1d : float or 0-dimensional Tensor
         offset_1d : (Nsteps, ) Tensor of integers
-        shp_1d : integer, the number of grid points along the axis
+        shp_1d : integer, the length of grid along the axis, in term of grid spacing
         npt : integer, npoints GL quad rule
     return:
         nodes (Nsteps, npt, shp_1d-1).
@@ -496,7 +496,7 @@ def _create_node1d_GL(npt, origin_1d, grid_spacing_1d, offset_1d, shp_1d, device
     # if shp_1d > MAX_INDEX:
     #     raise ValueError(f'shp_1d={shp_1d} is larger than MAX_INDEX {MAX_INDEX}.')
 
-    grid_1d = create_grid1d(origin_1d, grid_spacing_1d, offset_1d, shp_1d, device)
+    grid_1d = create_grid1d(origin_1d, grid_spacing_1d, offset_1d, shp_1d+1, device)
     roots, _ = roots_legendre(npt)
     roots = to_tensor(roots, device=device)
     half_delta = (grid_1d[:, 1:] - grid_1d[:, :-1])/2. # (Nsteps, shp_1d-1)
@@ -514,12 +514,12 @@ def create_node1ds(method, npoints, origin, grid_spacing, offset, shape, device=
         grid_spaing : tuple[float], in a size of (vdim, )
         offset : Tensor, in a size of (Nbatch, vdim)
         shape : tuple[int], in a size of (vdim, ),
-                number of grid points for grid axes, (shape1, shape2, ...)
+                the length of grid along each axis, in term of grid spacing, (shape1, shape2, ...)
         npoints : (vdim, ), n points for GL quad rule, (npoints1, npoints2, ...)
         device : device
     Return:
         a list in which each element is a tensor with a shape
-        of (Nsteps, npoints1, npoints2, ..., shape1-1, shape2-1, ...)
+        of (Nsteps, npoints1, npoints2, ..., shape1, shape2, ...)
     '''
     node1ds = []
     if method != 'gauss_legendre':
@@ -530,6 +530,7 @@ def create_node1ds(method, npoints, origin, grid_spacing, offset, shape, device=
                               offset[:,i], shape[i], device)
         )
     return node1ds
+
 
 def eval_qmodel(Q, X0, X1, Sigma, x, y, z, qmodel=qline_diff3D, **kwargs):
     '''
@@ -627,7 +628,7 @@ def eval_qeff(Q, X0, X1, Sigma, offset, shape, origin, grid_spacing, method, npo
     kernel = kernel.view(lmn_prod, 1, rst[0], rst[1], rst[2]) # out_channel, in_channel/groups, R, S, T
 
     # FIXME: Not friendly to jit
-    nbtensor = Q.size(0) * torch.prod(shape) * lmn_prod * 4 / 1024**2 # MB
+    nbtensor = Q.size(0) * torch.prod(shape+1) * lmn_prod * 4 / 1024**2 # MB
     nbtensor = nbtensor * 5 # intermediate states inflate memory by 5.
     nchunk = int(nbtensor // mem_limit) + 1
 
@@ -659,7 +660,7 @@ def eval_qeff(Q, X0, X1, Sigma, offset, shape, origin, grid_spacing, method, npo
         else:
             charge = eval_qmodel(Qi, X0i, X1i, Sigmai, xi, yi, zi, **kwargs)
 
-        charge = charge.view(Qi.size(0), lmn_prod, shape[0]-1, shape[1]-1, shape[2]-1) # batch, channel, D1, D2, D3
+        charge = charge.view(Qi.size(0), lmn_prod, shape[0], shape[1], shape[2]) # batch, channel, D1, D2, D3
         if skippad:
             # charge = torch.nn.functional.pad(charge, pad=(rst[2]-1, rst[2]-1, rst[1]-1, rst[1]-1,
             #                                               rst[0]-1, rst[0]-1), mode="constant", value=0)
@@ -674,4 +675,5 @@ def eval_qeff(Q, X0, X1, Sigma, offset, shape, origin, grid_spacing, method, npo
 
         qeff.append(torch.sum(charge, dim=[1])) # 1 for merged l,m,n
 
-    return torch.cat(qeff, dim=0), shape
+    return torch.cat(qeff, dim=0)
+
