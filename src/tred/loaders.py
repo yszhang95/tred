@@ -112,8 +112,11 @@ def file_xxx(filepath, dtype=torch.float32):
 
 # FIXME: to use torch.jit.script
 def _equal_div(X0X1: Tensor, ExtensiveFloat: Tensor,
-               IntensiveFloat: Tensor, IntensiveInt: Tensor,
-               Ns: Tensor) -> Tuple[Tensor, Tensor, Tensor, Tensor]:
+               IntensiveFloat: Tensor,
+               ExtensiveDouble: Tensor,
+               IntensiveDouble: Tensor,
+               IntensiveInt: Tensor,
+               Ns: Tensor) -> Tuple[Tensor, Tensor, Tensor, Tensor, Tensor, Tensor]:
     '''
     Divide X0X1[i] to Ns[i] sub-segments.
     Divide ExtensiveFloat[i] by Ns[i].
@@ -154,16 +157,25 @@ def _equal_div(X0X1: Tensor, ExtensiveFloat: Tensor,
         ExtensiveFloat = ExtensiveFloat.unsqueeze(1)
     if IntensiveFloat.dim() == 1:
         IntensiveFloat = IntensiveFloat.unsqueeze(1)
+    if ExtensiveDouble.dim() == 1:
+        ExtensiveDouble = ExtensiveDouble.unsqueeze(1)
+    if IntensiveDouble.dim() == 1:
+        IntensiveDouble = IntensiveDouble.unsqueeze(1)
     if IntensiveInt.dim() == 1:
         IntensiveInt = IntensiveInt.unsqueeze(1)
 
     ExtensiveFloat = ExtensiveFloat / Ns[:,None]
     ExtensiveFloat = ExtensiveFloat.repeat(1,max_size).view(batch_size,
                                                             max_size, -1)[selected]
+    ExtensiveDouble = ExtensiveDouble / Ns[:,None]
+    ExtensiveDouble = ExtensiveDouble.repeat(1,max_size).view(batch_size,
+                                                            max_size, -1)[selected]
+
     IntensiveFloat = IntensiveFloat.repeat(1,max_size).view(batch_size, max_size, -1)[selected]
+    IntensiveDouble = IntensiveDouble.repeat(1,max_size).view(batch_size, max_size, -1)[selected]
     IntensiveInt = IntensiveInt.repeat(1,max_size).view(batch_size, max_size, -1)[selected]
 
-    return X0X1, ExtensiveFloat, IntensiveFloat, IntensiveInt
+    return X0X1, ExtensiveFloat, IntensiveFloat, ExtensiveDouble, IntensiveDouble, IntensiveInt
 
 _equal_div_script = torch.jit.script(_equal_div)
 
@@ -175,6 +187,7 @@ def steps_from_ndh5(data, type_map=None):
     Output:
         The output data is a tuple of a tensor for float and a tensor for integer.
         - The tensor in float type spans (N_batch, 8), by 'dE', 'dEdx', 'x_start', 'y_start', 'z_start', 'x_end', 'y_end', 'z_end'.
+        - The tensor in double type spans (N_batch, ) by 't0'.
         - the tensor in integer type spans (N_batch, 2), by 'pdg_id', 'event_id'.
 
     FIXME: Unsigned integers are implicitly converted to signed integers.
@@ -182,13 +195,15 @@ def steps_from_ndh5(data, type_map=None):
     if type_map is None:
         type_map = {
             'float32' : torch.float32,
+            'float64' : torch.float64,
             'int32' : torch.int32,
         }
     if isinstance(data, h5py.File) and 'segments' in data.keys():
         data = data['segments']
     _dkeys = {
             'float32' : ['dE', 'dEdx', 'x_start', 'y_start', 'z_start', 'x_end', 'y_end', 'z_end'],
-            'int32' : ['pdg_id', 'event_id'] # fixme: event_id is in uint32 at ND
+            'float64' : ['t0_start'],
+            'int32' : ['event_id', 'pdg_id'] # fixme: event_id is in uint32 at ND
     }
 
     _data = {}
@@ -202,20 +217,23 @@ class StepLoader:
     '''
     Produce step tensors assuming data is in Step schema.
     The supported data is in a foramt of h5py.File or numpy structured array.
-    The output data is a tuple of a tensor for float and a tensor for integer.
+    The output data is a tuple of a tensor for float, double and a tensor for integer.
     - The tensor in float type spans (N_batch, 8), by 'dE', 'dEdx', 'x_start', 'y_start', 'z_start', 'x_end', 'y_end', 'z_end'.
+    - The tensor in double type spans (N_batch, ) by 't0'.
     - the tensor in integer type spans (N_batch, 2), by 'pdg_id', 'event_id'.
 
     Random access is only available for batch dimension, not along feature dimension.
 
     FIXME: Advanced indexing may be supported in the future.
+    FIXME: the dataset does not provide `labels` array.
     '''
     DTYPE = {
         'float32' : torch.float32,
+        'float64' : torch.float64,
         'int32' : torch.int32,
     }
 
-    def __init__(self, data, transform, **kwargs):
+    def __init__(self, data, transform, target_transform=None, **kwargs):
         # fixme: the following can be wraped in a transform function specialized to ND
         self._dkeys, self._data = transform(data, StepLoader.DTYPE)
 
@@ -229,23 +247,30 @@ class StepLoader:
         dE = self._data['float32'][:,0]
         dEdx = self._data['float32'][:,1]
         IntensiveInt = self._data['int32']
-        X0X1, dE, dEdx, IntensiveInt = (
-            StepLoader._batch_equal_div(X0X1, dE, dEdx,
+        ExtensiveDouble = torch.empty((len(dE),0), requires_grad=False, dtype=torch.float64)
+        IntensiveDouble = self._data['float64'][:]
+        X0X1, dE, dEdx, _, IntensiveDouble, IntensiveInt = (
+            StepLoader._batch_equal_div(X0X1, dE, dEdx, ExtensiveDouble, IntensiveDouble,
                                         IntensiveInt,
                                         step_limit, mem_limit, device, fn
                                         )
         )
 
         self._data['float32'] = torch.cat([dE.view(-1,1), dEdx.view(-1,1), X0X1], dim=1)
+        self._data['float64'] = IntensiveDouble
         self._data['int32'] = IntensiveInt
+        self.length = len(self._data['int32'])
 
     @staticmethod
-    def _batch_equal_div(X0X1, ExtensiveFloat, IntensiveFloat, IntensiveInt,
+    def _batch_equal_div(X0X1, ExtensiveFloat, IntensiveFloat, ExtensiveDouble,
+                        IntensiveDouble, IntensiveInt,
                          step_limit, mem_limit, device='cpu', fn=_equal_div_script):
         old_device = X0X1.device
         X0X1 = X0X1.to(device)
         ExtensiveFloat = ExtensiveFloat.to(device)
         IntensiveFloat = IntensiveFloat.to(device)
+        ExtensiveDouble = ExtensiveDouble.to(device)
+        IntensiveDouble = IntensiveDouble.to(device)
         IntensiveInt = IntensiveInt.to(device)
 
         n_limit = mem_limit * 1024 * 1024 # Bytes
@@ -254,21 +279,26 @@ class StepLoader:
         max_size = Ns.max().item()
         nextf = 1 if len(ExtensiveFloat.shape) == 1 else ExtensiveFloat.size(1)
         nintf = 1 if len(IntensiveFloat.shape) == 1 else IntensiveFloat.size(1)
+        nextd = 1 if len(ExtensiveDouble.shape) == 1 else ExtensiveDouble.size(1)
+        nintd = 1 if len(IntensiveDouble.shape) == 1 else IntensiveDouble.size(1)
         ninti = 1 if len(IntensiveInt.shape) == 1 else IntensiveInt.size(1)
-        nbytes = max_size * X0X1.size(0) * (X0X1.size(1) + nextf + nintf + ninti) * 4 # Bytes
+        nbytes = max_size * X0X1.size(0) * (X0X1.size(1) + nextf + nintf + 2*nextd + 2*nintd + ninti) * 4 # Bytes
         n_chunk = int(nbytes // n_limit) + 1
 
         Nss = Ns.chunk(n_chunk)
         X0X1s = X0X1.chunk(n_chunk)
         ExtensiveFloats = ExtensiveFloat.chunk(n_chunk)
         IntensiveFloats = IntensiveFloat.chunk(n_chunk)
+        ExtensiveDoubles = ExtensiveDouble.chunk(n_chunk)
+        IntensiveDoubles = IntensiveDouble.chunk(n_chunk)
         IntensiveInts = IntensiveInt.chunk(n_chunk)
 
         tensors = []
-        for _x0x1, _extf, _intf, _inti, _ns in zip(X0X1s, ExtensiveFloats,
-                                              IntensiveFloats, IntensiveInts,
-                                              Nss):
-            args = (_x0x1, _extf, _intf, _inti, _ns)
+        for (_x0x1, _extf, _intf, _extd,
+             _intd, _inti, _ns) in zip(X0X1s, ExtensiveFloats, IntensiveFloats,
+                                       ExtensiveDoubles, IntensiveDoubles,
+                                       IntensiveInts, Nss):
+            args = (_x0x1, _extf, _intf, _extd, _intd, _inti, _ns)
             tensors.append(
                 fn(*args)
             )
@@ -277,10 +307,10 @@ class StepLoader:
                      for j in range(len(tensors[0])))
 
     def __len__(self):
-        return len(self._data['float32'])
+        return self.length
 
     def __getitem__(self, idx):
-        return self._data['float32'][idx], self._data['int32'][idx]
+        return self._data['float32'][idx], self._data['float64'][idx], self._data['int32'][idx]
 
     def get_column(self, key):
         '''

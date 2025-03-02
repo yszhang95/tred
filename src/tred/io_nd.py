@@ -305,7 +305,8 @@ def nd_collate_fn(batch):
     # features, labels = zip(*batch) # for generatel conversion from [(features_sample1, labels_sample1), ...] to ([features_sample1, ...], [labels_sample1, ...])
     t64bit = features[1] if features[1].dim() == 1 else features[1][:,0]
 
-    t = torch.min(t64bit, dim=0)[0]
+    # FIXME: decimals to round depends on the units. Here -3 means ms in as I assume t64bit in us.
+    t = torch.min(t64bit, dim=0)[0].round(decimals=-3)
     t = t.expand(t64bit.size())
     dt = t64bit - t
     ts = torch.stack([t.to(torch.float32), dt.to(torch.float32)], dim=1)
