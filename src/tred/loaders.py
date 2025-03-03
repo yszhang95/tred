@@ -203,12 +203,14 @@ def steps_from_ndh5(data, type_map=None):
     _dkeys = {
             'float32' : ['dE', 'dEdx', 'x_start', 'y_start', 'z_start', 'x_end', 'y_end', 'z_end'],
             'float64' : ['t0_start'],
-            'int32' : ['event_id', 'pdg_id'] # fixme: event_id is in uint32 at ND
+            'int32' : ['event_id', 'vertex_id', 'pdg_id'] # fixme: event_id is in uint32 at ND
     }
 
     _data = {}
     for k, v in _dkeys.items():
-        _data[k] = torch.stack([torch.tensor(data[n], dtype=type_map[k], requires_grad=False) for n in v], dim=1) \
+        # FIXME: check data[n].flags['C_CONTIGUOUS']) and force to convert to contiguous array
+        # data[n] = np.ascontiguousarray(data[n])
+        _data[k] = torch.stack([torch.tensor(data[n].copy(), dtype=type_map[k], requires_grad=False) for n in v], dim=1) \
             if isinstance(v, (list, tuple)) else torch.tensor(data[v], dtype=type_map[k], requires_grad=False)
 
     return _dkeys, _data

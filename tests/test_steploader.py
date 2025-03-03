@@ -72,8 +72,8 @@ def plot_segments(fpath):
 
 def test_special_numbers():
     data = [
-        (1, 2, 1,1,1,2,4,9, 1, 1, 20),
-        (1, 1, 2,4,9,2,4,10, 1, 2, 20)
+        (1, 2, 1,1,1,2,4,9, 1, 1, 20, 0),
+        (1, 1, 2,4,9,2,4,10, 1, 2, 20, 1)
     ]
 
     X0X1 = np.array(data)[:,2:8].astype(np.float32)
@@ -88,12 +88,15 @@ def test_special_numbers():
     event_id = torch.tensor(event_id)
     t0_start = np.array(data)[:,10].astype(np.float64)
     t0_start = torch.tensor(t0_start)
+    vertex_id = np.array(data)[:,11].astype(np.int32)
+    vertex_id = torch.tensor(vertex_id)
     dummy = torch.empty((len(t0_start),0), dtype=torch.float64)
 
     dtype = np.dtype([('dE', 'f4'), ('dEdx', 'f4'), ('x_start', 'f4'),
                       ('y_start', 'f4'), ('z_start', 'f4'), ('x_end', 'f4'),
                       ('y_end', 'f4'), ('z_end', 'f4'),
-                      ('pdg_id', 'i4'), ('event_id', 'i4'), ('t0_start', 'f8')])
+                      ('pdg_id', 'i4'), ('event_id', 'i4'), ('t0_start', 'f8'),
+                      ('vertex_id', 'i4')])
 
     data = np.array(data, dtype=dtype)
 
@@ -107,14 +110,14 @@ def test_special_numbers():
         .to(torch.int32) + 1
     X0X1_, dE_, dEdx_, dummy_, ts_, intids_ = (
         _equal_div_script(X0X1, dE, dEdx, dummy, t0_start,
-                          torch.stack([event_id, pdg_id], dim=1).view(-1, 2),
+                          torch.cat([event_id[...,None], vertex_id[...,None], pdg_id[...,None]], dim=-1),
                           Ns)
     )
 
     print('Test _batch_equal_div')
     _X0X1, _dE, _dEdx, _dummy, _ts, _intids = (
         StepLoader._batch_equal_div(X0X1, dE, dEdx, dummy, t0_start,
-                                    torch.stack([event_id, pdg_id], dim=1).view(-1, 2),
+                                    torch.cat([event_id[...,None], vertex_id[...,None], pdg_id[...,None]], dim=-1),
                                     step_limit, mem_limit=1/1024/1024,
                                     fn=_equal_div_script)
     )
@@ -160,7 +163,7 @@ def test_nb():
             total_size = np.sum(Ns)
             extf_dim = 1 # hard code
             intf_dim = 1 # hard code
-            inti_dim = 2 # hard code
+            inti_dim = 3 # hard code
 
             # Preallocate a single output array
             x0x1_ = np.empty((total_size, 6), dtype=np.float32)
@@ -190,7 +193,7 @@ def test_nb():
                                     for n in ['dE', 'dEdx', 'x_start', 'y_start',
                                               'z_start', 'x_end', 'y_end', 'z_end']], axis=1).reshape(len(segments), -1)
         data['int32'] = np.stack([segments[n]
-                                     for n in ['pdg_id', 'event_id']], axis=1)
+                                     for n in ['event_id', 'vertex_id', 'pdg_id']], axis=1)
         X0X1 = data['float32'][:,2:8]
         dE = data['float32'][:,0]
         dEdx = data['float32'][:,1]
@@ -225,7 +228,7 @@ def test_perf():
     data['float64'] = torch.tensor(segments['t0_start'])
     data['int32'] = torch.stack([torch.tensor(segments[n], dtype=torch.int32,
                                               requires_grad=False)
-                                 for n in ['pdg_id', 'event_id']], dim=1)
+                                 for n in ['event_id', 'vertex_id', 'pdg_id']], dim=1)
     X0X1 = data['float32'][:,2:8]
     dE = data['float32'][:,0]
     dEdx = data['float32'][:,1]
