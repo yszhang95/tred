@@ -26,6 +26,7 @@ from .blocking import Block
 from .drift import drift
 from .util import debug, tenstr
 from .raster.depos import binned as raster_depos
+from .raster.steps import compute_qeff
 
 from .types import index_dtype
 from .sparse import chunkify
@@ -36,9 +37,18 @@ import torch
 import torch.nn as nn
 
 def raster_steps(*args,**kwds):
-    raise NotImplementedError("Yousen, make raster.steps.function, import it as tred.graph.raster_steps and delete this temporary function")
-
-
+    # raise NotImplementedError("Yousen, make raster.steps.function, import it as tred.graph.raster_steps and delete this temporary function")
+    # rasters, offsets = raster_steps(self.grid_spacing, tail, head, sigma, charge, nsigma=self.nsigma)
+    # args[0] : grid_spaing
+    # args[1] : tail, X0
+    # args[2] : tail, X1
+    # args[3] : sigma
+    # args[4] : charge, Q
+    # kwds['nsigma] : nsigma, scalar
+    return compute_qeff(grid_spacing=args[0], X0=args[1], X1=args[2],
+                        Sigma=args[3], Q=args[4],
+                        n_sigma=(kwds['nsigma'], kwds['nsigma'], kwds['nsigma']),
+                        origin=(0,0,0), method='gauss_legendre', npoints=(2,2,2))
 
 def param(thing, dtype=torch.float32):
     if isinstance(thing, torch.Tensor):
@@ -158,6 +168,7 @@ class Raster(nn.Module):
 
         head = self._transform(head, time)
         rasters, offsets = raster_steps(self.grid_spacing, tail, head, sigma, charge, nsigma=self.nsigma)
+
         return Block(location = offsets, data=rasters)
 
 
