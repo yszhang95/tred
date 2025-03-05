@@ -5,8 +5,10 @@ import torch
 import logging
 import tred.graph as tg
 
+logger = logging.getLogger('tred/tests/effq/test_raster_steps.py')
+
 def test_compute_qeff_raster_steps(level=None):
-    local_logger = logging.getLogger('test_eval_qeff_raster_steps')
+    local_logger = logger.getChild('test_eval_qeff_raster_steps')
     if level:
         local_logger.setLevel(level)
 
@@ -26,10 +28,35 @@ def test_compute_qeff_raster_steps(level=None):
     assert q_sum > 0, "Raster steps computed integral should be positive"
     assert np.isclose(q_sum, qint, rtol=1E-5), f'Raster steps computed integral does not match predefined value {qint}.'
 
+def test_transform(level=None):
+    local_logger = logger.getChild('test_transform')
+    if level:
+        local_logger.setLevel(level)
+    local_logger.debug('Testing transform by predefined values')
+
+    points = torch.tensor([3,4,5]).view(1,3)
+    time = torch.tensor([2])
+    pdims = (1, 2)
+    tdim = 1
+    raster = tg.Raster(velocity=0.16, grid_spacing=(1,1,1), pdims=pdims, tdim=tdim, nsigma=3.0)
+    p = raster._transform(points, time)
+    assert p.equal( torch.tensor([4, 2, 5]).view(1,3) ),  f'points after transformation is {p}.'
+
+    points = torch.tensor([3,4,5]).view(1,3)
+    time = torch.tensor([2])
+    pdims = (0, 2)
+    tdim = 1
+    raster = tg.Raster(velocity=0.16, grid_spacing=(1,1,1), pdims=pdims, tdim=tdim, nsigma=3.0)
+    p = raster._transform(points, time)
+    assert p.equal(torch.tensor([3, 2, 5]).view(1,3)), f'points after transformation is {p}.'
+
+
 def main():
     print('-------- test_compute_qeff ---------')
     test_compute_qeff_raster_steps()
 
+    print('-------- test_transform ---------')
+    test_transform()
 
 if __name__ == '__main__':
     try:

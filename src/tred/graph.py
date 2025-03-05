@@ -118,7 +118,9 @@ class Raster(nn.Module):
     def __init__(self, velocity, grid_spacing, pdims=(1,2), tdim=-1, nsigma=3.0):
         '''
         - pdims :: the N-1 dimensions for transverse pitch indexing into input points.
+                   They are axes in the original tensor.
         - tdim :: the 1 dimension for time/drift.
+                  This is the target axis of the new tensor to be processed.
         '''
         super().__init__()
 
@@ -136,20 +138,21 @@ class Raster(nn.Module):
     def _transform(self, point, time):
         if point is None:
             return point
-        nbatch = point.shape[0]
+
         ndims = len(self._pdims) + 1
-        new_point = torch.zeros((nbatch, ndims), device=point.device)
         if self._pdims:
-            for ind, pdim in enumerate(self._pdims):
-                new_point[:,ind] = point[:,pdim]
+            old_tdim = (set(range(ndims)) - set(self._pdims)).pop()
+            axes = list(iter(self._pdims))
+            axes.insert(self._tdim, old_tdim)
+            point = point[:, axes]
 
         # FIXME: This is a bug! We need to set tail/head time dimension slightly
         # differently to preserve the step "angle" in the pitch-vs-time
         # dimensions.
-        new_point[:,self._tdim] = time
+        point[:,self._tdim] = time
 
-        return new_point
-        
+        return point
+
     def forward(self, sigma, time, charge, tail, head=None):
         '''
         Raster the input depos, return block.
@@ -247,4 +250,3 @@ class Sim(nn.Module):
     def forward(self, response, time, charge, tail, head=None):
         signal = self.charge(time, charge, tail, head)
         return self.current(signal, response)
-    
