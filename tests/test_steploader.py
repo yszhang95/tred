@@ -72,8 +72,8 @@ def plot_segments(fpath):
 
 def test_special_numbers():
     data = [
-        (1, 2, 1,1,1,2,4,9, 1, 1),
-        (1, 1, 2,4,9,2,4,10, 1, 2)
+        (1, 2, 1,1,1,2,4,9, 1, 1, 20, 0),
+        (1, 1, 2,4,9,2,4,10, 1, 2, 20, 1)
     ]
 
     X0X1 = np.array(data)[:,2:8].astype(np.float32)
@@ -86,11 +86,17 @@ def test_special_numbers():
     pdg_id = torch.tensor(pdg_id)
     event_id = np.array(data)[:,9].astype(np.int32)
     event_id = torch.tensor(event_id)
+    t0_start = np.array(data)[:,10].astype(np.float64)
+    t0_start = torch.tensor(t0_start)
+    vertex_id = np.array(data)[:,11].astype(np.int32)
+    vertex_id = torch.tensor(vertex_id)
+    dummy = torch.empty((len(t0_start),0), dtype=torch.float64)
 
     dtype = np.dtype([('dE', 'f4'), ('dEdx', 'f4'), ('x_start', 'f4'),
                       ('y_start', 'f4'), ('z_start', 'f4'), ('x_end', 'f4'),
                       ('y_end', 'f4'), ('z_end', 'f4'),
-                      ('pdg_id', 'i4'), ('event_id', 'i4')])
+                      ('pdg_id', 'i4'), ('event_id', 'i4'), ('t0_start', 'f8'),
+                      ('vertex_id', 'i4')])
 
     data = np.array(data, dtype=dtype)
 
@@ -102,22 +108,24 @@ def test_special_numbers():
     print('Test _equal_div')
     Ns = (torch.linalg.norm(X0X1[:,:3]-X0X1[:,3:], dim=1)//step_limit)\
         .to(torch.int32) + 1
-    X0X1_, dE_, dEdx_, intids_ = (
-        _equal_div_script(X0X1, dE, dEdx,
-                          torch.stack([pdg_id, event_id], dim=1).view(-1, 2),
+    X0X1_, dE_, dEdx_, dummy_, ts_, intids_ = (
+        _equal_div_script(X0X1, dE, dEdx, dummy, t0_start,
+                          torch.cat([event_id[...,None], vertex_id[...,None], pdg_id[...,None]], dim=-1),
                           Ns)
     )
 
     print('Test _batch_equal_div')
-    _X0X1, _dE, _dEdx, _intids = (
-        StepLoader._batch_equal_div(X0X1, dE, dEdx,
-                                    torch.stack([pdg_id, event_id], dim=1).view(-1, 2),
+    _X0X1, _dE, _dEdx, _dummy, _ts, _intids = (
+        StepLoader._batch_equal_div(X0X1, dE, dEdx, dummy, t0_start,
+                                    torch.cat([event_id[...,None], vertex_id[...,None], pdg_id[...,None]], dim=-1),
                                     step_limit, mem_limit=1/1024/1024,
                                     fn=_equal_div_script)
     )
     assert X0X1_.allclose(_X0X1)
     assert dE_.allclose(_dE)
     assert dEdx_.allclose(_dEdx)
+    assert ts_.allclose(_ts)
+    assert dummy_.allclose(_dummy)
     assert intids_.allclose(_intids)
 
     data = StepLoader(data, step_limit=step_limit, transform=steps_from_ndh5)
@@ -128,14 +136,15 @@ def test_special_numbers():
         dL =torch.linalg.norm(X0-X1)
         dE = data[i][0][0]
         dEdx = data[i][0][1]
-        intids = data[i][1]
-        print(data[i], dL)
+        ts = data[i][1]
+        intids = data[i][2]
         assert dL < step_limit
         assert X0.allclose(X0X1_[i,:3])
         assert X1.allclose(X0X1_[i,3:])
         assert dE.allclose(dE_[i])
         assert dEdx.allclose(dEdx_[i])
-        assert intids.allclose(intids_[i])
+        assert ts.allclose(ts_[i])
+        assert intids.equal(intids_[i])
         if i>0:
             assert data[i][0][2:5].allclose(data[i-1][0][5:8])
 
@@ -154,7 +163,7 @@ def test_nb():
             total_size = np.sum(Ns)
             extf_dim = 1 # hard code
             intf_dim = 1 # hard code
-            inti_dim = 2 # hard code
+            inti_dim = 3 # hard code
 
             # Preallocate a single output array
             x0x1_ = np.empty((total_size, 6), dtype=np.float32)
@@ -184,7 +193,7 @@ def test_nb():
                                     for n in ['dE', 'dEdx', 'x_start', 'y_start',
                                               'z_start', 'x_end', 'y_end', 'z_end']], axis=1).reshape(len(segments), -1)
         data['int32'] = np.stack([segments[n]
-                                     for n in ['pdg_id', 'event_id']], axis=1)
+                                     for n in ['event_id', 'vertex_id', 'pdg_id']], axis=1)
         X0X1 = data['float32'][:,2:8]
         dE = data['float32'][:,0]
         dEdx = data['float32'][:,1]
@@ -216,12 +225,15 @@ def test_perf():
     data['float32'] = torch.stack([torch.tensor(segments[n], requires_grad=False)
                                    for n in ['dE', 'dEdx', 'x_start', 'y_start',
                                              'z_start', 'x_end', 'y_end', 'z_end']], dim=1)
+    data['float64'] = torch.tensor(segments['t0_start'])
     data['int32'] = torch.stack([torch.tensor(segments[n], dtype=torch.int32,
                                               requires_grad=False)
-                                 for n in ['pdg_id', 'event_id']], dim=1)
+                                 for n in ['event_id', 'vertex_id', 'pdg_id']], dim=1)
     X0X1 = data['float32'][:,2:8]
     dE = data['float32'][:,0]
     dEdx = data['float32'][:,1]
+    ExtensiveDouble = torch.empty((len(dE),0), dtype=torch.float64, requires_grad=False)
+    IntensiveDouble = data['float64']
     IntensiveInt = data['int32']
     step_limit = 1
     mem_limit = 5*1024 # MB
@@ -230,7 +242,7 @@ def test_perf():
     start = torch.cuda.Event(enable_timing=True)
     end = torch.cuda.Event(enable_timing=True)
     start.record()
-    StepLoader._batch_equal_div(X0X1, dE, dEdx, IntensiveInt,
+    StepLoader._batch_equal_div(X0X1, dE, dEdx, ExtensiveDouble, IntensiveDouble, IntensiveInt,
                                     step_limit, mem_limit, device='cuda',
                                 fn=_equal_div_script)
     torch.cuda.synchronize()
@@ -246,11 +258,11 @@ def test_perf():
     mem_limit = 5*1024 # MB
     print('Warm up on CPU-GPU-CPU')
     for i in range(5):
-        StepLoader._batch_equal_div(X0X1, dE, dEdx, IntensiveInt,
+        StepLoader._batch_equal_div(X0X1, dE, dEdx, ExtensiveDouble, IntensiveDouble, IntensiveInt,
                                     step_limit, mem_limit, device='cuda',
                                     fn=_equal_div_script)
     start = time.time()
-    StepLoader._batch_equal_div(X0X1, dE, dEdx, IntensiveInt,
+    StepLoader._batch_equal_div(X0X1, dE, dEdx, ExtensiveDouble, IntensiveDouble, IntensiveInt,
                                 step_limit, mem_limit, device='cuda',
                                 fn=_equal_div_script)
     end = time.time()
@@ -263,16 +275,18 @@ def test_perf():
 
     dE = dE.to('cuda:0')
     dEdx = dEdx.to('cuda:0')
+    ExtensiveDouble = ExtensiveDouble.to('cuda:0')
+    IntensiveDouble = IntensiveDouble.to('cuda:0')
     IntensiveInt = IntensiveInt.to('cuda:0')
     mem_limit = 5*1024 # MB
     print('Warm up on GPU')
     for i in range(5):
-        StepLoader._batch_equal_div(X0X1, dE, dEdx, IntensiveInt,
+        StepLoader._batch_equal_div(X0X1, dE, dEdx, ExtensiveDouble, IntensiveDouble, IntensiveInt,
                                     step_limit, mem_limit, device='cuda',
                                     fn=_equal_div_script)
     torch.cuda.synchronize()
     start = time.time()
-    X0X1new, _, _, _ = StepLoader._batch_equal_div(X0X1, dE, dEdx, IntensiveInt,
+    X0X1new, _, _, _, _, _ = StepLoader._batch_equal_div(X0X1, dE, dEdx, ExtensiveDouble, IntensiveDouble, IntensiveInt,
                                                    step_limit, mem_limit, device='cuda',
                                                    fn = _equal_div_script)
     torch.cuda.synchronize()
@@ -287,6 +301,16 @@ def test_perf():
     print('Elapsed', (end-start)*1000, 'ms for X0X1cpu transfering from C to G to C')
     print('Correction factor', len(X0X1new)/len(X0X1))
 
+
+    torch.cuda.synchronize()
+    ExtensiveDouble = ExtensiveDouble.to('cpu')
+    IntensiveDouble = IntensiveDouble.to('cpu')
+    start = time.time()
+    ExtensiveDouble.to('cuda').to('cpu')
+    IntensiveDouble.to('cuda').to('cpu')
+    torch.cuda.synchronize()
+    end = time.time()
+    print('Elapsed', (end-start)*1000, 'ms for float64 transfering from C to G to C')
 
 if __name__ == '__main__':
     test_special_numbers()
