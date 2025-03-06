@@ -45,7 +45,7 @@ def diffuse(dt, diffusion, sigma=None):
     '''
     squeeze = False
 
-    # eg, diffusion is 5, [5] or [4,5,6]
+    # eg, diffusion is 5; it cannot be a list/tuple
     if not isinstance(diffusion, torch.Tensor):
         diffusion = torch.tensor([diffusion], device=dt.device)
         squeeze = True
@@ -105,6 +105,11 @@ def drift(locs, velocity, diffusion, lifetime, target=0,
 
       (locs, times, sigma, charges)
 
+    - locs :: 1D (npts, ) or 2D (npts, vdim) tensor of the updated locs. The original locs is kept except along vaxis. locs along vaxis is updated to target.
+    - times :: tensor with the same shape as locs's. It is initial time (the argument times) + dt (from transport).
+    - sigma :: real 1D (npts,) or 2D (npts, vdim) tensors by adding the initial sigma and diffusion width in quadrature.
+    - charges :: quenched charges by function absorb.
+
     Required arguments:
 
     - locs :: 1D (npts,) or 2D (npts,vdim) tensor of initial locations.
@@ -148,7 +153,7 @@ def drift(locs, velocity, diffusion, lifetime, target=0,
     else:
         times = times + dt
 
-    debug(f'dt:{tenstr(dt)} diffusion:{tenstr(diffusion)}')
+    debug(f'dt:{tenstr(dt)} diffusion:{tenstr(diffusion) if isinstance(diffusion, torch.Tensor) else diffusion}')
     sigma = diffuse(dt, diffusion=diffusion, sigma=sigma)
 
     default_charge = 1000
