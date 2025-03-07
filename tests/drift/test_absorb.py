@@ -158,6 +158,7 @@ def plot_charge_distributions():
     # Compute error (vertical range) for the theory curve
     error_curve = torch.full((len(dt_curve),), initial_charge2[0].item()) * \
                   torch.exp(-dt_curve/lifetime) * (1 - torch.exp(-dt_curve/lifetime))
+    error_curve = np.sqrt(error_curve)
 
     # Plot negative dt part of theory curve
     ax2.plot(neg_dt_curve.numpy(), neg_the_curve.numpy(), 'k-', linewidth=2)
