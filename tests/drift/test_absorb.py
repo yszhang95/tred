@@ -48,6 +48,7 @@ def test_absorb_negative_dt():
     charge = torch.tensor([100, 200])
     lifetime = 1.0
     expected = charge * torch.exp(- dt / lifetime)  # note: - dt is positive here
+    expected[dt<0] = charge[dt<0].to(torch.float32)
     result = absorb(charge, dt, lifetime, fluctuate=False)
     assert torch.allclose(result, expected), f"Expected {expected}, got {result}"
 
@@ -163,16 +164,16 @@ def plot_charge_distributions():
     # Plot negative dt part of theory curve
     ax2.plot(neg_dt_curve.numpy(), neg_the_curve.numpy(), 'k-', linewidth=2)
     # Plot positive dt theory curve and shaded uncertainty
-    ax2.plot(dt_curve.numpy(), theory_curve.numpy(), 'k-', linewidth=2, label='Theory: N₀ exp(-dt/lifetime)')
+    ax2.plot(dt_curve.numpy(), theory_curve.numpy(), 'k-', linewidth=2, label='ExpoDist: N₀ exp(-dt/lifetime)')
     ax2.fill_between(dt_curve.numpy(),
                      (theory_curve - error_curve).numpy(),
                      (theory_curve + error_curve).numpy(),
-                     color='gray', alpha=0.3, label='Theory ± expected binomial variance')
+                     color='gray', alpha=0.3, label='ExpoDist ± expected binomial variance')
     # Plot deterministic and stochastic points
     ax2.plot(dt_values_line.numpy(), deterministic_points.numpy(), 'bo', label='Fluctuate=False')
     ax2.plot(neg_dt_values.numpy(), neg_det_points.numpy(), 'bo')
-    ax2.plot(dt_values_line.numpy(), stochastic_points.numpy(), 'ro', label='Fluctuate=True')
-    ax2.plot(neg_dt_values.numpy(), neg_sto_points.numpy(), 'ro')
+    ax2.plot(dt_values_line.numpy(), stochastic_points.numpy(), 'r*', label='Fluctuate=True')
+    ax2.plot(neg_dt_values.numpy(), neg_sto_points.numpy(), 'r*')
 
     ax2.text(0.65, 0.5, f'initial charge {initial_charge2[0].item()}; lifetime {lifetime}',
              transform=ax2.transAxes, fontsize=12, color='black')

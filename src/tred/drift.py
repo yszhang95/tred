@@ -90,6 +90,8 @@ def absorb(charge, dt, lifetime, fluctuate=False):
 
     Note, negative dt will lead to exponential increase not decrease.  Ie,
     implies that the drift "backed up" the point.
+    This is unphysical. The surviving electrons (charge) remain the same when dt is negative.
+    No negative binomial fluctuations or any factor from the exponential distribution is applied.
     '''
     charge = charge.to(dtype=torch.int32)
     if fluctuate:
@@ -97,8 +99,7 @@ def absorb(charge, dt, lifetime, fluctuate=False):
         loss = torch.clamp(loss, 0, 1, out=loss)
         b = Binomial(charge, loss)
         return charge - b.sample()
-
-    return charge * torch.exp(-dt / lifetime)
+    return torch.where(dt>=0, charge * torch.exp(-dt / lifetime), charge)
 
 
 def drift(locs, velocity, diffusion, lifetime, target=0,
