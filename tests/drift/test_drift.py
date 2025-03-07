@@ -1,6 +1,6 @@
 import torch
 import pytest
-from tred.drift import drift
+from tred.drift import drift, transport
 
 def test_drift_input_validation():
     """Ensure drift function properly handles incorrect input types and shapes."""
@@ -130,6 +130,97 @@ def test_drift_multiple_dimensions(velocity,lifetime,target,vaxis):
     assert times_out.shape == (2,), "Times should match the number of points"
     assert sigma_out.shape == (2, 2), "Sigma should have correct shape, expected npt, vdim = {locs.shape}"
     assert charge_out.shape == (2,), "Charge should match the number of points"
+
+# Test tshift corrections with various data formats.
+@pytest.mark.parametrize("locs, times, velocity, target, tshift, expected", [
+    # Provided times, scalar tshift.
+    (torch.tensor([1.0, 3.0]), torch.tensor([0.5, 1.0]), 2.0, 5.0, 0.2,
+     torch.tensor([0.5, 1.0]) + transport(torch.tensor([1.0, 3.0]), 5.0, 2.0) - 0.2),
+    # No initial times, scalar tshift.
+    (torch.tensor([1.0, 3.0]), None, 2.0, 5.0, 0.2,
+     transport(torch.tensor([1.0, 3.0]), 5.0, 2.0) - 0.2),
+    # No initial times, 0D tensor tshift.
+    (torch.tensor([1.0, 3.0]), None, 2.0, 5.0, torch.tensor(0.2),
+     transport(torch.tensor([1.0, 3.0]), 5.0, 2.0) - 0.2),
+])
+def test_tshift_correction(locs, times, velocity, target, tshift, expected):
+    diffusion = 0.1
+    lifetime = 10.0
+    _, times_out, _, _ = drift(locs, velocity, diffusion, lifetime, target=target, times=times, tshift=tshift)
+    assert torch.allclose(times_out, expected), f"Expected times {expected}, got {times_out}"
+
+@pytest.mark.parametrize("locs, times, velocity, target, tshift, expected", [
+    # Provided times, scalar tshift.
+    (torch.tensor([1.0, 3.0]), torch.tensor([0.5, 1.0]), 2.0, 5.0, 0.2,
+     torch.tensor([0.5, 1.0]) + transport(torch.tensor([1.0, 3.0]), 5.0, 2.0) - 0.2),
+    # No initial times, scalar tshift.
+    (torch.tensor([1.0, 3.0]), None, 2.0, 5.0, 0.2,
+     transport(torch.tensor([1.0, 3.0]), 5.0, 2.0) - 0.2),
+    # No initial times, 0D tensor tshift.
+    (torch.tensor([1.0, 3.0]), None, 2.0, 5.0, torch.tensor(0.2),
+     transport(torch.tensor([1.0, 3.0]), 5.0, 2.0) - 0.2),
+])
+def test_tshift_interference(locs, times, velocity, target, tshift, expected):
+    diffusion = 0.1
+    lifetime = 10.0
+    o00, _, o02, o03 = drift(locs, velocity, diffusion, lifetime, target=target, times=times, tshift=tshift)
+    o10, _, o12, o13 = drift(locs, velocity, diffusion, lifetime, target=target, times=times, tshift=None)
+    assert o00.allclose(o10) and o02.allclose(o12) and o03.allclose(o03)
+
+# Test drtoa corrections with various data formats.
+@pytest.mark.parametrize("locs, times, velocity, target, drtoa, expected", [
+    # Provided times, scalar drtoa.
+    (torch.tensor([1.0, 3.0]), torch.tensor([0.5, 1.0]), 2.0, 5.0, 4.0,
+     torch.tensor([0.5, 1.0]) + transport(torch.tensor([1.0, 3.0]), 5.0, 2.0) - (4.0 / 2.0)),
+    # Provided times, 0D tensor drtoa.
+    (torch.tensor([1.0, 3.0]), torch.tensor([0.5, 1.0]), 2.0, 5.0, torch.tensor(4.0),
+     torch.tensor([0.5, 1.0]) + transport(torch.tensor([1.0, 3.0]), 5.0, 2.0) - (torch.tensor(4.0) / 2.0)),
+    # No initial times, scalar drtoa.
+    (torch.tensor([1.0, 3.0]), None, 2.0, 5.0, 4.0,
+     transport(torch.tensor([1.0, 3.0]), 5.0, 2.0) - (4.0 / 2.0)),
+    # No initial times, 0D tensor drtoa.
+    (torch.tensor([1.0, 3.0]), None, 2.0, 5.0, torch.tensor(4.0),
+     transport(torch.tensor([1.0, 3.0]), 5.0, 2.0) - (torch.tensor(4.0) / 2.0)),
+])
+def test_drtoa_correction(locs, times, velocity, target, drtoa, expected):
+    diffusion = 0.1
+    lifetime = 10.0
+    _, times_out, _, _ = drift(locs, velocity, diffusion, lifetime, target=target, times=times, drtoa=drtoa)
+    assert torch.allclose(times_out, expected), f"Expected times {expected}, got {times_out}"
+
+@pytest.mark.parametrize("locs, times, velocity, target, drtoa, expected", [
+    # Provided times, scalar drtoa.
+    (torch.tensor([1.0, 3.0]), torch.tensor([0.5, 1.0]), 2.0, 5.0, 4.0,
+     torch.tensor([0.5, 1.0]) + transport(torch.tensor([1.0, 3.0]), 5.0, 2.0) - (4.0 / 2.0)),
+    # Provided times, 0D tensor drtoa.
+    (torch.tensor([1.0, 3.0]), torch.tensor([0.5, 1.0]), 2.0, 5.0, torch.tensor(4.0),
+     torch.tensor([0.5, 1.0]) + transport(torch.tensor([1.0, 3.0]), 5.0, 2.0) - (torch.tensor(4.0) / 2.0)),
+    # No initial times, scalar drtoa.
+    (torch.tensor([1.0, 3.0]), None, 2.0, 5.0, 4.0,
+     transport(torch.tensor([1.0, 3.0]), 5.0, 2.0) - (4.0 / 2.0)),
+    # No initial times, 0D tensor drtoa.
+    (torch.tensor([1.0, 3.0]), None, 2.0, 5.0, torch.tensor(4.0),
+     transport(torch.tensor([1.0, 3.0]), 5.0, 2.0) - (torch.tensor(4.0) / 2.0)),
+])
+def test_drtoa_interference(locs, times, velocity, target, drtoa, expected):
+    diffusion = 0.1
+    lifetime = 10.0
+    o00, _, o02, o03 = drift(locs, velocity, diffusion, lifetime, target=target, times=times, drtoa=drtoa)
+    o10, _, o12, o13 = drift(locs, velocity, diffusion, lifetime, target=target, times=times, drtoa=None)
+    assert o00.allclose(o10) and o02.allclose(o12) and o03.allclose(o03)
+
+# Test that tshift and drtoa are mutually exclusive.
+def test_mutually_exclusive_tshift_and_drtoa():
+    locs = torch.tensor([1.0, 3.0])
+    velocity = 2.0
+    diffusion = 0.1
+    lifetime = 10.0
+    target = 5.0
+    times = torch.tensor([0.5, 1.0])
+    tshift = 0.2
+    drtoa = 4.0
+    with pytest.raises(ValueError):
+        drift(locs, velocity, diffusion, lifetime, target=target, times=times, tshift=tshift, drtoa=drtoa)
 
 if __name__ == "__main__":
     pytest.main([__file__])

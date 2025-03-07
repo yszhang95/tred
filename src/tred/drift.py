@@ -103,7 +103,8 @@ def absorb(charge, dt, lifetime, fluctuate=False):
 
 
 def drift(locs, velocity, diffusion, lifetime, target=0,
-          times=None, vaxis=0, charge=None, sigma=None, fluctuate=False):
+          times=None, vaxis=0, charge=None, sigma=None, fluctuate=False,
+          tshift=None, drtoa=None):
     '''
     Apply drift models.
 
@@ -111,10 +112,16 @@ def drift(locs, velocity, diffusion, lifetime, target=0,
 
       (locs, times, sigma, charges)
 
-    - locs :: 1D (npts, ) or 2D (npts, vdim) tensor of the updated locs. The original locs is kept except along vaxis. locs along vaxis is updated to target.
-    - times :: tensor with the same shape as locs's. It is initial time (the argument times) + dt (from transport).
+    - locs :: 1D (npts, ) or 2D (npts, vdim) tensor of the updated locs. The original locs is kept except along vaxis.
+              locs along vaxis is updated to target.
+    - times :: tensor with the same shape as locs's. It is
+               initial time (the argument times) + dt (from transport) - tshift (given
+               or from drtoa/velocity, drtoa = loc_anode - loc_respone).
     - sigma :: real 1D (npts,) or 2D (npts, vdim) tensors by adding the initial sigma and diffusion width in quadrature.
     - charges :: quenched charges by function absorb.
+
+    Note: sigma, charges, locs are post-drift quantities at anode planes. The value of times depends on the potential
+          shifts from tshift or drtoa, may not be time when survivial electrons arrive at anodes.
 
     Required arguments:
 
@@ -125,13 +132,21 @@ def drift(locs, velocity, diffusion, lifetime, target=0,
 
     Optional arguments:
 
-    - target :: real scalar, location on vaxis to cease drift.  Default is 0.
+    - target :: real scalar, location on vaxis to cease drift, i.e., anode plane.  Default is 0.
     - times :: 1D (npts,) tensor of initial times.  Default is zeros.
     - vaxis :: int scalar.  The vector-axis on which to drift.  Default is 0.
     - charge :: real scalar or 1D (npts,) initial charge.  Default is 1000 electrons.
     - sigma :: real 1D (npts,) or 2D (npts,vdim) tensor giving initial sigma.  Default is none.
     - fluctuate :: bool apply random fluctuation to charge.  Default is False.
+    - tshift :: real scalar (number or 0D tensor), to correct for drift time from response plane to anode.
+    - drtoa :: real scalar (number or 0D tensor). The displacement along drift direction from response plane
+               to anode plane, loc_anode - loc_response. It is mutually exclusive with tshift. Default to None.
+
+    FIXME: units of drtoa must be consistent with locs.
     '''
+    if tshift is not None and drtoa is not None:
+        raise ValueError('tshift and drtoa are mutually exclusive arguments.')
+
     locs = locs.detach().clone()
     squeeze = False
     if len(locs.shape) == 1:
@@ -158,6 +173,11 @@ def drift(locs, velocity, diffusion, lifetime, target=0,
         times = dt
     else:
         times = times + dt
+
+    if tshift is not None:
+        times = times - tshift
+    if drtoa is not None:
+        times = times - drtoa/velocity
 
     debug(f'dt:{tenstr(dt)} diffusion:{tenstr(diffusion) if isinstance(diffusion, torch.Tensor) else diffusion}')
     sigma = diffuse(dt, diffusion=diffusion, sigma=sigma)
