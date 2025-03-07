@@ -60,8 +60,12 @@ class Drifter(nn.Module):
     def __init__(self, diffusion, lifetime, velocity,
                  target=0, vaxis=0, fluctuate=False):
         '''
+        diffusion :: diffusion coefficients, real scalar (number or 0D tensor), or 1D tensor, or plain list/tuple.
+                     The 1D tensor or plain list/tuple must be a sequence of numbers in a size of (vdim,)
         velocity is signed scalar
         vaxis is the axis on which the velocity is defined. default=0 (x)
+
+        All parameters will be set to a constant tensor in the class instance.
         '''
         super().__init__()
         if target is None:

@@ -18,23 +18,29 @@ def test_drift_input_validation():
     with pytest.raises(ValueError):
         drift(locs, velocity, diffusion, lifetime, sigma=torch.tensor([[0.1]]))  # Mismatched sigma shape
 
-def test_drift_locs_update():
+    with pytest.raises(AttributeError):
+        drift(locs, velocity, diffusion.tolist(), lifetime, sigma=torch.tensor([[0.1]]))  # Incorrect diffusion
+
+@pytest.mark.parametrize("velocity,lifetime,target,vaxis", [
+    (1.0, 10.0, 5.0, 1),
+    (torch.tensor(1.0), torch.tensor(10.0), torch.tensor(5.0), torch.tensor(1)),
+])
+def test_drift_locs_update(velocity,lifetime,target,vaxis):
     """Check if locs are updated correctly along vaxis."""
     locs = torch.tensor([[1.0, 2.0], [3.0, 4.0]])
-    velocity = 1.0
     diffusion = torch.tensor([0.1, 0.2])
-    lifetime = 10.0
-    vaxis = 1
-    target = 5.0
 
     locs_out, _, _, _ = drift(locs, velocity, diffusion, lifetime, target=target, vaxis=vaxis)
     assert torch.allclose(locs_out[:, vaxis], torch.full((len(locs),), target)), "locs[vaxis] should be set to target"
     assert torch.allclose(locs_out[:, 0], locs[:, 0]), "Other loc dimensions should remain unchanged"
 
-def test_drift_times_update():
+@pytest.mark.parametrize("velocity,lifetime,target,vaxis", [
+    (2.0, 10.0, 5.0, 0),
+    (torch.tensor(2.0), torch.tensor(10.0), torch.tensor(5.0), torch.tensor(0)),
+])
+def test_drift_times_update(velocity,lifetime,target,vaxis):
     """Check if times are updated correctly."""
     locs = torch.tensor([1.0, 3.0])
-    velocity = 2.0
     diffusion = 0.1
     lifetime = 10.0
     target = 5.0
@@ -44,13 +50,14 @@ def test_drift_times_update():
     _, times_out, _, _ = drift(locs, velocity, diffusion, lifetime, target=target, times=times)
     assert torch.allclose(times_out, times + dt), "Times should be incremented by dt"
 
-def test_neg_drift_velocity():
+@pytest.mark.parametrize("velocity,lifetime,target,vaxis", [
+    (-2.0, 10.0, 5.0, 0),
+    (torch.tensor(-2.0), torch.tensor(10.0), torch.tensor(5.0), torch.tensor(0)),
+])
+def test_neg_drift_velocity(velocity,lifetime,target,vaxis):
     '''Check if sigmas are 0, dt < 0 when velocity is negative and target - loc > 0'''
     locs = torch.tensor([1.0, 3.0])
-    velocity = -2.0
     diffusion = 0.1
-    lifetime = 10.0 # dummy values
-    target = 5.0
     _, times_out, sigma_out, _ = drift(locs, velocity, diffusion, lifetime, target=target)
     assert torch.all(times_out<0), f'Output times, i.e., dt, {times_out} should be negative.'
     assert torch.allclose(sigma_out, torch.tensor(0.), atol=1E-6), f'Output sigma, {sigma_out}, should be 0 when dt is negative.'
@@ -105,7 +112,11 @@ def test_drift_single_dimension():
     assert len(locs.shape) == 1, f'Shape of locs should be preserved after squeezing.'
     assert locs.allclose(torch.full((len(locs),), target)), f'locs should be updated to target'
 
-def test_drift_multiple_dimensions():
+@pytest.mark.parametrize("velocity,lifetime,target,vaxis", [
+    (1.0, 10.0, 5.0, 1),
+    (torch.tensor(1.0), torch.tensor(10.0), torch.tensor(5.0), torch.tensor(1)),
+])
+def test_drift_multiple_dimensions(velocity,lifetime,target,vaxis):
     """Ensure function handles multi-dimensional locs correctly."""
     locs = torch.tensor([[1.0, 2.0], [3.0, 4.0]])
     velocity = 1.0
