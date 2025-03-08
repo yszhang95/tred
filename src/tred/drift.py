@@ -140,8 +140,11 @@ def drift(locs, velocity, diffusion, lifetime, target=0,
     - sigma :: real 1D (npts,) or 2D (npts,vdim) tensor giving initial sigma.  Default is none.
     - fluctuate :: bool apply random fluctuation to charge.  Default is False.
     - tshift :: real positive scalar (number or 0D tensor), to correct for drift time from response plane to anode.
+                Note: users must be responsible for the correct shift in use.
     - drtoa :: real positive scalar (number or 0D tensor). The distance along drift direction from response plane
                to anode plane, abs(loc_anode - loc_response). It is mutually exclusive with tshift. Default to None.
+               Note: users must be responsible for the consistency between drift velocity in TRED
+               and in field response calculations.
 
     FIXME: units of drtoa must be consistent with locs.
     '''
