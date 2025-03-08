@@ -88,12 +88,12 @@ def test_drift_sigma_consistency():
 
 def test_drift_charge_quenching():
     """Ensure charges decrease over time for dt > 0 and are of float type."""
-    locs = torch.tensor([1.0, 3.0])
+    locs = torch.tensor([1.0, 3.0, 7.0])
     velocity = 2.0
     diffusion = 0.1
     lifetime = 10.0
     target = 5.0
-    charge = torch.tensor([100, 200])
+    charge = torch.tensor([100, 200, 200])
 
     _, _, _, charge_out = drift(locs, velocity, diffusion, lifetime, target=target, charge=charge)
     assert torch.all(charge_out <= charge), "Charge should not increase"

@@ -58,7 +58,8 @@ class Drifter(nn.Module):
     Drift charge along one of N-dimensions.
     '''
     def __init__(self, diffusion, lifetime, velocity,
-                 target=0, vaxis=0, fluctuate=False):
+                 target=0, vaxis=0, fluctuate=False,
+                 tshift=None, drtoa=None):
         '''
         diffusion :: diffusion coefficients, real scalar (number or 0D tensor), or 1D tensor, or plain list/tuple.
                      The 1D tensor or plain list/tuple must be a sequence of numbers in a size of (vdim,)
@@ -76,6 +77,8 @@ class Drifter(nn.Module):
             raise ValueError('a lifetime value is required (units [time])')
         if velocity is None:
             raise ValueError('a velocity value is required (units [distance]/[time])')
+        if tshift is not None and drtoa is not None:
+            raise ValueError('tshift and drtoa are mutually exclusive arguments.')
 
         constant(self, 'target', target)
         constant(self, 'diffusion', diffusion)
@@ -83,6 +86,14 @@ class Drifter(nn.Module):
         constant(self, 'velocity', velocity)
         constant(self, 'vaxis', vaxis, index_dtype)
         constant(self, 'fluctuate', fluctuate, bool)
+        if tshift is not None:
+            constant(self, 'tshift', tshift)
+        else:
+            self.tshift = None
+        if drtoa is not None:
+            constant(self, 'drtoa', drtoa)
+        else:
+            self.drtoa = None
 
     def forward(self, time, charge, tail, head=None):
         '''
@@ -98,7 +109,8 @@ class Drifter(nn.Module):
                                              lifetime=self.lifetime,
                                              target=self.target, times=time,
                                              vaxis=self.vaxis, charge=charge,
-                                             fluctuate=self.fluctuate)
+                                              fluctuate=self.fluctuate,
+                                              tshift=self.tshift, drtoa=self.drtoa)
         if head is None:
             return (dsigma, dtime, dcharge, dtail)
         dhead = head + (dtail - tail)

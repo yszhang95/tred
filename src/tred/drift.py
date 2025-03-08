@@ -11,7 +11,7 @@ Eg: (npts=5,vdim=3) is 5 points in 3-space.
 
 '''
 
-from .util import debug, tenstr
+from .util import debug, tenstr, to_tensor
 
 import torch
 from torch.distributions.binomial import Binomial
@@ -116,12 +116,13 @@ def drift(locs, velocity, diffusion, lifetime, target=0,
               locs along vaxis is updated to target.
     - times :: tensor with the same shape as locs's. It is
                initial time (the argument times) + dt (from transport) - tshift (given
-               or from drtoa/velocity, drtoa = loc_anode - loc_respone).
+               or from abs(drtoa/velocity), drtoa = abs(loc_anode - loc_respone)).
     - sigma :: real 1D (npts,) or 2D (npts, vdim) tensors by adding the initial sigma and diffusion width in quadrature.
     - charges :: quenched charges by function absorb.
 
     Note: sigma, charges, locs are post-drift quantities at anode planes. The value of times depends on the potential
-          shifts from tshift or drtoa, may not be time when survivial electrons arrive at anodes.
+          shifts from tshift or drtoa, may not be time when survivial electrons arrive at anodes, but the value pulled
+          back to response plane.
 
     Required arguments:
 
@@ -138,9 +139,9 @@ def drift(locs, velocity, diffusion, lifetime, target=0,
     - charge :: real scalar or 1D (npts,) initial charge.  Default is 1000 electrons.
     - sigma :: real 1D (npts,) or 2D (npts,vdim) tensor giving initial sigma.  Default is none.
     - fluctuate :: bool apply random fluctuation to charge.  Default is False.
-    - tshift :: real scalar (number or 0D tensor), to correct for drift time from response plane to anode.
-    - drtoa :: real scalar (number or 0D tensor). The displacement along drift direction from response plane
-               to anode plane, loc_anode - loc_response. It is mutually exclusive with tshift. Default to None.
+    - tshift :: real positive scalar (number or 0D tensor), to correct for drift time from response plane to anode.
+    - drtoa :: real positive scalar (number or 0D tensor). The distance along drift direction from response plane
+               to anode plane, abs(loc_anode - loc_response). It is mutually exclusive with tshift. Default to None.
 
     FIXME: units of drtoa must be consistent with locs.
     '''
@@ -174,17 +175,19 @@ def drift(locs, velocity, diffusion, lifetime, target=0,
     else:
         times = times + dt
 
-    if tshift is not None:
-        times = times - tshift
     if drtoa is not None:
-        times = times - drtoa/velocity
+        tshift = drtoa / velocity
+    if tshift is not None:
+        tshift = tshift if isinstance(tshift, torch.Tensor) else to_tensor(tshift, dtype=torch.float32, device=times.device)
+    if tshift is not None:
+        times = times - torch.abs(tshift)
 
     debug(f'dt:{tenstr(dt)} diffusion:{tenstr(diffusion) if isinstance(diffusion, torch.Tensor) else diffusion}')
     sigma = diffuse(dt, diffusion=diffusion, sigma=sigma)
 
     default_charge = 1000
     if charge is None:
-        charge = torch.zeros(npts, dtype=torch.int32)+default_charge
+        charge = torch.zeros(npts, dtype=torch.int32, device=locs.device)+default_charge
     charges = absorb(charge, dt, lifetime=lifetime, fluctuate=fluctuate)
 
     if squeeze:
