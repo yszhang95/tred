@@ -26,8 +26,11 @@ def test_drifter_init_validation(diffusion, lifetime, velocity, target, expect_e
         d = Drifter(diffusion, lifetime, velocity, target=target)
         assert isinstance(d, Drifter)
 
-
-def test_drifter_forward_no_head():
+@pytest.mark.parametrize("device",[
+    'cpu',
+    'cuda',
+])
+def test_drifter_forward_no_head(device):
     """
     Test Drifter forward pass (no head). Check shapes and basic value correctness.
     """
@@ -39,10 +42,12 @@ def test_drifter_forward_no_head():
     vaxis = 0
     drifter = Drifter(diffusion, lifetime, velocity, target=target, vaxis=vaxis)
 
+    drifter = drifter.to(device)
+
     # Prepare inputs
-    locs = torch.tensor([1.0, 3.0])
-    time = torch.tensor([0.0, 1.0])  # initial times
-    charge = torch.tensor([100.0, 200.0])
+    locs = torch.tensor([1.0, 3.0], device=device)
+    time = torch.tensor([0.0, 1.0], device=device)  # initial times
+    charge = torch.tensor([100.0, 200.0], device=device)
 
     # Run forward
     dsigma, dtime, dcharge, dtail = drifter(time, charge, locs)
@@ -67,7 +72,11 @@ def test_drifter_forward_no_head():
     assert torch.allclose(dcharge, expected_charge), "Charge should follow exponential quenching."
 
 
-def test_drifter_forward_with_head():
+@pytest.mark.parametrize("device",[
+    'cpu',
+    'cuda',
+])
+def test_drifter_forward_with_head(device):
     """
     Test Drifter forward pass when a head location is provided.
     Drifter should then return 5 outputs: (dsigma, dtime, dcharge, dtail, dhead).
@@ -80,11 +89,13 @@ def test_drifter_forward_with_head():
     target = 0.0
     drifter = Drifter(diffusion, lifetime, velocity, target=target, vaxis=1)
 
+    drifter = drifter.to(device)
+
     # Prepare inputs (2D)
-    tail = torch.tensor([[0.0, 1.0], [2.0, 3.0]])
-    head = torch.tensor([[1.0, 2.0], [3.0, 5.0]])
-    time = torch.tensor([0.1, 1.2])
-    charge = torch.tensor([300.0, 400.0])
+    tail = torch.tensor([[0.0, 1.0], [2.0, 3.0]], device=device)
+    head = torch.tensor([[1.0, 2.0], [3.0, 5.0]], device=device)
+    time = torch.tensor([0.1, 1.2], device=device)
+    charge = torch.tensor([300.0, 400.0], device=device)
 
     # Run forward
     outputs = drifter(time, charge, tail, head=head)
@@ -99,7 +110,7 @@ def test_drifter_forward_with_head():
     assert dhead.shape == head.shape, "dhead shape should match head."
 
     # For vaxis=1, we expect tail[:,1] to become target
-    assert torch.allclose(dtail[:, 1], torch.full((2,), target)), (
+    assert torch.allclose(dtail[:, 1], torch.full((2,), target, device=device)), (
         "Drifter should set locs along axis=1 to target"
     )
 
