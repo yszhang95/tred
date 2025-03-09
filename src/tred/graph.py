@@ -100,6 +100,12 @@ class Drifter(nn.Module):
         Drift depos or steps.
 
         Returns tuple one larger than input args with sigma prepended.
+
+        dsigma :: post-drift diffusion width at target plane.
+        dtime :: post-drift time is the time for tail. Shifts may be applied.
+        dcharge :: post-drift charge at target plane.
+        dtail :: post-drift positions of tail.
+        dhead :: post-drift positions of head.
         '''
 
         # note, can in principle, drift with pare-existing sigmas.  But here we

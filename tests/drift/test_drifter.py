@@ -501,6 +501,100 @@ def plot_diffusion_width():
     plt.show()
     plt.savefig('drifter_diffwidth.png')
 
+def plot_drift():
+    """
+    A self-contained test illustrating how to use the Drifter class.
+    We create some mock (tail, head) points, drift them, and make a plot
+    with two panels:
+      - left panel shows (axis1 vs axis0)
+      - right panel shows (axis2 vs axis0).
+    We'll plot tail, head, dtail, dhead, and a vertical line for the target.
+    Per-batch entry, we draw a line connecting tail→head and dtail→dhead.
+    """
+    # ------------------------------------------------------------------
+    # 1) Create some mock data for tail, head.
+    #    Suppose we have npt=4 points in 3D: (x,y,z).
+    # ------------------------------------------------------------------
+    tail = torch.tensor([
+        [0.0,  0.5, 0.0],
+        [1.0, -0.2, 1.0],
+        [2.0,  0.7, 2.5],
+        [3.0, -1.0, 3.0]
+    ], dtype=torch.float32)
+    # Head is just a small offset from tail, for illustration:
+    head = tail - torch.tensor([0.5, 0.2, 0.3])
+
+    # Charge and time can be dummy for demonstration.
+    charge = torch.ones(tail.shape[0])
+    time   = torch.zeros(tail.shape[0])
+
+    # ------------------------------------------------------------------
+    # 2) Create a Drifter instance with some example parameters.
+    #    The drift axis is axis=0 (x-direction), i.e. velocity=1.0 along x.
+    # ------------------------------------------------------------------
+    drifter = Drifter(
+        diffusion=[0.1, 0.1, 0.1],
+        lifetime=100.0,
+        velocity=1.0,
+        target=5.0,  # We'll mark this on the plot
+        vaxis=0,     # drift along axis 0
+        fluctuate=False
+    )
+
+    # ------------------------------------------------------------------
+    # 3) Run the Drifter forward pass to get dtail, dhead.
+    # ------------------------------------------------------------------
+    # The forward returns (dsigma, dtime, dcharge, dtail, dhead) if head is not None:
+    dsigma, dtime, dcharge, dtail, dhead = drifter.forward(time, charge, tail, head)
+
+    # ------------------------------------------------------------------
+    # 4) Make the figure with two panels:
+    #    left panel  => (axis1 vs. axis0)
+    #    right panel => (axis2 vs. axis0)
+    # ------------------------------------------------------------------
+    fig, (ax_left, ax_right) = plt.subplots(1, 2, figsize=(10, 4))
+
+    # Left panel: y = axis1, x = axis0
+    ax_left.scatter(tail[:, 0], tail[:, 1], label='tail')
+    ax_left.scatter(head[:, 0], head[:, 1], label='head')
+    ax_left.scatter(dtail[:, 0], dtail[:, 1], label='dtail')
+    ax_left.scatter(dhead[:, 0], dhead[:, 1], label='dhead')
+    # Vertical line for the target location along x=target
+    ax_left.axvline(drifter.target.item(), linestyle='--', label='target')
+
+    # Connect tail→head and dtail→dhead per batch entry
+    for i in range(tail.shape[0]):
+        ax_left.plot([tail[i, 0], head[i, 0]], [tail[i, 1], head[i, 1]], linewidth=0.5)
+        ax_left.plot([dtail[i, 0], dhead[i, 0]], [dtail[i, 1], dhead[i, 1]], linewidth=0.5)
+
+    ax_left.set_xlabel('axis0 (x)')
+    ax_left.set_ylabel('axis1 (y)')
+    ax_left.legend()
+    ax_left.set_title('Projection on (axis1 vs axis0)')
+    ax_left.grid(True)
+
+    # Right panel: y = axis2, x = axis0
+    ax_right.scatter(tail[:, 0], tail[:, 2], label='tail')
+    ax_right.scatter(head[:, 0], head[:, 2], label='head')
+    ax_right.scatter(dtail[:, 0], dtail[:, 2], label='dtail')
+    ax_right.scatter(dhead[:, 0], dhead[:, 2], label='dhead')
+    ax_right.axvline(drifter.target.item(), linestyle='--', label='target')
+
+    for i in range(tail.shape[0]):
+        ax_right.plot([tail[i, 0], head[i, 0]], [tail[i, 2], head[i, 2]], linewidth=0.5)
+        ax_right.plot([dtail[i, 0], dhead[i, 0]], [dtail[i, 2], dhead[i, 2]], linewidth=0.5)
+
+    ax_right.set_xlabel('axis0 (x)')
+    ax_right.set_ylabel('axis2 (z)')
+    ax_right.legend()
+    ax_right.set_title('Projection on (axis2 vs axis0)')
+    ax_right.grid(True)
+
+    plt.tight_layout()
+    plt.show()
+
+    plt.savefig('drifter_tail_head.png')
+
 
 # If running this module directly, call the plotting function.
 if __name__ == '__main__':
@@ -508,3 +602,4 @@ if __name__ == '__main__':
     plot_drift_time_vs_location()
     plot_charge_vs_location()
     plot_diffusion_width()
+    plot_drift()
