@@ -86,14 +86,19 @@ def test_drifter_forward_with_head(device):
     diffusion = [0.2, 0.2]
     lifetime = 5.0
     velocity = 1.0
-    target = 0.0
-    drifter = Drifter(diffusion, lifetime, velocity, target=target, vaxis=1)
+    target = 5.0
+    vaxis = 1
+    drifter = Drifter(diffusion, lifetime, velocity, target=target, vaxis=vaxis)
 
     drifter = drifter.to(device)
 
     # Prepare inputs (2D)
-    tail = torch.tensor([[0.0, 1.0], [2.0, 3.0]], device=device)
-    head = torch.tensor([[1.0, 2.0], [3.0, 5.0]], device=device)
+    tail = torch.tensor([[0.0, 3.0], [2.0, 3.0]], device=device)
+    head = torch.tensor([[1.0, 1.0], [3.0, 4.0]], device=device) # for vaxis == 1
+
+    tail_reorder = torch.tensor([[0.0, 3.0], [3.0, 4.0]], device=device)
+    head_reorder = torch.tensor([[1.0, 1.0], [2.0, 3.0]], device=device) # for vaxis == 1
+
     time = torch.tensor([0.1, 1.2], device=device)
     charge = torch.tensor([300.0, 400.0], device=device)
 
@@ -110,15 +115,25 @@ def test_drifter_forward_with_head(device):
     assert dhead.shape == head.shape, "dhead shape should match head."
 
     # For vaxis=1, we expect tail[:,1] to become target
-    assert torch.allclose(dtail[:, 1], torch.full((2,), target, device=device)), (
+    assert torch.allclose(dtail[:, vaxis], torch.full((2,), target, device=device)), (
         "Drifter should set locs along axis=1 to target"
     )
 
     # dhead = head + (dtail - tail) => it shifts "head" by the same amount that "tail" was shifted
-    expected_dhead = head + (dtail - tail)
+    expected_dhead = head_reorder + (dtail - tail_reorder)
+    expected_dtail = tail_reorder.clone().detach()
+    expected_dtail[:,vaxis] = torch.full((len(dtail),), target, device=device)
+    assert torch.allclose(dtail, expected_dtail), (
+        f"dtail should be at target {target} along vaxis {vaxis} while others keep unchanged for dtail {dtail}, tail {tail}."
+    )
     assert torch.allclose(dhead, expected_dhead), (
         "dhead should reflect the same shift from tail -> dtail"
     )
+    expected_dtime = (target-tail_reorder[:,vaxis])/velocity + time
+    assert torch.allclose(expected_dtime, dtime), \
+        f'drift time {dtime} must be calculated. ' \
+        f'Expected drift time is {expected_dtime} from time {time}, '\
+        f'reordered tail {tail_reorder[:,vaxis]}, target {target}, velocity {velocity}.'
 
 
 def test_drifter_negative_velocity():
@@ -522,7 +537,8 @@ def plot_drift():
         [3.0, -1.0, 3.0]
     ], dtype=torch.float32)
     # Head is just a small offset from tail, for illustration:
-    head = tail - torch.tensor([0.5, 0.2, 0.3])
+    head = tail - torch.tensor([-0.5, 0.2, 0.3]).unsqueeze(0)
+
 
     # Charge and time can be dummy for demonstration.
     charge = torch.ones(tail.shape[0])
@@ -532,14 +548,19 @@ def plot_drift():
     # 2) Create a Drifter instance with some example parameters.
     #    The drift axis is axis=0 (x-direction), i.e. velocity=1.0 along x.
     # ------------------------------------------------------------------
+    vaxis = 0
+    target = 5.
+    velocity = 0.5
     drifter = Drifter(
         diffusion=[0.1, 0.1, 0.1],
         lifetime=100.0,
-        velocity=1.0,
-        target=5.0,  # We'll mark this on the plot
-        vaxis=0,     # drift along axis 0
+        velocity=velocity,
+        target=target,  # We'll mark this on the plot
+        vaxis=vaxis,     # drift along axis 0
         fluctuate=False
     )
+
+    expected_tail = torch.where((tail[:,vaxis] > head[:,vaxis]).view(-1,1).expand(-1, 3), tail, head)
 
     # ------------------------------------------------------------------
     # 3) Run the Drifter forward pass to get dtail, dhead.
@@ -552,7 +573,9 @@ def plot_drift():
     #    left panel  => (axis1 vs. axis0)
     #    right panel => (axis2 vs. axis0)
     # ------------------------------------------------------------------
-    fig, (ax_left, ax_right) = plt.subplots(1, 2, figsize=(10, 4))
+    fig, ax = plt.subplots(2, 2, figsize=(10, 4*2))
+    (ax_left, ax_right) = ax[0,:]
+    ax_dt = ax[1,0]
 
     # Left panel: y = axis1, x = axis0
     ax_left.scatter(tail[:, 0], tail[:, 1], label='tail')
@@ -589,6 +612,15 @@ def plot_drift():
     ax_right.legend()
     ax_right.set_title('Projection on (axis2 vs axis0)')
     ax_right.grid(True)
+
+    ax_dt.plot(target - expected_tail[:,vaxis], dtime, 'o-')
+    ax_dt.set_xlabel('drift distance')
+    ax_dt.set_ylabel('drift time')
+    text_x = 0.05  # Position relative to axis
+    text_y = 0.90  # Position relative to axis
+    ax_dt.text(text_x, text_y, f'Velocity = {velocity} units/time',
+             transform=ax_dt.transAxes, fontsize=12, verticalalignment='top',
+             bbox=dict(facecolor='white', alpha=0.7, edgecolor='none'))
 
     plt.tight_layout()
     plt.show()

@@ -98,16 +98,33 @@ class Drifter(nn.Module):
     def forward(self, time, charge, tail, head=None):
         '''
         Drift depos or steps.
+        Requried Arguments:
+        - time :: 1D tensor, the time of each step/depo in a shape of (npt, )
+        - charge :: 1D tensor, the charge of each step/depo in a shape of (npt, )
+        - tail :: 2D tensor in a shape of (npt, vdim) or 1D tensor in a shape
+                  of (npt,), the position of depo when head is None, or end
+                  point of each step when head is given.
+        - head :: 2D tensor in a shape of (npt, vdim) or 1D tensor in a shape
+                  of (npt,), the position of start point of each step.
+
+        Note: the meaning of tail and head are swappable when they are given together.
+              The method internally redefines the tail to be closet point to anode
+              and the head to be farthest point to anode. It is worth noting the
+              swap does not affect the input but gives the definition of dtail,
+              dhead at the output.
 
         Returns tuple one larger than input args with sigma prepended.
 
         dsigma :: post-drift diffusion width at target plane.
         dtime :: post-drift time is the time for tail. Shifts may be applied.
         dcharge :: post-drift charge at target plane.
-        dtail :: post-drift positions of tail.
-        dhead :: post-drift positions of head.
+        dtail :: post-drift positions of depo or point closest to anode of each step.
+        dhead :: post-drift positions of depo, or point farthest to anode of each step.
         '''
 
+        if head is not None:
+            tail, head = Drifter._ensure_tail_closer_to_anode(tail, head,
+                                                     self.velocity, self.vaxis)
         # note, can in principle, drift with pare-existing sigmas.  But here we
         # assume point-like.
         dtail, dtime, dsigma, dcharge = drift(tail, velocity=self.velocity,
@@ -121,6 +138,66 @@ class Drifter(nn.Module):
             return (dsigma, dtime, dcharge, dtail)
         dhead = head + (dtail - tail)
         return (dsigma, dtime, dcharge, dtail, dhead)
+
+
+    @staticmethod
+    def _ensure_tail_closer_to_anode(tail, head, velocity, vaxis):
+        """
+        Ensures that the `tail` position is always closer to the anode than the `head`.
+
+        This function reorders the `tail` and `head` tensors based on their positions along a specified axis (`vaxis`).
+            The reordering is determined by the sign of `velocity`:
+            - If `velocity > 0`, the function ensures `tail[:, vaxis] > head[:, vaxis]`, swapping elements where necessary.
+            - If `velocity < 0`, it ensures `tail[:, vaxis] < head[:, vaxis]`.
+
+        The swap operation is performed in-place for efficiency.
+
+        Parameters:
+            - tail (torch.Tensor): Tensor representing tail positions, either 1D (`(npt,)`) or 2D (`(npt, vdim)`).
+            - head (torch.Tensor): Tensor representing head positions, either 1D (`(npt,)`) or 2D (`(npt, vdim)`).
+            - velocity (float): Determines the direction of drift. Positive values prioritize larger `tail[:, vaxis]`, 
+                            while negative values prioritize smaller ones.
+            - vaxis (int): The index of the axis along which the positions are compared.
+
+        Returns:
+            - tuple (torch.Tensor, torch.Tensor): The reordered `tail` and `head` tensors.
+
+        Raises:
+            - ValueError: If `tail` and `head` do not have the same shape.
+
+        Notes:
+            - If the input tensors are 1D, they are temporarily expanded to 2D for processing and then restored to 1D.
+        """
+
+        if tail.shape != head.shape:
+            raise ValueError(
+                f"tail and head must have the same shape. Got tail: {tail.shape}, head: {head.shape}."
+            )
+
+        tail_new, head_new = tail.clone().detach(), head.clone().detach()
+
+        # Handle 1D input by temporarily adding an extra dimension
+        squeeze = tail.dim() == 1
+        if squeeze:
+            tail_new, head_new = tail_new.unsqueeze(1), head_new.unsqueeze(1)
+
+        if vaxis >= tail_new.size(1):
+            raise ValueError(
+                f'Allow vaxis is only up to {tail.size(1)}.'
+            )
+
+        # Identify indices where swapping is needed
+        mask = (tail_new[:, vaxis] < head_new[:, vaxis]) if velocity > 0 else (tail_new[:, vaxis] > head_new[:, vaxis])
+        swap_idx = torch.nonzero(mask, as_tuple=True)[0]
+
+        # Swap elements in-place
+        tail_new[swap_idx], head_new[swap_idx] = head_new[swap_idx].clone(), tail_new[swap_idx].clone()
+
+        # Restore original shape if necessary
+        if squeeze:
+            tail_new, head_new = tail_new.squeeze(1), head_new.squeeze(1)
+
+        return tail_new, head_new
 
 
 class Raster(nn.Module):
