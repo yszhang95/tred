@@ -115,6 +115,36 @@ def tpc_label(borders, X0, X1=None, **kwargs):
     labels = torch.concatenate(labels, dim=0)
     return labels
 
+def tpc_drift_direction(borders):
+    '''
+    assume drift direction to be [-1, 1, -1, 1, ...] alternatively
+    assume drift direction is axis0
+    --> assume anode position is on borders[:,0,0]
+    '''
+    # check for conssitency with tpc_label
+    boxes = borders
+    vmin = torch.min(boxes, dim=2)[0] # (ntpc, 3)
+    vmax = torch.max(boxes, dim=2)[0] # (ntpc, 3)
+
+    anodes = []
+    cathodes = []
+    drift_directions = []
+
+    for ibox, box in enumerate(borders):
+        b0 = torch.min(box, dim=1)[0] # (3, )
+        b1 = torch.max(box, dim=1)[0] # (3, )
+        assert b0.allclose(vmin[ibox], rtol=1E-6, atol=1E-6), 'TPC order in tpc_drift_direction does not match that in tpc_label'
+        assert b1.allclose(vmax[ibox], rtol=1E-6, atol=1E-6), 'TPC order in tpc_drift_direction does not match that in tpc_label'
+        if ibox %2  == 0:
+            assert box[0,0] < box[0,1], 'Expect borders[i,0,0] < borders[i,0,1] for even i so that borders[i,0,0] is the anode position and the drift position is -1.'
+            drift_directions.append(-1)
+        else:
+            assert box[0,0] > box[0,1], 'Expect borders[i,0,0] > borders[i,0,1] for odd i so that borders[i,0,0] is the anode position and the drift position is 1.'
+            drift_directions.append(1)
+        anodes.append(box[0,0])
+        cathodes.append(box[0,1])
+    return torch.stack(anodes), torch.stack(cathodes), torch.tensor(drift_directions, requires_grad=False)
+
 def check_features(features):
     '''
     The feature array is assumed to be a list of ntuple, with (Tensor[float32], Tensor[float64], Tensor[int32]).
@@ -136,7 +166,7 @@ class TPCDataset(Dataset):
     The first dimension of each tensor is batch dimension.
     The label array is an integer array for entry labels and TPC labels. TPC labels are optional.
     '''
-    def __init__(self, features, labels, tpc_id, tpc_label_index=None, sort_index=None):
+    def __init__(self, features, labels, tpc_id, anode=0, cathode=0, drift=0, tpc_label_index=None, sort_index=None):
         '''
         `features` and `labels` are selected according to tpc_id if `labels` consists of the TPC labels as the second label.
         Otherwise, all data in `features` and `labels` are saved.
@@ -165,7 +195,7 @@ class TPCDataset(Dataset):
                 sort_label = label[:, sort_index]
             else:
                 raise ValueError
-            if sort_label != None:            
+            if sort_label != None:
                 indices = torch.argsort(labels, stable=True)
                 labels = labels[indices]
                 features = [f[indices] for f in  features]
@@ -180,6 +210,10 @@ class TPCDataset(Dataset):
         self.length = len(self.labels)
         self.tpc_id = tpc_id
 
+        self.anode = anode
+        self.cathode = cathode
+        self.drift = drift
+
     def __getitem__(self, idx):
         return (self.features[0][idx], self.features[1][idx], self.features[2][idx]), self.labels[idx]
 
@@ -190,6 +224,10 @@ def create_tpc_datasets_from_steps(features, labels, borders, **kwargs):
     '''
     features is a list of (Tensor[float32], Tensor[float64], Tensor[int32]).
     steps is a Tensor[float32], with (N_batch, 8). It corresponds to `StepLoader.__getitem__`.
+
+    labels are assumed to be from 0 to ntpc
+
+    FIXME: to match label with index
     '''
     check_features(features)
     steps = features[0]
@@ -197,14 +235,19 @@ def create_tpc_datasets_from_steps(features, labels, borders, **kwargs):
         raise ValueError('steps must be a size of (N_batch, 8). Please check `StepLoader`.')
     X0, X1 = steps[:,2:5], steps[:,5:8]
     tpclabels = tpc_label(borders, X0, X1, **kwargs)
+    anodes, cathodes, drift_dir = tpc_drift_direction(borders)
     unique_labels, inverse_indices = torch.unique(tpclabels, return_inverse=True, return_counts=False, sorted=True)
     tpcs = []
+
     for tpclabel in unique_labels:
         if tpclabel < 0:
             continue
         indices = torch.nonzero(inverse_indices == tpclabel, as_tuple=True)
         tpcs.append(TPCDataset(
-            tuple(f[indices] for f in features), labels[indices], tpclabel
+            tuple(f[indices] for f in features), labels[indices], tpclabel,
+            anode=anodes[tpclabel],
+            cathode=cathodes[tpclabel],
+            drift=drift_dir[tpclabel],
         ))
     return tpcs
 
