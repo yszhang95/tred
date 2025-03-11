@@ -110,7 +110,18 @@ def tpc_label(borders, X0, X1=None, **kwargs):
         cond = c0 & c1
         #FIXME: assume there is no overlaps
         indices = torch.nonzero(cond, as_tuple=True)
+        uidx, cidx = torch.unique(indices[0], return_counts=True)
         labelc[indices[0]] = indices[1].to(index_dtype)
+        assert torch.all(cidx==1), f'{indices[0][cidx>1]}, {labelc[indices[0][cidx>1]]}'
+        unique_labels = torch.unique(labelc, sorted=True)
+        for i, label in enumerate(unique_labels, -1):
+            if label < 0:
+                continue
+            testX = X[labelc == label]
+            testmin = torch.all(testX >= vmin[i].unsqueeze(0), dim=1)
+            testmax = torch.all(testX < vmax[i].unsqueeze(0), dim=1)
+            test = testmin & testmax
+            assert torch.all(test), f'{testX[~test]}, {vmin[i]}'
         labels.append(labelc)
     labels = torch.concatenate(labels, dim=0)
     return labels
@@ -236,13 +247,13 @@ def create_tpc_datasets_from_steps(features, labels, borders, **kwargs):
     X0, X1 = steps[:,2:5], steps[:,5:8]
     tpclabels = tpc_label(borders, X0, X1, **kwargs)
     anodes, cathodes, drift_dir = tpc_drift_direction(borders)
-    unique_labels, inverse_indices = torch.unique(tpclabels, return_inverse=True, return_counts=False, sorted=True)
+    unique_labels = torch.unique(tpclabels, return_inverse=False, return_counts=False, sorted=True)
     tpcs = []
 
     for tpclabel in unique_labels:
         if tpclabel < 0:
             continue
-        indices = torch.nonzero(inverse_indices == tpclabel, as_tuple=True)
+        indices = torch.nonzero(tpclabels == tpclabel, as_tuple=True)
         tpcs.append(TPCDataset(
             tuple(f[indices] for f in features), labels[indices], tpclabel,
             anode=anodes[tpclabel],
