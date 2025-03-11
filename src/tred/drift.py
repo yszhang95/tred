@@ -11,7 +11,7 @@ Eg: (npts=5,vdim=3) is 5 points in 3-space.
 
 '''
 
-from .util import debug, tenstr
+from .util import debug, tenstr, to_tensor
 
 import torch
 from torch.distributions.binomial import Binomial
@@ -34,7 +34,7 @@ def diffuse(dt, diffusion, sigma=None):
     Return new Gaussian diffusion sigma after drifting by time dt.
 
     - dt :: scalar or real 1D tensor of drift times (npts,).
-    - diffusion :: real scalar or 1D (vdim,) tensor of diffusion coefficients.
+    - diffusion :: real scalar (number or 0D tensor) or 1D (vdim,) tensor of diffusion coefficients.
     - sigma :: real 1D (npts) or 2D (npts,vdim) tensor or None.
 
     A sigma of None indicate no prior diffusion.
@@ -45,9 +45,14 @@ def diffuse(dt, diffusion, sigma=None):
     '''
     squeeze = False
 
-    # eg, diffusion is 5, [5] or [4,5,6]
+    # eg, diffusion is 5; it cannot be a list/tuple
     if not isinstance(diffusion, torch.Tensor):
         diffusion = torch.tensor([diffusion], device=dt.device)
+        squeeze = True
+
+    # eg, diffusion is a 0D tensor
+    if diffusion.dim() == 0:
+        diffusion = diffusion.unsqueeze(0)
         squeeze = True
 
     if len(dt.shape) != 1:
@@ -85,6 +90,8 @@ def absorb(charge, dt, lifetime, fluctuate=False):
 
     Note, negative dt will lead to exponential increase not decrease.  Ie,
     implies that the drift "backed up" the point.
+    This is unphysical. The surviving electrons (charge) remain the same when dt is negative.
+    No negative binomial fluctuations or any factor from the exponential distribution is applied.
     '''
     charge = charge.to(dtype=torch.int32)
     if fluctuate:
@@ -92,18 +99,30 @@ def absorb(charge, dt, lifetime, fluctuate=False):
         loss = torch.clamp(loss, 0, 1, out=loss)
         b = Binomial(charge, loss)
         return charge - b.sample()
-
-    return charge * torch.exp(-dt / lifetime)
+    return torch.where(dt>=0, charge * torch.exp(-dt / lifetime), charge)
 
 
 def drift(locs, velocity, diffusion, lifetime, target=0,
-          times=None, vaxis=0, charge=None, sigma=None, fluctuate=False):
+          times=None, vaxis=0, charge=None, sigma=None, fluctuate=False,
+          tshift=None, drtoa=None):
     '''
     Apply drift models.
 
     Returns tuple of post-drift quantities:
 
       (locs, times, sigma, charges)
+
+    - locs :: 1D (npts, ) or 2D (npts, vdim) tensor of the updated locs. The original locs is kept except along vaxis.
+              locs along vaxis is updated to target.
+    - times :: tensor with the same shape as locs's. It is
+               initial time (the argument times) + dt (from transport) - tshift (given
+               or from abs(drtoa/velocity), drtoa = abs(loc_anode - loc_respone)).
+    - sigma :: real 1D (npts,) or 2D (npts, vdim) tensors by adding the initial sigma and diffusion width in quadrature.
+    - charges :: quenched charges by function absorb.
+
+    Note: sigma, charges, locs are post-drift quantities at anode planes. The value of times depends on the potential
+          shifts from tshift or drtoa, may not be time when survivial electrons arrive at anodes, but the value pulled
+          back to response plane.
 
     Required arguments:
 
@@ -114,13 +133,24 @@ def drift(locs, velocity, diffusion, lifetime, target=0,
 
     Optional arguments:
 
-    - target :: real scalar, location on vaxis to cease drift.  Default is 0.
+    - target :: real scalar, location on vaxis to cease drift, i.e., anode plane.  Default is 0.
     - times :: 1D (npts,) tensor of initial times.  Default is zeros.
     - vaxis :: int scalar.  The vector-axis on which to drift.  Default is 0.
     - charge :: real scalar or 1D (npts,) initial charge.  Default is 1000 electrons.
     - sigma :: real 1D (npts,) or 2D (npts,vdim) tensor giving initial sigma.  Default is none.
     - fluctuate :: bool apply random fluctuation to charge.  Default is False.
+    - tshift :: real positive scalar (number or 0D tensor), to correct for drift time from response plane to anode.
+                Note: users must be responsible for the correct shift in use.
+    - drtoa :: real positive scalar (number or 0D tensor). The distance along drift direction from response plane
+               to anode plane, abs(loc_anode - loc_response). It is mutually exclusive with tshift. Default to None.
+               Note: users must be responsible for the consistency between drift velocity in TRED
+               and in field response calculations.
+
+    FIXME: units of drtoa must be consistent with locs.
     '''
+    if tshift is not None and drtoa is not None:
+        raise ValueError('tshift and drtoa are mutually exclusive arguments.')
+
     locs = locs.detach().clone()
     squeeze = False
     if len(locs.shape) == 1:
@@ -148,12 +178,19 @@ def drift(locs, velocity, diffusion, lifetime, target=0,
     else:
         times = times + dt
 
-    debug(f'dt:{tenstr(dt)} diffusion:{tenstr(diffusion)}')
+    if drtoa is not None:
+        tshift = drtoa / velocity
+    if tshift is not None:
+        tshift = tshift if isinstance(tshift, torch.Tensor) else to_tensor(tshift, dtype=torch.float32, device=times.device)
+    if tshift is not None:
+        times = times - torch.abs(tshift)
+
+    debug(f'dt:{tenstr(dt)} diffusion:{tenstr(diffusion) if isinstance(diffusion, torch.Tensor) else diffusion}')
     sigma = diffuse(dt, diffusion=diffusion, sigma=sigma)
 
     default_charge = 1000
     if charge is None:
-        charge = torch.zeros(npts, dtype=torch.int32)+default_charge
+        charge = torch.zeros(npts, dtype=torch.int32, device=locs.device)+default_charge
     charges = absorb(charge, dt, lifetime=lifetime, fluctuate=fluctuate)
 
     if squeeze:
