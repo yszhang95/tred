@@ -135,7 +135,26 @@ class Raster(nn.Module):
         self._pdims = pdims or ()
         self._tdim = tdim
 
+    def _time_diff(self, tail, head=None):
+        """
+        Always return (head - tail)/v if head is not None.
+
+        taild and head are in a shape of (npt, vdim) or (npt,).
+        """
+        if head is None:
+            return None
+        ndims = len(self._pdims) + 1
+        tdim = (set(range(ndims)) - set(self._pdims)).pop()
+        d = tail - head if ndims == 1 else tail[:,tdim] - head[:,tdim]
+        return d/self.velocity
+
     def _transform(self, point, time):
+        """
+        point is in a shape of (npt, vdim) or (npt,).
+
+        The output point is always in a shape of (npt, vdim). When the input
+        is in the shape of (npt,), the vdim for output is 1.
+        """
         if point is None:
             return point
 
@@ -146,9 +165,6 @@ class Raster(nn.Module):
             axes.insert(self._tdim, old_tdim)
             point = point[:, axes]
 
-        # FIXME: This is a bug! We need to set tail/head time dimension slightly
-        # differently to preserve the step "angle" in the pitch-vs-time
-        # dimensions.
         point[:,self._tdim] = time
 
         return point
@@ -162,6 +178,8 @@ class Raster(nn.Module):
 
         If head is None then tail is a depo point.  Otherwise the two make a step.
         '''
+        dt = self._time_diff(tail, head)
+
         tail = self._transform(tail, time)
 
         debug(f'grid:{tenstr(self.grid_spacing)} tail:{tenstr(tail)} sigma:{tenstr(sigma)} charge:{tenstr(charge)}')
@@ -169,7 +187,7 @@ class Raster(nn.Module):
             rasters, offsets = raster_depos(self.grid_spacing, tail, sigma, charge, nsigma=self.nsigma)
             return Block(location = offsets, data=rasters)
 
-        head = self._transform(head, time)
+        head = self._transform(head, dt+time)
         rasters, offsets = raster_steps(self.grid_spacing, tail, head, sigma, charge, nsigma=self.nsigma)
 
         return Block(location = offsets, data=rasters)
