@@ -26,6 +26,7 @@ from .blocking import Block
 from .drift import drift
 from .util import debug, tenstr
 from .raster.depos import binned as raster_depos
+from .raster.steps import compute_qeff
 
 from .types import index_dtype
 from .sparse import chunkify
@@ -36,9 +37,18 @@ import torch
 import torch.nn as nn
 
 def raster_steps(*args,**kwds):
-    raise NotImplementedError("Yousen, make raster.steps.function, import it as tred.graph.raster_steps and delete this temporary function")
-
-
+    # raise NotImplementedError("Yousen, make raster.steps.function, import it as tred.graph.raster_steps and delete this temporary function")
+    # rasters, offsets = raster_steps(self.grid_spacing, tail, head, sigma, charge, nsigma=self.nsigma)
+    # args[0] : grid_spaing
+    # args[1] : tail, X0
+    # args[2] : tail, X1
+    # args[3] : sigma
+    # args[4] : charge, Q
+    # kwds['nsigma] : nsigma, scalar
+    return compute_qeff(grid_spacing=args[0], X0=args[1], X1=args[2],
+                        Sigma=args[3], Q=args[4],
+                        n_sigma=(kwds['nsigma'], kwds['nsigma'], kwds['nsigma']),
+                        origin=(0,0,0), method='gauss_legendre', npoints=(2,2,2))
 
 def param(thing, dtype=torch.float32):
     if isinstance(thing, torch.Tensor):
@@ -207,7 +217,10 @@ class Raster(nn.Module):
     def __init__(self, velocity, grid_spacing, pdims=(1,2), tdim=-1, nsigma=3.0):
         '''
         - pdims :: the N-1 dimensions for transverse pitch indexing into input points.
+                   They are axes in the original tensor.
         - tdim :: the 1 dimension for time/drift.
+                  This is the target axis of the new tensor to be processed.
+        - grid_spacing :: 1D tensor or tuple/list. Spacing of grid is in the transformed coordinate.
         '''
         super().__init__()
 
@@ -219,26 +232,52 @@ class Raster(nn.Module):
         constant(self, 'velocity', velocity)
         constant(self, 'grid_spacing', grid_spacing)
         constant(self, 'nsigma', nsigma)
+
         self._pdims = pdims or ()
-        self._tdim = tdim
+        self._tdim = tdim if tdim>=0 else len(self._pdims) + 1 + tdim
+
+    def _time_diff(self, tail, head=None):
+        """
+        Always return (head - tail)/v if head is not None.
+
+        taild and head are in a shape of (npt, vdim) or (npt,).
+        """
+        if head is None:
+            return None
+        ndims = len(self._pdims) + 1
+        tdim = (set(range(ndims)) - set(self._pdims)).pop()
+        d = tail - head if ndims == 1 else tail[:,tdim] - head[:,tdim]
+        return d/self.velocity
 
     def _transform(self, point, time):
+        """
+        point is in a shape of (npt, vdim) or (npt,).
+
+        The output point is always in a shape of (npt, vdim). When the input
+        is in the shape of (npt,), the vdim for output is 1.
+
+        When time is None, swap the component of data along the second dimension
+        without updating `self._tdim` component.
+        """
         if point is None:
             return point
-        nbatch = point.shape[0]
+
         ndims = len(self._pdims) + 1
-        new_point = torch.zeros((nbatch, ndims), device=point.device)
         if self._pdims:
-            for ind, pdim in enumerate(self._pdims):
-                new_point[:,ind] = point[:,pdim]
+            old_tdim = (set(range(ndims)) - set(self._pdims)).pop()
+            axes = list(iter(self._pdims))
+            # Method insert always inserts new elements in front of the position;
+            # Insertion position is desired when tdim >= 0;
+            # For tdim < 0, data fall behind the desired position counting from the back;
+            # A correction is made in __init__; vdim + tdim for tdim<0
+            axes.insert(self._tdim, old_tdim)
+            point = point[:, axes]
 
-        # FIXME: This is a bug! We need to set tail/head time dimension slightly
-        # differently to preserve the step "angle" in the pitch-vs-time
-        # dimensions.
-        new_point[:,self._tdim] = time
+        if time is not None:
+            point[:,self._tdim] = time
 
-        return new_point
-        
+        return point
+
     def forward(self, sigma, time, charge, tail, head=None):
         '''
         Raster the input depos, return block.
@@ -246,8 +285,14 @@ class Raster(nn.Module):
         Input drifted charge undergoes a transformation of the tensor dimensions
         via pdims and tdim.
 
+        The arguments tail, head, and sigma represent data in spatial
+        coordinates. Later, the drift-direction component is
+        transformed in terms of time.
+
         If head is None then tail is a depo point.  Otherwise the two make a step.
         '''
+        dt = self._time_diff(tail, head)
+
         tail = self._transform(tail, time)
 
         debug(f'grid:{tenstr(self.grid_spacing)} tail:{tenstr(tail)} sigma:{tenstr(sigma)} charge:{tenstr(charge)}')
@@ -255,8 +300,11 @@ class Raster(nn.Module):
             rasters, offsets = raster_depos(self.grid_spacing, tail, sigma, charge, nsigma=self.nsigma)
             return Block(location = offsets, data=rasters)
 
-        head = self._transform(head, time)
+        head = self._transform(head, dt+time)
+        sigma = self._transform(sigma, None)
+        sigma[:, self._tdim] = sigma[:, self._tdim] / self.velocity # distance to time
         rasters, offsets = raster_steps(self.grid_spacing, tail, head, sigma, charge, nsigma=self.nsigma)
+
         return Block(location = offsets, data=rasters)
 
 
@@ -335,4 +383,3 @@ class Sim(nn.Module):
     def forward(self, response, time, charge, tail, head=None):
         signal = self.charge(time, charge, tail, head)
         return self.current(signal, response)
-    
