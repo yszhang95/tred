@@ -121,6 +121,7 @@ class Raster(nn.Module):
                    They are axes in the original tensor.
         - tdim :: the 1 dimension for time/drift.
                   This is the target axis of the new tensor to be processed.
+        - grid_spacing :: 1D tensor or tuple/list. Spacing of grid is in the transformed coordinate.
         '''
         super().__init__()
 
@@ -155,6 +156,9 @@ class Raster(nn.Module):
 
         The output point is always in a shape of (npt, vdim). When the input
         is in the shape of (npt,), the vdim for output is 1.
+
+        When time is None, swap the component of data along the second dimension
+        without updating `self._tdim` component.
         """
         if point is None:
             return point
@@ -170,7 +174,8 @@ class Raster(nn.Module):
             axes.insert(self._tdim, old_tdim)
             point = point[:, axes]
 
-        point[:,self._tdim] = time
+        if time is not None:
+            point[:,self._tdim] = time
 
         return point
 
@@ -180,6 +185,10 @@ class Raster(nn.Module):
 
         Input drifted charge undergoes a transformation of the tensor dimensions
         via pdims and tdim.
+
+        The arguments tail, head, and sigma represent data in spatial
+        coordinates. Later, the drift-direction component is
+        transformed in terms of time.
 
         If head is None then tail is a depo point.  Otherwise the two make a step.
         '''
@@ -193,6 +202,8 @@ class Raster(nn.Module):
             return Block(location = offsets, data=rasters)
 
         head = self._transform(head, dt+time)
+        sigma = self._transform(sigma, None)
+        sigma[:, self._tdim] = sigma[:, self._tdim] / self.velocity # distance to time
         rasters, offsets = raster_steps(self.grid_spacing, tail, head, sigma, charge, nsigma=self.nsigma)
 
         return Block(location = offsets, data=rasters)

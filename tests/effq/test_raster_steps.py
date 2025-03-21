@@ -155,6 +155,36 @@ def test_drift_raster_positions():
     # Show the plot
     plt.savefig('drifted_tailhead.png')
 
+def test_raster(level=None):
+    local_logger = logger.getChild('test_raster')
+    if level:
+        local_logger.setLevel(level)
+
+    # Test the raster_steps wrapper. Note: raster_steps uses fixed npoints=(2,2,2)
+    velocity = 0.1
+    target = 0.1
+    grid_spacing = (0.1, 0.1, 0.1) # 0.1 * velocity = 0.01, tdim = -1
+
+    sigma = torch.tensor([(0.05, 0.5, 0.5)]) # 0.5 * velocity = 0.05
+    charge = torch.tensor([(1,)])
+    nsigma = 0.7
+
+    tail = torch.tensor([(0.06, 2.4, 3.4)]) # 0.06 to 0.1 = 0.4 in time
+    head = torch.tensor([(0.04, 2.6, 3.6)]) # 0.04 to 0.1 = 0.6 in time
+
+    drifter = tg.Drifter(diffusion=[0.1, 0.1, 0.1], lifetime=10, velocity=velocity, target=target)
+
+    _, dtime, _, dtail, dhead = drifter(None, charge, tail, head)
+
+    raster = tg.Raster(velocity, grid_spacing, pdims=(1,2), tdim=-1, nsigma=nsigma)
+    block = raster(sigma, dtime, charge, dtail, dhead)
+
+    q_sum = torch.sum(block.data).item()
+    qint = 0.313723 # from mathematica
+    local_logger.debug(f'Raster steps test passed, computed integral sum: {q_sum}')
+    assert q_sum > 0, "Raster steps computed integral should be positive"
+    assert np.isclose(q_sum, qint, rtol=1E-5), f'Raster steps computed integral, {q_sum}, does not match predefined value {qint}.'
+
 def main():
     # print('-------- test_compute_qeff ---------')
     test_compute_qeff_raster_steps()
@@ -166,15 +196,18 @@ def main():
 
     test_drift_raster_positions()
 
+    test_raster()
+
 if __name__ == '__main__':
+    logging.basicConfig(level=logging.CRITICAL)
     try:
         opt = sys.argv[1]
         if opt.lower() == 'debug':
-            logging.basicConfig(level=logging.DEBUG)
+            logger.setLevel(level=logging.DEBUG)
         elif opt.lower() == 'warning':
-            logging.basicConfig(level=logging.WARNING)
+            logger.setLevel(level=logging.WARNING)
         elif opt.lower() == 'info':
-            logging.basicConfig(level=logging.INFO)
+            logger.setLevel(level=logging.INFO)
         else:
             print('Usage: test_grid.py [debug|warning|info]')
             exit(-1)
