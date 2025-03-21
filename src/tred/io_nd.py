@@ -114,14 +114,14 @@ def tpc_label(borders, X0, X1=None, **kwargs):
         labelc[indices[0]] = indices[1].to(index_dtype)
         assert torch.all(cidx==1), f'{indices[0][cidx>1]}, {labelc[indices[0][cidx>1]]}'
         unique_labels = torch.unique(labelc, sorted=True)
-        for i, label in enumerate(unique_labels, -1):
+        for label in unique_labels:
             if label < 0:
                 continue
             testX = X[labelc == label]
-            testmin = torch.all(testX >= vmin[i].unsqueeze(0), dim=1)
-            testmax = torch.all(testX < vmax[i].unsqueeze(0), dim=1)
+            testmin = torch.all(testX >= vmin[label].unsqueeze(0), dim=1)
+            testmax = torch.all(testX < vmax[label].unsqueeze(0), dim=1)
             test = testmin & testmax
-            assert torch.all(test), f'{testX[~test]}, {vmin[i]}'
+            assert torch.all(test), f'{testX[~test]}, {vmin[label]}'
         labels.append(labelc)
     labels = torch.concatenate(labels, dim=0)
     return labels
