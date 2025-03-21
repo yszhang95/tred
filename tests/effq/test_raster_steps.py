@@ -51,6 +51,14 @@ def test_transform(level=None):
     p = raster._transform(points, time)
     assert p.equal(torch.tensor([3, 2, 5]).view(1,3)), f'points after transformation is {p}.'
 
+    points = torch.tensor([3,4,5]).view(1,3)
+    time = torch.tensor([2])
+    pdims = (0, 2)
+    tdim = -1
+    raster = tg.Raster(velocity=0.16, grid_spacing=(1,1,1), pdims=pdims, tdim=tdim, nsigma=3.0)
+    p = raster._transform(points, time)
+    assert p.equal(torch.tensor([3, 5, 2]).view(1,3)), f'points after transformation is {p}.'
+
 def test_time_diff():
     """Test the _time_diff method.
         Test _time_diff with head as None."""

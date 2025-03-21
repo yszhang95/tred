@@ -132,8 +132,9 @@ class Raster(nn.Module):
         constant(self, 'velocity', velocity)
         constant(self, 'grid_spacing', grid_spacing)
         constant(self, 'nsigma', nsigma)
+
         self._pdims = pdims or ()
-        self._tdim = tdim
+        self._tdim = tdim if tdim>=0 else len(self._pdims) + 1 + tdim
 
     def _time_diff(self, tail, head=None):
         """
@@ -162,6 +163,10 @@ class Raster(nn.Module):
         if self._pdims:
             old_tdim = (set(range(ndims)) - set(self._pdims)).pop()
             axes = list(iter(self._pdims))
+            # Method insert always inserts new elements in front of the position;
+            # Insertion position is desired when tdim >= 0;
+            # For tdim < 0, data fall behind the desired position counting from the back;
+            # A correction is made in __init__; vdim + tdim for tdim<0
             axes.insert(self._tdim, old_tdim)
             point = point[:, axes]
 
