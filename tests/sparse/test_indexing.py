@@ -41,8 +41,8 @@ def plot_crop_batched_2d():
 
     fig, axes = plt.subplots(nrows=len(offsets), ncols=1, figsize=(8, 6*len(offsets)))
     for i in range(len(offsets)):
-        axes[i].scatter(grid[0], grid[1], c=data[i], label=f'ibatch {i}')
-        axes[i].legend()
+        axes[i].scatter(grid[0], grid[1], c=data[i])
+        axes[i].set_title(label=f'ibatch {i}; offset {offsets[i].tolist()}; shape {inner[i].tolist()}')
     plt.savefig('crop_batched_2d.png')
 
 def plot_union_bounds_2d():
