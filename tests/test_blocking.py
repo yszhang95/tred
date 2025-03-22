@@ -11,6 +11,6 @@ def test_blocking_slice():
     # print(f'{s.location.shape=}\n{s.location}')
     # print(f'{s.data.shape=}\n{s.data}')
     assert s.location.shape == b.location.shape
-    assert torch.all(s.shape == torch.tensor([1,1]))
+    assert s.shape == torch.Size([1,1])
     assert s.data.shape == torch.Size([2,1,1])
 
