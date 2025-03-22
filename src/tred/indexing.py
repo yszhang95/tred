@@ -86,8 +86,8 @@ def crop_batched(offsets, inner, outer):
         for dim in torch.arange(vdim):
             keep[omesh[dim] <  offset[dim]] = 0
             keep[omesh[dim] >= offset[dim] + shape[dim]] = 0
-        
-        ind = bind*nbat + torch.nonzero(keep.flatten(), as_tuple=True)[0]
+
+        ind = bind*boff + torch.nonzero(keep.flatten(), as_tuple=True)[0]
         inds.append(ind)
     return torch.hstack(inds)
 
