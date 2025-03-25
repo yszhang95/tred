@@ -71,7 +71,7 @@ def test_chunking_2d():
                 assert torch.all(rs[b, x, y] == val)
 
 
-def test_chunk_locating_3d():
+def test_chunk_location_3d():
     '''
     Test tred.chunking.location() in 3D
     '''
@@ -85,8 +85,18 @@ def test_chunk_locating_3d():
 
     offsets = (torch.rand([nbatch, len(cshape)])*10).to(dtype=torch.int)
 
-    chunk_location(Block(location=offsets, shape=eshape), cshape)
-    
+    locs = chunk_location(Block(location=offsets, shape=eshape), cshape)
+
+    for b in range(nbatch):
+        for x in range(mshape[0]):
+            for y in range(mshape[1]):
+                for z in range(mshape[2]):
+                    l = locs[b,x,y,z]
+                    o = offsets[b] + torch.tensor(
+                       (x*cshape[0],y*cshape[1],z*cshape[2])
+                    )
+                    assert torch.equal(l, o), f"{l}, {o}"
+
 
 def test_chunking_3d():
     '''
