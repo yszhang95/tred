@@ -49,6 +49,8 @@ class Block:
     def size(self):
         '''
         Return torch.Size like a tensor.size() does. This includes batched dimension.
+
+        Warning: potential CPU-CUDA synchronization per call.
         '''
         return Size([self.nbatches] + self.shape.tolist())
 
@@ -76,6 +78,9 @@ class Block:
     def set_shape(self, shape:Shape):
         '''
         Set the spacial shape of the volumes.  This will drop any data.
+
+        If the input `shape` is not a tensor, `Block.shape` will reside on the CPU.
+        Otherwise, it is moved to the same device as `location`.
         '''
         if hasattr(self, "data"):
             delattr(self, "data")
@@ -122,6 +127,9 @@ class Block:
 def apply_slice(block: Block, space_slice) -> Block:
     '''
     Apply a slice to the block data along the spatial dimensions.
+
+    The resulting block provides a view of the input block's data
+    without deeply copying the original data.
 
     The space_slice is an N-tuple with a slice instance for each spatial
     dimensions.  The slice is common to all elements along the batch dimension.
