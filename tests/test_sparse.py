@@ -43,12 +43,15 @@ def test_sparse_bsb_guts():
     assert not hasattr(e, "data")
     print(f'{e.location.shape=} {e.shape=} {sgrid.spacing}')
 
+    assert e.location.shape == torch.Size([2,3])
+    assert torch.equal(e.shape, torch.tensor([10,20,30]))
 
     fill_envelope(e, b)
 
     c = reshape_envelope(e, sgrid.spacing)
     assert c is not None
     assert c.data is not None
+
 
 def test_sparse_funcs_multichunk():
     sgrid = SGrid([10,10])
