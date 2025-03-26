@@ -115,7 +115,7 @@ def fill_envelope(envelope: Block, block: Block) -> Block:
     if not hasattr(envelope, "data"):
         envelope.set_data(torch.zeros(envelope.size(),
                                       dtype=block.data.dtype, device=block.data.device))
-    
+
     if len(block.shape) != len(envelope.shape):
         raise ValueError(f'fill_envelope shape mismatch with block {block.shape} and envelope {envelope.shape}')
 
@@ -141,7 +141,7 @@ def reshape_envelope(envelope: Block, chunk_shape:Shape):
 
     vdim = len(chunk_shape)
     return Block( location=loc.flatten(0, vdim), data=dat.flatten(0, vdim) )
-        
+
 
 # def block_chunk(sgrid: SGrid, block: Block) -> Block:
 #     '''
@@ -164,7 +164,6 @@ def chunkify(block: Block, shape: IntTensor) -> Block:
     return reshape_envelope(envelope, sgrid.spacing)
 
 
-
 def index_chunks(sgrid: SGrid, chunk: Block) -> Block:
     '''
     Index the chunks over space by bin.
@@ -174,21 +173,23 @@ def index_chunks(sgrid: SGrid, chunk: Block) -> Block:
     This returns a Block with a single batch and is defined on the super-grid.
     Each chunk is mapped to one element in the N-dimensional data which in turn
     holds the batch index of the chunk.  Elements with negative value indicate
-    that no chunk exists.  
+    that no chunk exists.
+
+    The returned location is on indices of the super-grid, i.e., from `sgrid.spoint`.
 
     The returned index block allows round trip navigation between a chunk and
     its neighbors.  For example:
 
     >>> ic = index_chunks(sgrid, chunk)
     >>> ic_origin = ic.location[0]
-    >>> ic_index = ic.data
+    >>> ic_index = ic.data[0]
 
     Round trip through the index
 
-    >>> s_index = sgrid.spoint(chunk.location, ic_origin).T
-    >>> b_index = ic_index[s_index]
+    >>> s_index = sgrid.spoint(chunk.location, sgrid.gpoint(ic_origin)).T
+    >>> b_index = ic_index[s_index.tolist()]
     >>> assert torch.all(b_index == torch.arange(chunk.nbatches))
-    
+
     Find nearest neighbor above a chunk along dimension zero.
 
     >>> nn = torch.zeros_like(ic_origin)
