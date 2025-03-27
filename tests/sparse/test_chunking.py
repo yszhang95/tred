@@ -57,7 +57,7 @@ def plot_grid_on_axis(ax, c0, c1, grid_values):
     for i in range(len(y)):
         for j in range(len(x)):
             ax.plot(xx[i, j], yy[i, j], 'ro')
-            ax.text(xx[i, j]+0.1, yy[i, j]+0.1, str(grid_values[i, j]),
+            ax.text(xx[i, j]+0.1, yy[i, j]+0.1, str(grid_values[j, i]),
                     fontsize=10, color='black', ha='center', va='center')
 
     # Set limits and grid details

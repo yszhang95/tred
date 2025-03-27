@@ -2,6 +2,12 @@ import torch
 import pytest
 from tred.sparse import SGrid  # Replace with the actual module name where SGrid is defined
 from tred.blocking import Block  # Replace with the actual module path
+from tred.sparse import chunkify
+from tred.graph import ChunkSum
+
+import matplotlib.pyplot as plt
+import matplotlib.colors as mcolors
+import numpy as np
 
 def test_vdim():
     # Test that the number of spatial dimensions equals the length of the spacing vector.
@@ -76,3 +82,176 @@ def test_envelope():
     expected_shape = torch.tensor([4, 6])
     assert torch.equal(env.location, expected_location), f'envelope location {env.location}, expected_location {expected_location}'
     assert torch.equal(env.shape, expected_shape), f'envelope shape {env.shape}, expected_shape {expected_shape}'
+
+# Generate N visually distinct colors using HSV
+def generate_colors(n):
+    colors = plt.cm.hsv(np.linspace(0, 1, n))
+    return colors
+
+def box2d(c0, c1):
+    return np.array([[c0[0], c0[0], c1[0], c1[0], c0[0]],
+                     [c0[1], c1[1], c1[1], c0[1], c0[1]]])
+
+def plot_grid_on_axis(ax, c0, c1, grid_values, offset=(0.1, 0.1), **kwargs):
+    """
+    Plot the box outline and annotate every integer grid point within the box on the given axis.
+
+    Parameters:
+      ax         : Matplotlib axis to plot on.
+      c0, c1     : Two-element lists/arrays defining the lower-left and upper-right corners.
+      grid_values: A 2D numpy array containing the values to annotate at each grid point.
+                   Its shape should be ((c1[1]-c0[1]+1), (c1[0]-c0[0]+1)).
+    """
+    # Create grid coordinates (inclusive)
+    x = np.arange(c0[0], c1[0] - 0.1)
+    y = np.arange(c0[1], c1[1] - 0.1)
+    xx, yy = np.meshgrid(x, y)
+
+    # Plot the box outline
+    pts = box2d(c0, c1)
+    ax.plot(pts[0], pts[1], **kwargs)
+
+    # Loop through grid points to plot a marker and annotate with grid_values
+    for i in range(len(y)):
+        for j in range(len(x)):
+            ax.plot(xx[i, j], yy[i, j], 'ro')
+            ax.text(xx[i, j]+offset[0], yy[i, j]+offset[1], str(grid_values[j, i]),
+                    fontsize=10, color='black', ha='center', va='center')
+
+    # Set limits and grid details
+
+def plot_chunkify():
+    nbatch = 2
+    cshape = (2, 2)
+    mshape = (2, 3)
+    dshape = [cshape[i] * mshape[i] for i in range(2)]
+
+    dsize = [nbatch,] + dshape
+
+    data = np.arange(nbatch)
+    data = data.repeat(np.prod(dshape)).reshape(*dsize)
+    loc = torch.tensor([[5, 7],
+                        [0, 1]])
+    block = Block(location=loc, data=torch.tensor(data))
+
+    chunks = chunkify(block, cshape)
+
+    # plotting
+    fig, ax = plt.subplots(figsize=(8, 8))
+
+    col_codes = generate_colors(block.size()[0])
+    for i in range(block.size()[0]):
+        loc = block.location[i]
+        c0 = loc.numpy()
+        c1 = c0 + np.array(dsize[1:])
+        grid_values = block.data[i].numpy()
+        plot_grid_on_axis(ax, c0, c1, grid_values, color=col_codes[i], linestyle='-')
+
+    col_codes = generate_colors(chunks.size()[0])
+    for i in range(chunks.size()[0]):
+        loc = chunks.location[i]
+        c0 = loc.numpy()
+        c1 = c0 + np.array(cshape)
+        grid_values = chunks.data[i].numpy()
+        plot_grid_on_axis(ax, c0, c1, grid_values, color=col_codes[i], linestyle='-.')
+
+    # ax.grid(True)
+    plt.tight_layout()
+    plt.savefig('chunkify_2d.png')
+    plt.close()
+
+def test_chunksum():
+    nbatch = 2
+    cshape = (2, 2)
+    mshape = (2, 3)
+    dshape = [cshape[i] * mshape[i] for i in range(2)]
+
+    dsize = [nbatch,] + dshape
+
+    data = np.arange(nbatch)
+    data = data.repeat(np.prod(dshape)).reshape(*dsize)
+    loc = torch.tensor([[5, 7],
+                        [0, 1]])
+    block = Block(location=loc, data=torch.tensor(data))
+
+    chunksum = ChunkSum(cshape)
+    chunks = chunksum(block)
+
+    # hard coded
+    expected_loc = torch.tensor([
+            [0, 0], # [[0, 1], [0, 1]],
+            [0, 2], # [[1, 1], [1, 1]],
+            [0, 4], # [[1, 1], [1, 1]],
+            [0, 6], # [[1, 0], [1, 0]],
+            [2, 0], # [[0, 1], [0, 1]],
+            [2, 2], # [[1, 1], [1, 1]],
+            [2, 4], # [[1, 1], [1, 1]],
+            [2, 6], # [[1, 0], [1, 0]]
+        ])
+    expected_data = torch.tensor([
+            [[0, 1], [0, 1]],
+            [[1, 1], [1, 1]],
+            [[1, 1], [1, 1]],
+            [[1, 0], [1, 0]],
+            [[0, 1], [0, 1]],
+            [[1, 1], [1, 1]],
+            [[1, 1], [1, 1]],
+            [[1, 0], [1, 0]]
+        ])
+    assert torch.equal(expected_loc, chunks.location)
+    assert torch.equal(expected_data, chunks.data), f'{chunks.data}'
+
+
+def plot_chunksum():
+    nbatch = 2
+    cshape = (2, 2)
+    mshape = (2, 3)
+    dshape = [cshape[i] * mshape[i] for i in range(2)]
+
+    dsize = [nbatch,] + dshape
+
+    data = np.arange(nbatch)
+    data = data.repeat(np.prod(dshape)).reshape(*dsize)
+    loc = torch.tensor([[5, 7],
+                        [0, 1]])
+    block = Block(location=loc, data=torch.tensor(data))
+
+    chunksum = ChunkSum(cshape)
+    chunks = chunksum(block)
+
+    # plotting
+    fig, ax = plt.subplots(figsize=(8, 8))
+
+    col_codes = generate_colors(block.size()[0])
+    for i in range(block.size()[0]):
+        loc = block.location[i]
+        c0 = loc.numpy()
+        c1 = c0 + np.array(dsize[1:])
+        grid_values = block.data[i].numpy()
+        plot_grid_on_axis(ax, c0, c1, grid_values, color=col_codes[i], linestyle='-')
+
+    col_codes = generate_colors(chunks.size()[0])
+    for i in range(chunks.size()[0]):
+        loc = chunks.location[i]
+        c0 = loc.numpy()
+        c1 = c0 + np.array(cshape)
+        grid_values = chunks.data[i].numpy()
+        plot_grid_on_axis(ax, c0, c1, grid_values, offset=(0.3, 0.3), color=col_codes[i], linestyle='-.')
+
+    # ax.grid(True)
+    plt.tight_layout()
+    plt.savefig('chunksum_2d.png')
+    plt.close()
+
+def main():
+    test_vdim()
+    test_to_tensor()
+    test_spoint_and_gpoint()
+    test_batched_spoint()
+    test_envelope()
+    plot_chunkify()
+    test_chunksum()
+    plot_chunksum()
+
+if __name__ == '__main__':
+    main()
