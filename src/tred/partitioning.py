@@ -28,6 +28,7 @@ from .types import Tensor, IntTensor
 from typing import Generator
 import torch
 
+
 def deinterlace(ten: Tensor, steps: IntTensor) -> Generator[Tensor, None, None]:
     '''
     Yield tensors that have been interlaced in ten at given step.
@@ -49,7 +50,7 @@ def deinterlace(ten: Tensor, steps: IntTensor) -> Generator[Tensor, None, None]:
 
     if torch.any(torch.tensor(ten.shape, device=steps.device) % steps):
         raise ValueError(f'tensor of shape {ten.shape} not an integer multiple of {steps}')
-        
+
     steps = to_tuple(steps)
 
     all_imps = [list(range(s)) for s in steps]
@@ -60,8 +61,16 @@ def deinterlace(ten: Tensor, steps: IntTensor) -> Generator[Tensor, None, None]:
         yield t
 
 
-
-def deinterlace_block(block: Block, spacing: Tensor, taxis: int = -1) -> Block:
+# Not validated and not referenced elsewhere.
+#
+# The function seems to work under the assumption, the block is at the corner of the super grid. Then deinterlaced partitions are at the
+# same position on the super grid (same indices). Then the returned location make senses. Function interlaced in tred.convo supports this opinion.
+#
+# Given a block (let us ignore batch dimension) at (1,2) or (2,2). The shape of the block is (4, 4). And we ignore taxis now.
+# The step size is set to (2, 2). I expect returned data are data[[[0,2], [0,1,2,3]]] and data[[[1,3], [0,1,2,3]]].
+# The returned location is at (1,2) // [2,2] -> [0,1]. I do not understand the meaning.
+# When loation is at (2,2), then the resulted location [1,1] implies all partitions are at the index [1,1] of the super-grid.
+def deinterlace_block(block: Block, spacing: Tensor, taxis: int = -1) -> Generator[Block, None, None]:
     '''
     Iterate over impact de-interlace partitioning.
 

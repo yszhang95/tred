@@ -49,7 +49,15 @@ def test_impacts():
     laces = list(deinterlace(data, step_sizes))
 
     assert len(laces) == torch.prod(step_sizes)
-                    
+
     for lace in laces:
         assert torch.all(torch.tensor(lace.shape) == lace_shape)
 
+    # not consider batch dim
+    for i in range(step_sizes[1]):
+        for j in range(step_sizes[2]):
+            for k in range(step_sizes[3]):
+                pass
+                ind = i*step_sizes[2]*step_sizes[3] + j * step_sizes[3] + k
+                assert torch.equal(laces[ind], data[:,i::step_sizes[1],
+                                                    j::step_sizes[2],k::step_sizes[3]])
