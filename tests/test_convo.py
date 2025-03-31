@@ -25,7 +25,8 @@ def test_zero_pad():
     assert torch.all(tp[2:,:,:] == 0)
     assert torch.all(tp[:,3:,:] == 0)
     assert torch.all(tp[:,:,4:] == 0)
-    
+    assert torch.equal(tp[:2,:3,:4], t)
+
 
     # inner padding by bracketing zero_pad with roll's.
 
@@ -38,7 +39,9 @@ def test_zero_pad():
     print(f'{trp=}')
     print(f'{trpr=}')
 
-    assert torch.all(trpr[:1,:1,:2] == t[:1, :1, :2])
-    assert torch.all(trpr[1:-1, 1:-1, 2:-2] == 0)
-
-    
+    assert torch.all(trpr[:1,:2,:2] == t[:1, :2, :2]) # from 0 to o_shape - h_shape - 1; first o_shape - h_shape
+    assert torch.all(trpr[-1:,-1:,-2:] == t[-1:, -1:, -2:]) # last h_shape
+    assert torch.all(trpr[1:-1, 1:-1, 2:-2] == 0) # The joint is of course zeros
+    assert torch.all(trpr[1:-1, :, :] == 0) # We actually want unions;
+    assert torch.all(trpr[:, 2:-1, :] == 0) # We actually want unions;
+    assert torch.all(trpr[:, :, 2:-2] == 0) # We actually want unions;
