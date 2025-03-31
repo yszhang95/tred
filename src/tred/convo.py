@@ -61,7 +61,7 @@ def zero_pad(ten : Tensor, shape: Shape|None = None) -> Tensor:
     if not batched:
         padded = padded[0]
     return padded
-        
+
 
 def front_half(n):
     '''
@@ -270,8 +270,17 @@ def interlaced(signal: Block, response: Tensor, steps: IntTensor, taxis: int = -
     - steps :: an integer N-tensor giving the number of steps performed by the interlacing.
     - taxis :: the dimension of N that is considered the time/drift axis.
 
+    The signal block must be aligned to the lower-left corner of its pixel grid.
+    The response tensor must be aligned to the lower-left corner of the collection pixel
+    where the single ionizing electron is collected.
+
     Both signal and response tensors represent interval-space samples.  They are
     not padded but are interlaced.  The interlace spacing is given by steps.
+
+    This is similar to depth-wise convolution in neural network terminology.
+    Each channel—representing an impact position—is convolved with its own kernel
+    (the field response), where each response element has a fixed offset relative
+    to the pixel corner.
 
     The convolution() function is applied to each matching interlaced tensor in
     signal and response and the sum over "laces" is returned as a Block.  The

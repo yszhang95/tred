@@ -95,10 +95,21 @@ def ndlarsim(npy_path):
     response_38_v2b_50ns_ndlar.npy
 
     And return a tred response object.
+
+    The input response is expected to be a quadrant of the full response, with a shape of (45, 45, 6400).
+    It is aligned to the center of the collection pixel, rather than the lower corner.
+
+    The resulting response is then shifted to align with the lower corner of the collection pixel.
+
+    The shift and response shape are hard-coded. Use with caution.
     '''
+    nd_response_shape = (45, 45, 6400) # 4.5 pixels; pixel is aligned to the center
+    response_shifts = (5,5) # pixel is aligned to the lower corner
     raw = numpy.load(npy_path)
     if raw.shape != (45,45,6400):
         raise ValueError(f'unexpected shape {raw.shape} from {npy_path}')
     raw = torch.from_numpy(raw.astype(numpy.float32))
-    return quadrant_copy(raw)
+    full_response = quadrant_copy(raw)
+    aligned_response = torch.roll(full_response, shifts=response_shifts, dims=(0,1))
+    return aligned_response
 
