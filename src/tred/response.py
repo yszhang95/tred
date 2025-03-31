@@ -34,8 +34,12 @@ class Response:
 def axis_last(ten, axis=-1):
     '''
     Return tensor transposed so that the given axis is the last.
+
+    WARNING: This function transforms axes differently from `_transform` in `Drifter`.
+             This function simply swap the axes. The other
+             one move the axis to the last without changing the others' order.
     '''
-    if axis == -1 or axis == len(axis.shape) - 1:
+    if axis == -1 or axis == len(ten.shape) - 1:
         return ten
     return torch.transpose(ten, axis, -1)
 
