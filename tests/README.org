@@ -1,0 +1,21 @@
+* Tests for =tred=
+** General
+Tests are spread in three parts.
+- plots
+- tests
+- tests/functionalities
+** Drift
+** Rasterization
+** Convolution
+** Sparse
+Tests are
+- Scripts under =tests=,
+  : uv run python test_chunking.py
+  : uv run python test_blocking.py
+  : uv run python test_indexing.py
+  : uv run python test_sparse.py
+- Scripts under =tests/sparse=,
+  : uv run python test_chunking.py
+  : uv run python test_blocking.py
+  : uv run python test_indexing.py
+  : uv run python test_sparse.py
