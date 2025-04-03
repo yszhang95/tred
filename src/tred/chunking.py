@@ -76,7 +76,7 @@ def location(envelope: Block, chunk_shape:Shape):
         prod = torch.unsqueeze(mgd+off, -1) # dimension 1+N+1
         off_mg.append(prod)
     return torch.cat(off_mg, dim=-1)
-    
+
 
 def content(envelope, chunk_shape):
     '''
@@ -141,24 +141,19 @@ def accumulate(chunk : Block) -> Block:
     '''
     Sum chunks at the same location, skipping any that are empty
     '''
-    by_loc = defaultdict(list)
-    for loc, dat in zip(chunk.location, chunk.data):
-        loc = to_tuple(loc)
-        by_loc[loc].append(dat)
+    loc = chunk.location
+    dat = chunk.data
+    # Step 1: Get unique keys and their inverse index
+    unique_locs, inv = torch.unique(loc, dim=0, return_inverse=True)
 
-    locs = list()
-    dats = list()
-    for cloc, cdats in by_loc.items():
-        cdat = cdats.pop()
-        if len(cdats):
-            cdat = sum(cdats, cdat)
-        if not torch.any(cdat):
-            continue
-        locs.append(cloc)
-        dats.append(cdat)
+    # Step 2: Prepare output tensor
+    summed = torch.zeros((unique_locs.shape[0], *dat.shape[1:]), dtype=dat.dtype).to(dat.device)
 
-    # checkme: in principle, we could leave these as lists.
-    locs = chunk.to_tensor(locs)
-    dats = torch.stack(dats, axis=0)
-    return Block(location=locs, data=dats)
+    # Step 3: Use index_add to accumulate
+    summed = summed.index_add(dim=0, index=inv, source=dat, alpha=1)
+
+    # Step 4: Drop zero contents
+    indices = torch.where(summed.sum(dim=[i+1 for i in range(chunk.vdim)]))
+
+    return Block(location=unique_locs[indices], data=summed[indices])
 
