@@ -28,26 +28,33 @@ def plot_ndlar_response():
     res_np = np.load(response_path)
     response = ndlarsim(response_path)
 
-    X = response[:,:,np.argmax(res_np[0,0])].numpy()
+    Xe = response[:,:,np.argmax(res_np[0,0])].numpy()
 
-    fig, ax = plt.subplots()
-    cax = ax.matshow(X)
+    full_response = quadrant_copy(torch.from_numpy(res_np))
+    full_response = torch.roll(full_response, shifts=(45,45), dims=(0,1))
+    Xp = full_response[:,:,np.argmax(res_np[0,0])].numpy()
 
-    # Set ticks at intervals of 10
-    xticks = range(0, X.shape[0], 10)
-    yticks = range(0, X.shape[1], 10)
-    ax.set_xticks(yticks)
-    ax.set_yticks(xticks)
+    fig, axes = plt.subplots(nrows=1, ncols=2, figsize=(8*2, 8))
+    for ax, X in zip(axes, [Xe, Xp]):
+        cax = ax.matshow(X)
 
-    # Enable grid on top of the image
-    ax.grid(which='both', color='white', linestyle='-', linewidth=0.5)
+        # Set ticks at intervals of 10
+        xticks = range(0, X.shape[0], 10)
+        yticks = range(0, X.shape[1], 10)
+        ax.set_xticks(yticks)
+        ax.set_yticks(xticks)
 
-    ax.set_xlabel('index along axis 1')
-    ax.set_ylabel('index along axis 0')
+        # Enable grid on top of the image
+        ax.grid(which='both', color='white', linestyle='-', linewidth=0.5)
 
-    ax.set_title('when current at the center of collection pixel reaches maximum')
+        ax.set_xlabel('index along axis 1')
+        ax.set_ylabel('index along axis 0')
 
-    fig.colorbar(cax)
+        cbar = fig.colorbar(cax, ax=ax)
+        cbar.set_label('Amplitude')
+
+    axes[0].set_title('Electron at center pixel; collection pixel moved to [0,0];\nwhen current at the center of\n collection pixel reaches maximum')
+    axes[1].set_title('Pixel at center; original response;\nwhen current at the center of\n collection pixel reaches maximum')
 
     fig.savefig('ndlar_response_peak_at_pxlctr.png')
 
