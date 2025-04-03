@@ -19,9 +19,8 @@ def shape_meshgrid(shape, device=None):
     if not device:
         return mg
     return tuple([one.to(device=device) for one in mg])
-        
 
-    
+
 def crop(offset, inner, outer):
     '''
     Return the indices of elements spanning the inner N-dimensional box
@@ -45,7 +44,6 @@ def crop(offset, inner, outer):
 
     return torch.nonzero(indices.flatten(), as_tuple=True)[0]
 
-    
 
 def crop_batched(offsets, inner, outer):
     '''
@@ -72,6 +70,15 @@ def crop_batched(offsets, inner, outer):
     batched_inner = False
     if len(inner.shape) > 1:
         batched_inner = True
+
+    if not batched_inner:
+        idims = [torch.arange(o) for o in inner]
+        inner_mg = torch.cartesian_prod(*idims).to(offsets.device)
+        stride = torch.cumprod(torch.tensor([1,]+list(outer[-1:0:-1])), dim=0).flip(dims=(0,)).to(offsets.device)
+        batch_off = torch.arange(0, nbat*boff-1, boff).to(offsets.device)
+        offsets = batch_off + torch.sum(offsets * stride.unsqueeze(0), dim=1)
+        inner_off = torch.sum(stride.unsqueeze(0) * inner_mg, dim=1)
+        return torch.flatten(offsets.unsqueeze(1) + inner_off.unsqueeze(0))
 
     inds = list()
     for bind in range(nbat):
