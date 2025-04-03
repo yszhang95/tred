@@ -61,7 +61,7 @@ def zero_pad(ten : Tensor, shape: Shape|None = None) -> Tensor:
     if not batched:
         padded = padded[0]
     return padded
-        
+
 
 def front_half(n):
     '''
@@ -126,7 +126,7 @@ def symmetric_pad(ten: Tensor, shape: Shape, symmetry: tuple) -> Tensor:
     vdim = len(o_shape)
     if not all([t < s for t,s in zip(o_shape, shape)]):
         raise ValueError(f'symmetric_pad: truncation {o_shape} to {shape} is not supported')
-        
+
     # We will always apply the zero padding as an "append" and achieve the
     # desired symmetry by rolling the dimension before and/or after the padding.
     pre_shift = [0]*vdim
@@ -136,7 +136,7 @@ def symmetric_pad(ten: Tensor, shape: Shape, symmetry: tuple) -> Tensor:
         if sym == "append":
             continue
         # all others require some kind of shift
-        
+
         # the original size of the dimension
         o_siz = o_shape[idim]
         # the final target size
@@ -157,11 +157,11 @@ def symmetric_pad(ten: Tensor, shape: Shape, symmetry: tuple) -> Tensor:
             pre_shift[idim] = half
             post_shift[idim] = -half
             continue
-        
+
         if sym == "edge":
             # Append, then shift half the padding to the front.  This puts the
             # tensor data following "1+n//2" padding.
-            half = 1+p_siz//2
+            half = (1+p_siz)//2
             pre_shift[idim] = 0
             post_shift[idim] = half
             continue
@@ -203,7 +203,12 @@ def signal_pad(signal: Block, shape: Shape, taxis: int = -1) -> Block:
     sym = ["edge"] * len(shape)
     sym[taxis] = "append"
     data = symmetric_pad(signal.data, shape, sym)
-    fh = front_half(shape).to(device=signal.device)
+    # signal is batched
+    nrm1 = [i - j for i,j in zip(shape, signal.data.size()[1:])] # Nr - 1
+    nrm1 = to_tensor(nrm1, device=signal.data.device)
+    nrm1[taxis] = 0
+    assert not torch.any(nrm1 % 2) # length response tensor must always be odd
+    fh = nrm1 // 2
     debug(f'{fh=}')
     return Block(signal.location - fh, data=data)
 
@@ -270,8 +275,24 @@ def interlaced(signal: Block, response: Tensor, steps: IntTensor, taxis: int = -
     - steps :: an integer N-tensor giving the number of steps performed by the interlacing.
     - taxis :: the dimension of N that is considered the time/drift axis.
 
+    FIXME: taxis is not actually used nor tested.
+    WARNING: steps[taxis] should always be 1.
+
+    The signal block must be aligned to the lower-left corner of its pixel grid.
+    The response tensor must be aligned to the lower-left corner of the collection pixel
+    where the single ionizing electron is collected.
+
     Both signal and response tensors represent interval-space samples.  They are
     not padded but are interlaced.  The interlace spacing is given by steps.
+
+    This is similar to depth-wise convolution in neural network terminology.
+    Each channel—representing an impact position—is convolved with its own kernel
+    (the field response), where each response element has a fixed offset relative
+    to the pixel corner.
+
+    The response tensor is expected to exhibit mirror symmetry with respect to the
+    collection wire and pixel positions.
+    This symmetry informs the determination of the resulting block’s location.
 
     The convolution() function is applied to each matching interlaced tensor in
     signal and response and the sum over "laces" is returned as a Block.  The
