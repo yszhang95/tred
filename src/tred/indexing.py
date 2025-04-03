@@ -5,6 +5,8 @@ Functions to help calculate indices
 
 import torch
 
+from tred.types import index_dtype, MAX_INDEX
+
 def shape_meshgrid(shape, device=None):
     '''
     Return a meshgrid of indices spanning the shape.
@@ -71,13 +73,16 @@ def crop_batched(offsets, inner, outer):
     if len(inner.shape) > 1:
         batched_inner = True
 
+    # everything is within the precision
+    assert (nbat+1)*boff < MAX_INDEX
+
     if not batched_inner:
         idims = [torch.arange(o) for o in inner]
         inner_mg = torch.cartesian_prod(*idims).to(offsets.device)
-        stride = torch.cumprod(torch.tensor([1,]+list(outer[-1:0:-1])), dim=0).flip(dims=(0,)).to(offsets.device)
-        batch_off = torch.arange(0, nbat*boff-1, boff).to(offsets.device)
-        offsets = batch_off + torch.sum(offsets * stride.unsqueeze(0), dim=1)
-        inner_off = torch.sum(stride.unsqueeze(0) * inner_mg, dim=1)
+        stride = torch.cumprod(torch.tensor([1,]+list(outer[-1:0:-1])), dim=0).flip(dims=(0,)).to(offsets.device).to(index_dtype)
+        batch_off = torch.arange(0, nbat*boff-1, boff, dtype=index_dtype).to(offsets.device)
+        offsets = batch_off + torch.sum(offsets.to(index_dtype) * stride.unsqueeze(0), dim=1)
+        inner_off = torch.sum(stride.unsqueeze(0) * inner_mg, dim=1).to(index_dtype)
         return torch.flatten(offsets.unsqueeze(1) + inner_off.unsqueeze(0))
 
     inds = list()
@@ -106,4 +111,3 @@ def union_bounds(shape, offsets):
     pmin = torch.min(offsets, dim=0)
     pmax = torch.max(torch.tensor(shape)+offsets, dim=0)
     return (pmin.values, (pmax.values-pmin.values).to(dtype=pmin.values.dtype))
-    
