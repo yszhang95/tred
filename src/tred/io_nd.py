@@ -93,11 +93,11 @@ def tpc_label(borders, X0, X1=None, **kwargs):
         X1cs = [None] * len(X0cs)
 
     labels = []
-    
+
     boxes = borders
     vmin = torch.min(boxes, dim=2)[0] # (ntpc, 3)
     vmax = torch.max(boxes, dim=2)[0] # (ntpc, 3)
-    
+
     for X0c, X1c in zip(X0cs, X1cs):
         labelc = torch.full((len(X0c),), -1, dtype=index_dtype)
         if X1c is None:
@@ -140,6 +140,7 @@ def tpc_drift_direction(borders):
     anodes = []
     cathodes = []
     drift_directions = []
+    lower_left_corners = []
 
     for ibox, box in enumerate(borders):
         b0 = torch.min(box, dim=1)[0] # (3, )
@@ -152,9 +153,10 @@ def tpc_drift_direction(borders):
         else:
             assert box[0,0] > box[0,1], 'Expect borders[i,0,0] > borders[i,0,1] for odd i so that borders[i,0,0] is the anode position and the drift position is 1.'
             drift_directions.append(1)
+        lower_left_corners.append(b0[[1,2]])
         anodes.append(box[0,0])
         cathodes.append(box[0,1])
-    return torch.stack(anodes), torch.stack(cathodes), torch.tensor(drift_directions, requires_grad=False)
+    return torch.stack(anodes), torch.stack(cathodes), torch.tensor(drift_directions, requires_grad=False), torch.stack(lower_left_corners)
 
 def check_features(features):
     '''
@@ -177,7 +179,7 @@ class TPCDataset(Dataset):
     The first dimension of each tensor is batch dimension.
     The label array is an integer array for entry labels and TPC labels. TPC labels are optional.
     '''
-    def __init__(self, features, labels, tpc_id, anode=0, cathode=0, drift=0, tpc_label_index=None, sort_index=None):
+    def __init__(self, features, labels, tpc_id, anode=0, cathode=0, drift=0, lower_left_corner=(0,0), tpc_label_index=None, sort_index=None):
         '''
         `features` and `labels` are selected according to tpc_id if `labels` consists of the TPC labels as the second label.
         Otherwise, all data in `features` and `labels` are saved.
@@ -225,6 +227,8 @@ class TPCDataset(Dataset):
         self.cathode = cathode
         self.drift = drift
 
+        self.lower_left_corner = lower_left_corner
+
     def __getitem__(self, idx):
         return (self.features[0][idx], self.features[1][idx], self.features[2][idx]), self.labels[idx]
 
@@ -246,7 +250,7 @@ def create_tpc_datasets_from_steps(features, labels, borders, **kwargs):
         raise ValueError('steps must be a size of (N_batch, 8). Please check `StepLoader`.')
     X0, X1 = steps[:,2:5], steps[:,5:8]
     tpclabels = tpc_label(borders, X0, X1, **kwargs)
-    anodes, cathodes, drift_dir = tpc_drift_direction(borders)
+    anodes, cathodes, drift_dir, lower_left_corners = tpc_drift_direction(borders)
     unique_labels = torch.unique(tpclabels, return_inverse=False, return_counts=False, sorted=True)
     tpcs = []
 
@@ -259,6 +263,7 @@ def create_tpc_datasets_from_steps(features, labels, borders, **kwargs):
             anode=anodes[tpclabel],
             cathode=cathodes[tpclabel],
             drift=drift_dir[tpclabel],
+            lower_left_corner=lower_left_corners[tpclabel],
         ))
     return tpcs
 
