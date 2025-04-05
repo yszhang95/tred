@@ -1,5 +1,6 @@
 #!/usr/bin/env python
 from tred.graph import Drifter, Raster, ChunkSum, LacedConvo, Charge, Current, Sim
+from tred.blocking import Block
 from tred import units
 from .response import get_ndlarsim
 from tred.util import debug, info, tenstr
@@ -28,7 +29,8 @@ def make_nd(device='cpu'):
     '''
 
     borders = simple_geo_parser('tests/nd_geometry/ndlar-module.yaml', 'tests/nd_geometry/multi_tile_layout-3.0.40.yaml')
-    path = '/home/yousen/Public/ndlar_shared/data/segments_a_muon_first_event.hdf5'
+    # path = '/home/yousen/Public/ndlar_shared/data/segments_a_muon_first_event.hdf5'
+    path = '/home/yousen/Public/ndlar_shared/data/segments_first_event.hdf5'
     d0 = StepLoader(h5py.File(path), transform=steps_from_ndh5)
     f0, f1, i0 = d0[:]
     return (f0, f1, i0), i0, borders
@@ -53,9 +55,11 @@ def runit(device='cpu'):
     pspace = pitch/nimperpix
     tspace = 50*units.ns / units.us # values are in units of us
     grid_spacing = (pspace, pspace, tspace)
-    npixpersuper = 10
-    ntickperslice = 100
+    # npixpersuper = 10
+    npixpersuper = 2
+    ntickperslice = 300
     chunk_shape = (npixpersuper * nimperpix, npixpersuper * nimperpix, ntickperslice)
+    print(chunk_shape)
 
     efield = 0.5 # kV/cm
     rho = 1.38 # g/cm^3
@@ -91,6 +95,14 @@ def runit(device='cpu'):
 
     waveforms = {}
 
+    # Start recording memory snapshot history, initialized with a buffer
+    # capacity of 100,000 memory events, via the `max_entries` field.
+    MAX_NUM_OF_MEM_EVENTS_PER_SNAPSHOT = 100_000
+    torch.cuda.memory._record_memory_history(
+        max_entries=MAX_NUM_OF_MEM_EVENTS_PER_SNAPSHOT
+    )
+
+
     for itpc, tpcdataset in enumerate(tpcs):
         sampler = SortedLabelBatchSampler(tpcdataset.labels[:,0], batch_size)
         loader = CustomNDLoader(tpcdataset, sampler=sampler,
@@ -103,6 +115,7 @@ def runit(device='cpu'):
         chunksum = chunksum.to(device=device)
         convo = convo.to(device=device)
 
+        tpc_lower_left = tpcdataset.lower_left_corner.to(device).unsqueeze(0)
 
         for ibatch, (features, labels) in enumerate(loader):
             stime = time.time()
@@ -126,6 +139,8 @@ def runit(device='cpu'):
                 local_time = features[0][:,-1]
                 tail = features[0][:,2:5]
                 head = features[0][:,5:8]
+                tail[:,[1,2]] -= tpc_lower_left
+                head[:,[1,2]] -= tpc_lower_left
 
                 # dsigma, dtime, dcharge, dtail, dhead
                 drifted = drifter(local_time, charge, tail, head)
@@ -147,18 +162,46 @@ def runit(device='cpu'):
                 t04 = time.time()
 
                 signal = chunksum(qblock)
+                print(signal.data.device)
+
+                print(signal.nbatches)
+                qblock = None
 
                 if device == 'cuda':
                     torch.cuda.synchronize()
                 t05 = time.time()
 
-                iblock = convo(signal, response)
+                # free_mem, total_mem = torch.cuda.mem_get_info()
+                # total_mem = torch.cuda.get_device_properties(0).total_memory
+                # # r = torch.cuda.memory_reserved(0)
+                # allocated = torch.cuda.memory_allocated(0)
+                # free_mem = total_mem - allocated
+                # print('mem snapshot', free_mem/1024**3, total_mem/1024**3)
+
+                # if free_mem/total_mem > 0.7:
+                #     print(free_mem/total_mem)
+                #     nchunks = 1
+                # elif free_mem/total_mem > 0.5:
+                #     nchunks = 3
+                # elif free_mem/total_mem > 0.3:
+                #     nchunks = 6
+                # elif free_mem/total_mem > 0.2:
+                #     nchunks = 9
+                # else:
+                #     nchunks = 15
+                # print(nchunks)
+                nchunks = signal.nbatches // 300 + 1
+                ibs = []
+                for l, s in zip(signal.location.chunk(nchunks), signal.data.chunk(nchunks)):
+                    # print(s.shape[0])
+                    if s.shape[0] > 0:
+                        iblock = convo(Block(location=l, data=s), response)
 
                 if device == 'cuda':
                     torch.cuda.synchronize()
                 t06 = time.time()
 
-                current =chunksum(iblock)
+                # current =chunksum(iblock)
 
                 if device == 'cuda':
                     torch.cuda.synchronize()
@@ -188,15 +231,33 @@ def runit(device='cpu'):
                       f'N segments {len(features[0])}, '
                       f'elapsed {t07 - stime} sec on {device}.')
 
-                waveforms[f'current_tpc{tpcdataset.tpc_id}_batch{ibatch}'] = current
-                waveforms[f'effq_tpc{tpcdataset.tpc_id}_batch{ibatch}'] = signal
+                # waveforms[f'current_tpc{tpcdataset.tpc_id}_batch{ibatch}'] = current
+                # waveforms[f'effq_tpc{tpcdataset.tpc_id}_batch{ibatch}'] = signal
 
                 torch.cuda.reset_peak_memory_stats()
-            except torch.OutOfMemoryError:
-                info('torch.OutOfMemoryError, '
-                      f'tpc label {itpc}, batch label {ibatch}, '
-                      f'N segments {len(features[0])}, '
-                      f'elapsed {time.time() - stime} sec on {device}.')
+            except IndexError:
+                pass
+            # except torch.OutOfMemoryError as e:
+            #     current_device = torch.cuda.current_device()
+            #     allocated = torch.cuda.memory_allocated(current_device) / (1024 ** 2)  # in MB
+            #     reserved = torch.cuda.memory_reserved(current_device) / (1024 ** 2)    # in MB
+            #     total = torch.cuda.get_device_properties(current_device).total_memory / (1024 ** 2)  # in MB
+
+            #     info('torch.OutOfMemoryError, '
+            #         f'tpc label {itpc}, batch label {ibatch}, '
+            #         f'N segments {len(features[0])}, '
+            #         f'elapsed {time.time() - stime} sec on {device}. '
+            #         f'Memory allocated: {allocated:.2f} MB, reserved: {reserved:.2f} MB, '
+            #         f'total: {total:.2f} MB.'
+            #         f' {e}')
+
+    try:
+        torch.cuda.memory._dump_snapshot(f"crop_batched.pickle")
+    except Exception as e:
+        logger.error(f"Failed to capture memory snapshot {e}")
+
+    # Stop recording memory snapshot history.
+    torch.cuda.memory._record_memory_history(enabled=None)
 
     write_npz("waveforms.npz", **waveforms)
 
