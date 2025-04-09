@@ -95,7 +95,6 @@ def symmetric_pad(ten: Tensor, shape: Shape, symmetry: tuple) -> Tensor:
 
     - prepend :: padding is inserted on the low side of the dimension.
                  Layout: [n_p, n_t].
-    
 
     - append :: padding is inserted on the high side of the dimension.
                 Layout: [n_t, n_p].
@@ -288,7 +287,11 @@ def interlaced(signal: Block, response: Tensor, steps: IntTensor, taxis: int = -
     This is similar to depth-wise convolution in neural network terminology.
     Each channel—representing an impact position—is convolved with its own kernel
     (the field response), where each response element has a fixed offset relative
-    to the pixel corner.
+    to the pixel corner. The resulting output channels (impact positions) are then
+    summed to compute the current at a pixel.
+
+    Alternatively, the process can be viewed as performing a convolution with
+    a stride equal to the number of impact positions along each spatial dimension.
 
     The response tensor is expected to exhibit mirror symmetry with respect to the
     collection wire and pixel positions.
@@ -317,4 +320,3 @@ def interlaced(signal: Block, response: Tensor, steps: IntTensor, taxis: int = -
         meas.data += meas_lace_block.data
     return meas
 
-    

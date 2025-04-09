@@ -192,9 +192,9 @@ def test_interlaced():
 def plot_interlaced_2d():
     # Needs to include an extra dimension due to annoying setup of padding in convo.py. .
     q = torch.tensor([[1,0], [2,0], [0,0], [0,0], [0,0], [0,0], [1,0], [1,0], [0,1], [0,1]]) # non-batched, unit charge;
-    response = torch.tensor([[1,0], [0.5,0], [2,0], [2,0], [1,0], [0.5,0]]) # 3 pixels; nothing in the next moment
+    response = torch.tensor([[0.5,0], [1,0], [2,0], [2,0], [1,0], [0.5,0]]) # 3 pixels; nothing in the next moment
 
-    response_conv = torch.tensor([[2,0],[2,0], [1,0], [0.5,0], [1,0], [0.5,0]])
+    response_conv = torch.tensor([[2,0],[2,0], [1,0], [0.5,0], [0.5,0], [1,0]])
 
     signal = Block(location=torch.tensor([[0,0]]), data=q)
 
