@@ -276,6 +276,24 @@ def plot_interlaced_2d():
 
     fig.savefig('interlaced_convolve_2d.png')
 
+def test_sym_convo1d():
+    response = list(range(6))
+    response += response[::-1]
+    response = np.array(response)
+    Q = np.arange(20)
+    nr = response.shape[0]
+    nq = Q.shape[0]
+    # 4 partitions
+    # 2 groups
+    # group 1
+    o1 = np.convolve(Q[3::4], response[3::4])
+    o4 = np.convolve(Q[-1::-4], response[-1::-4])
+    assert np.equal(o1, o4[::-1]).all()
+    # group 2
+    o2 = np.convolve(Q[2::4], response[2::4])
+    o3 = np.convolve(Q[-2::-4], response[-2::-4])
+    assert np.equal(o2, o3[::-1]).all()
+
 
 if __name__ == '__main__':
     plot_symmetric_pad_1d()
@@ -286,3 +304,4 @@ if __name__ == '__main__':
     test_convo()
     test_nd()
     test_interlaced()
+    test_sym_convo1d()
