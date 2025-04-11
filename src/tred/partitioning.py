@@ -18,14 +18,14 @@ Partitioning this 1D tensor would generate a 1D collection of 1D tensors:
 
     [[0,0,...], [1,1,...], ..., [9,9,...]]
 
-For 2 transverse dimensions this would generate a 2D collection of 2D tensors.  
+For 2 transverse dimensions this would generate a 2D collection of 2D tensors.
 '''
 
 from itertools import product
 from .util import to_tensor, to_tuple
 from .blocking import Block
 from .types import Tensor, IntTensor
-from typing import Generator
+from typing import Generator, Tuple
 import torch
 
 
@@ -60,6 +60,48 @@ def deinterlace(ten: Tensor, steps: IntTensor) -> Generator[Tensor, None, None]:
         # print(f'deinterlace: {t.device} {t.shape} {slcs}')
         yield t
 
+def deinterlace_pairs(ten: Tensor, steps: IntTensor, pair_axis: int = 0) -> Generator[Tuple[Tensor, Tensor], None, None]:
+    '''
+    Yield tensors in pairs that have been interlaced in `ten` at given step.
+
+    This function is similar to `deinterlace`, but it groups slices into symmetric pairs
+    along the specified `pair_axis`.
+
+    The symmetric pairing matches positions along `pair_axis` in a mirrored fashion:
+    (0, N-1), (1, N-2), ..., where N is the number of interleaved positions along that axis
+    (given by `steps[pair_axis]`).
+
+    The slicing pattern follows a Cartesian product over all axes except `pair_axis`,
+    which is handled last to enforce symmetric pairing.
+
+    - pair_axis :: The axis along which a pair is generated.
+    '''
+    if len(ten.shape) != len(steps):
+        raise ValueError(f'dimensionality mismatch {len(ten.shape)} != {len(steps)}')
+
+    if torch.any(torch.tensor(ten.shape, device=steps.device) % steps):
+        raise ValueError(f'tensor of shape {ten.shape} not an integer multiple of {steps}')
+
+    steps = to_tuple(steps)
+
+    assert steps[pair_axis] % 2 == 0, f'Number of impact positions along axis'\
+        f' {pair_axis} is {steps[pair_axis]}, which should be even'
+
+    pair_axis = len(steps) + pair_axis if pair_axis < 0 else pair_axis
+
+    all_imps = [list(range(s)) for i, s in enumerate(steps) if i != pair_axis]
+
+    for imps in product(*all_imps):
+        for j in range(steps[pair_axis]//2):
+            imps1 = [imps[i] for i in range(len(imps))]
+            imps2 = [imps[i] for i in range(len(imps))]
+            imps1.insert(pair_axis, j)
+            imps2.insert(pair_axis, steps[pair_axis]-1-j)
+            slcs1 = [slice(imp,None,step) for imp,step in zip(imps1,steps)]
+            slcs2 = [slice(imp,None,step) for imp,step in zip(imps2,steps)]
+
+            yield (ten[slcs1], ten[slcs2])
+
 
 # Not validated and not referenced elsewhere.
 #
@@ -74,7 +116,7 @@ def deinterlace_block(block: Block, spacing: Tensor, taxis: int = -1) -> Generat
     '''
     Iterate over impact de-interlace partitioning.
 
-    - block :: an N-dimensional Block with data to be partitioned.  
+    - block :: an N-dimensional Block with data to be partitioned.
 
     - spacing :: an intenger N-tensor giving the super-grid spacing.
 
