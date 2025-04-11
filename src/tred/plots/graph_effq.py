@@ -272,6 +272,8 @@ def runit(device='cpu'):
     info(f'{sum(runtime["convo"])} convo')
     info(f'{sum(runtime["chunksum_current"])} chunksum_current')
 
+    info(f'Total elapsed time {time.time() - t0} seconds')
+
 def plots(out):
     with torch.no_grad():
         # torch.set_default_device('cuda')
