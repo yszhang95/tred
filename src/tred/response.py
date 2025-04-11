@@ -34,8 +34,12 @@ class Response:
 def axis_last(ten, axis=-1):
     '''
     Return tensor transposed so that the given axis is the last.
+
+    WARNING: This function transforms axes differently from `_transform` in `Drifter`.
+             This function simply swap the axes. The other
+             one move the axis to the last without changing the others' order.
     '''
-    if axis == -1 or axis == len(axis.shape) - 1:
+    if axis == -1 or axis == len(ten.shape) - 1:
         return ten
     return torch.transpose(ten, axis, -1)
 
@@ -82,7 +86,7 @@ def quadrant_copy(raw, axis=-1, even=True):
     full[h0:,   h1:,   :] = raw.flip(dims=[0,1])
 
     return axis_last(full, axis)
-    
+
 
 def ndlarsim(npy_path):
     '''
@@ -91,10 +95,33 @@ def ndlarsim(npy_path):
     response_38_v2b_50ns_ndlar.npy
 
     And return a tred response object.
+
+    The input response is expected to be a quadrant of the full response, with a shape of (45, 45, 6400).
+    It is aligned to the center of the collection pixel, rather than the lower corner.
+
+    The resulting response is then shifted to align with the lower corner of the collection pixel.
+
+    In addition to applying a shift, we transform the response to reflect an alternative explanation.
+    The array at [0, 0] corresponds to the case where the electron is located at the lower corner of the pixel, generating current in the pixel it lands on.
+    The array at [10, 0] corresponds to the case where the electron is at [0, 0], but the current is sensed in the pixel whose lower corner is at [10, 0].
+
+    The shift and response shape are hard-coded. Use with caution.
     '''
+    nd_response_shape = (45, 45, 6400) # 4.5 pixels; pixel is aligned to the center
+    response_shifts = (5,5) # pixel is aligned to the lower corner
+    response_shifts_to_center = (45, 45)
+    response_center_to_front= (-40, -40)
+    response_npxl = 9
+    response_nimp = 10
+    response_nt = 6400
     raw = numpy.load(npy_path)
     if raw.shape != (45,45,6400):
         raise ValueError(f'unexpected shape {raw.shape} from {npy_path}')
     raw = torch.from_numpy(raw.astype(numpy.float32))
-    return quadrant_copy(raw)
+    full_response = quadrant_copy(raw)
+    aligned_response = torch.roll(full_response, shifts=response_shifts_to_center, dims=(0,1))
+    aligned_response = aligned_response.view(response_npxl, response_nimp, response_npxl, response_nimp, response_nt)
+    aligned_response = torch.flip(aligned_response, dims=(0, 2)).reshape(response_npxl*response_nimp, response_npxl*response_nimp, response_nt)
+    aligned_response = torch.roll(aligned_response, shifts=response_center_to_front, dims=(0,1))
+    return aligned_response.contiguous()
 
