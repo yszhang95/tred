@@ -1,10 +1,11 @@
 import torch
-from tred.convo import symmetric_pad, convolve, interlaced
+from tred.response import ndlarsim, quadrant_copy
+from tred.convo import symmetric_pad, convolve, interlaced, interlaced_symm
 from tred.blocking import Block
 import matplotlib.pyplot as plt
 from matplotlib.ticker import MaxNLocator
 import numpy as np
-from torch.nn.functional import conv2d, pad
+from torch.nn.functional import conv2d, conv3d, pad
 
 def plot_symmetric_pad_1d():
     # (odd, even) and (odd, even)
@@ -40,12 +41,12 @@ def plot_sr_pad_1d():
 
     fig.savefig('sr_pad_1d.png')
 
-def direct_convo_pixel_time_2d(data, kernel):
+def direct_convo_pixel_time_2d(data, kernel, flip=True):
     '''
     Input are unbatched
     '''
     dims = torch.arange(kernel.ndim).tolist()
-    kernel_new = kernel.flip(dims=dims)
+    kernel_new = kernel.flip(dims=dims) if flip else kernel.clone().detach()
     nz = [[i-1, i-1] for i in kernel.size()]
     nz = [j for i in nz for j in i]
     nz = nz[::-1] # last axis appears in the front
@@ -53,6 +54,49 @@ def direct_convo_pixel_time_2d(data, kernel):
     data_new = data_new.unsqueeze(0).unsqueeze(1)
     kernel_new = kernel_new.unsqueeze(0).unsqueeze(0)
     return conv2d(data_new, kernel_new, padding='valid').squeeze(1)
+
+def direct_hybrid_conv_corr_nd_unbatch(data, kernel, taxis, nz_data, stride=(10,10,1)):
+    '''
+    data is a 3D-tensor, (10*nx, 10*ny, nt)
+    kernel is a 3D-tensor, (10*nx, 10*ny, nt)
+    conv along taxis, cross correlation for others
+    '''
+    # channels 1, batch 1
+    data_new = pad(data, nz_data, 'constant', 0) # 3D
+    data_new = data_new.unsqueeze(0).unsqueeze(1)
+    # channels 1, batch 1
+    kernel = kernel.flip(dims=(taxis,)).unsqueeze(0).unsqueeze(1).contiguous()
+    # channels, 1, strides (10, 10, 1)
+    return conv3d(data_new, kernel, padding='valid', stride=stride).squeeze(1)
+
+def test_nd():
+    nimpx, nimpy = 10, 10
+
+    data = torch.arange(2*nimpx*2*nimpy*2).view(2*nimpx, 2*nimpy, 2).to(torch.float32)
+
+    ndpath = "response_38_v2b_50ns_ndlar.npy"
+    kernel_conv = ndlarsim(ndpath)
+
+    quadrant = torch.tensor(np.load(ndpath).astype(np.float32))
+    kernel = quadrant_copy(quadrant).roll(shifts=(45,45),dims=(0,1))
+
+    kernel_conv = kernel_conv[:,:,6000:6100]
+    kernel_conv = kernel_conv.contiguous()
+    kernel = kernel[:,:,6000:6100]
+    kernel = kernel.contiguous()
+    kernel_check = kernel_conv.roll(shifts=(40,40),dims=(0,1)).reshape(9,10,9,10,-1).flip(dims=(0,2)).reshape(90,90,-1)
+    assert torch.allclose(kernel, kernel_check)
+
+    nx, ny, nt = kernel.shape
+    nz = (nt-1, nt-1, (ny//nimpy-1)*nimpy, (ny//nimpy-1)*nimpy,
+          (nx//nimpx-1)*nimpx, (nx//nimpx-1)*nimpx,)
+    results = direct_hybrid_conv_corr_nd_unbatch(data=data, kernel=kernel,
+                                           taxis=-1, nz_data=nz,
+                                           stride=(nimpx,nimpy,1))
+    signal = Block(location=torch.tensor([0,0,0]), data=data)
+    output = interlaced(signal, kernel_conv, steps=torch.tensor((nimpx,nimpy,1)), taxis=-1)
+    assert torch.allclose(output.data, results, atol=1E-5, rtol=1E-5)
+
 
 def test_convo():
 
@@ -189,12 +233,52 @@ def test_interlaced():
 
         assert torch.equal(result.location[0], torch.tensor([-1,0]))
 
+def test_nd_symm():
+
+    nimpx, nimpy = 10, 10
+
+    data = torch.arange(2*nimpx*2*nimpy*2).view(2*nimpx, 2*nimpy, 2).to(torch.float32)
+
+    ndpath = "response_38_v2b_50ns_ndlar.npy"
+    kernel_conv = ndlarsim(ndpath)
+
+    quadrant = torch.tensor(np.load(ndpath).astype(np.float32))
+    kernel = quadrant_copy(quadrant).roll(shifts=(45,45),dims=(0,1))
+
+    kernel_conv = kernel_conv[:,:,6000:6100]
+    kernel_conv = kernel_conv.contiguous()
+    kernel = kernel[:,:,6000:6100]
+    kernel = kernel.contiguous()
+    kernel_check = kernel_conv.roll(shifts=(40,40),dims=(0,1)).reshape(9,10,9,10,-1).flip(dims=(0,2)).reshape(90,90,-1)
+    assert torch.allclose(kernel, kernel_check)
+
+    nx, ny, nt = kernel.shape
+    nz = (nt-1, nt-1, (ny//nimpy-1)*nimpy, (ny//nimpy-1)*nimpy,
+          (nx//nimpx-1)*nimpx, (nx//nimpx-1)*nimpx,)
+    results = direct_hybrid_conv_corr_nd_unbatch(data=data, kernel=kernel,
+                                           taxis=-1, nz_data=nz,
+                                           stride=(nimpx,nimpy,1))
+    data = data.repeat((2,1,1,1))
+    data[1] = 2*data[1]
+    signal = Block(location=torch.tensor([[0,0,0],[0,0,0]]), data=data)
+    output = interlaced_symm(signal, kernel_conv, steps=torch.tensor((nimpx,nimpy,1)), taxis=-1, symm_axis=0)
+    for i in range(2):
+        assert torch.allclose(output.data[i], (i+1)*results, atol=1E-5, rtol=1E-5)
+    output = interlaced_symm(signal, kernel_conv, steps=torch.tensor((nimpx,nimpy,1)), taxis=-1, symm_axis=1)
+    for i in range(2):
+        assert torch.allclose(output.data[i], (i+1)*results, atol=1E-5, rtol=1E-5)
+
+    output2 = interlaced(signal, kernel_conv, steps=torch.tensor((nimpx,nimpy,1)), taxis=-1)
+    assert torch.allclose(output2.data[0], results, atol=1E-5, rtol=1E-5)
+    assert torch.equal(output.location, output2.location)
+
+
 def plot_interlaced_2d():
     # Needs to include an extra dimension due to annoying setup of padding in convo.py. .
     q = torch.tensor([[1,0], [2,0], [0,0], [0,0], [0,0], [0,0], [1,0], [1,0], [0,1], [0,1]]) # non-batched, unit charge;
-    response = torch.tensor([[1,0], [0.5,0], [2,0], [2,0], [1,0], [0.5,0]]) # 3 pixels; nothing in the next moment
+    response = torch.tensor([[0.5,0], [1,0], [2,0], [2,0], [1,0], [0.5,0]]) # 3 pixels; nothing in the next moment
 
-    response_conv = torch.tensor([[2,0],[2,0], [1,0], [0.5,0], [1,0], [0.5,0]])
+    response_conv = torch.tensor([[2,0],[2,0], [1,0], [0.5,0], [0.5,0], [1,0]])
 
     signal = Block(location=torch.tensor([[0,0]]), data=q)
 
@@ -232,6 +316,24 @@ def plot_interlaced_2d():
 
     fig.savefig('interlaced_convolve_2d.png')
 
+def test_sym_convo1d():
+    response = list(range(6))
+    response += response[::-1]
+    response = np.array(response)
+    Q = np.arange(20)
+    nr = response.shape[0]
+    nq = Q.shape[0]
+    # 4 partitions
+    # 2 groups
+    # group 1
+    o1 = np.convolve(Q[3::4], response[3::4])
+    o4 = np.convolve(Q[-1::-4], response[-1::-4])
+    assert np.equal(o1, o4[::-1]).all()
+    # group 2
+    o2 = np.convolve(Q[2::4], response[2::4])
+    o3 = np.convolve(Q[-2::-4], response[-2::-4])
+    assert np.equal(o2, o3[::-1]).all()
+
 
 if __name__ == '__main__':
     plot_symmetric_pad_1d()
@@ -240,5 +342,7 @@ if __name__ == '__main__':
     plot_interlaced_2d()
 
     test_convo()
-
+    test_nd()
     test_interlaced()
+    test_sym_convo1d()
+    test_nd_symm()

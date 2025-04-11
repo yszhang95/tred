@@ -7,7 +7,7 @@ Support for DFT-based convolutions.
 from .util import to_tuple, to_tensor, debug, tenstr, getattr_first
 from .types import IntTensor, Tensor, Shape, index_dtype
 from .blocking import Block, batchify
-from .partitioning import deinterlace
+from .partitioning import deinterlace, deinterlace_pairs
 import torch
 from torch.nn.functional import pad
 
@@ -95,7 +95,6 @@ def symmetric_pad(ten: Tensor, shape: Shape, symmetry: tuple) -> Tensor:
 
     - prepend :: padding is inserted on the low side of the dimension.
                  Layout: [n_p, n_t].
-    
 
     - append :: padding is inserted on the high side of the dimension.
                 Layout: [n_t, n_p].
@@ -217,6 +216,9 @@ def convolve_spec(signal: Block, response_spec: Tensor, taxis: int = -1) -> Bloc
     '''
     As convolve() but provide response in padded, Fourier representation.
     '''
+    iscomplex = False
+    if signal.data.dtype == torch.complex64 or signal.data.dtype == torch.complex128:
+        iscomplex = True
     signal = signal_pad(signal, response_spec.shape, taxis)
 
     # exclude first batched dimension
@@ -224,7 +226,9 @@ def convolve_spec(signal: Block, response_spec: Tensor, taxis: int = -1) -> Bloc
 
     signal_spec = torch.fft.fftn(signal.data, dim=dims)
     measure_spec = signal_spec * response_spec
-    measure = torch.fft.ifftn(measure_spec, dim=dims).real
+    measure = torch.fft.ifftn(measure_spec, dim=dims)
+    if not iscomplex:
+        measure = measure.real
     return Block(location = signal.location, data = measure) # fixme: normalization
 
 
@@ -288,7 +292,11 @@ def interlaced(signal: Block, response: Tensor, steps: IntTensor, taxis: int = -
     This is similar to depth-wise convolution in neural network terminology.
     Each channel—representing an impact position—is convolved with its own kernel
     (the field response), where each response element has a fixed offset relative
-    to the pixel corner.
+    to the pixel corner. The resulting output channels (impact positions) are then
+    summed to compute the current at a pixel.
+
+    Alternatively, the process can be viewed as performing a convolution with
+    a stride equal to the number of impact positions along each spatial dimension.
 
     The response tensor is expected to exhibit mirror symmetry with respect to the
     collection wire and pixel positions.
@@ -317,4 +325,35 @@ def interlaced(signal: Block, response: Tensor, steps: IntTensor, taxis: int = -
         meas.data += meas_lace_block.data
     return meas
 
-    
+
+def interlaced_symm(signal: Block, response: Tensor, steps: IntTensor, taxis: int = -1, symm_axis: int = 0) -> Block:
+    '''
+    Return a tred interlaced convolution of signal and response, similar to `interlaced`,
+    with the additional use of reflection symmetry in the response tensor.
+
+    symm_axis :: The axis (excluding batch) along which mirror symmetry is present in `response`.
+    '''
+    debug(f'interlaced: signal:{signal} response:{tenstr(response)} steps:{tenstr(steps)}')
+
+    symm_axis = symm_axis if symm_axis >=0 else steps.shape[0] + symm_axis
+
+    super_location = signal.location / steps
+
+    batched_steps = torch.cat([torch.tensor([1], device=steps.device), steps])
+    sig_laces = deinterlace_pairs(signal.data, batched_steps, 1+symm_axis) # one extra dim for batch dim
+    res_laces = deinterlace_pairs(response, steps, symm_axis)
+
+    flipdims = (1+symm_axis,) # batch dim == 0
+
+    meas = None
+    for sig_lace, res_lace in zip(sig_laces, res_laces):
+        sig_lace_block = Block(super_location, data=torch.complex(sig_lace[0], sig_lace[1].flip(dims=flipdims)))
+        # res_lace[1] is not used as it is a flipped copy, given the reflection symmetry
+        meas_lace_block = convolve(sig_lace_block, res_lace[0])
+        meas_lace_block = Block(location = meas_lace_block.location,
+                                data = meas_lace_block.data.real + torch.flip(meas_lace_block.data.imag, dims=flipdims))
+        if meas is None:
+            meas = meas_lace_block
+            continue
+        meas.data += meas_lace_block.data
+    return meas
