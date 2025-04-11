@@ -1,6 +1,6 @@
 import torch
 from tred.response import ndlarsim, quadrant_copy
-from tred.convo import symmetric_pad, convolve, interlaced
+from tred.convo import symmetric_pad, convolve, interlaced, interlaced_symm
 from tred.blocking import Block
 import matplotlib.pyplot as plt
 from matplotlib.ticker import MaxNLocator
@@ -72,7 +72,7 @@ def direct_hybrid_conv_corr_nd_unbatch(data, kernel, taxis, nz_data, stride=(10,
 def test_nd():
     nimpx, nimpy = 10, 10
 
-    data = torch.arange(2*nimpx*2*nimpy*2).view(2*nimpx, 2*nimpy, 2).to(torch.float32) # 5*10 * 5*10 * 5
+    data = torch.arange(2*nimpx*2*nimpy*2).view(2*nimpx, 2*nimpy, 2).to(torch.float32)
 
     ndpath = "response_38_v2b_50ns_ndlar.npy"
     kernel_conv = ndlarsim(ndpath)
@@ -233,6 +233,46 @@ def test_interlaced():
 
         assert torch.equal(result.location[0], torch.tensor([-1,0]))
 
+def test_nd_symm():
+
+    nimpx, nimpy = 10, 10
+
+    data = torch.arange(2*nimpx*2*nimpy*2).view(2*nimpx, 2*nimpy, 2).to(torch.float32)
+
+    ndpath = "response_38_v2b_50ns_ndlar.npy"
+    kernel_conv = ndlarsim(ndpath)
+
+    quadrant = torch.tensor(np.load(ndpath).astype(np.float32))
+    kernel = quadrant_copy(quadrant).roll(shifts=(45,45),dims=(0,1))
+
+    kernel_conv = kernel_conv[:,:,6000:6100]
+    kernel_conv = kernel_conv.contiguous()
+    kernel = kernel[:,:,6000:6100]
+    kernel = kernel.contiguous()
+    kernel_check = kernel_conv.roll(shifts=(40,40),dims=(0,1)).reshape(9,10,9,10,-1).flip(dims=(0,2)).reshape(90,90,-1)
+    assert torch.allclose(kernel, kernel_check)
+
+    nx, ny, nt = kernel.shape
+    nz = (nt-1, nt-1, (ny//nimpy-1)*nimpy, (ny//nimpy-1)*nimpy,
+          (nx//nimpx-1)*nimpx, (nx//nimpx-1)*nimpx,)
+    results = direct_hybrid_conv_corr_nd_unbatch(data=data, kernel=kernel,
+                                           taxis=-1, nz_data=nz,
+                                           stride=(nimpx,nimpy,1))
+    data = data.repeat((2,1,1,1))
+    data[1] = 2*data[1]
+    signal = Block(location=torch.tensor([[0,0,0],[0,0,0]]), data=data)
+    output = interlaced_symm(signal, kernel_conv, steps=torch.tensor((nimpx,nimpy,1)), taxis=-1, symm_axis=0)
+    for i in range(2):
+        assert torch.allclose(output.data[i], (i+1)*results, atol=1E-5, rtol=1E-5)
+    output = interlaced_symm(signal, kernel_conv, steps=torch.tensor((nimpx,nimpy,1)), taxis=-1, symm_axis=1)
+    for i in range(2):
+        assert torch.allclose(output.data[i], (i+1)*results, atol=1E-5, rtol=1E-5)
+
+    output2 = interlaced(signal, kernel_conv, steps=torch.tensor((nimpx,nimpy,1)), taxis=-1)
+    assert torch.allclose(output2.data[0], results, atol=1E-5, rtol=1E-5)
+    assert torch.equal(output.location, output2.location)
+
+
 def plot_interlaced_2d():
     # Needs to include an extra dimension due to annoying setup of padding in convo.py. .
     q = torch.tensor([[1,0], [2,0], [0,0], [0,0], [0,0], [0,0], [1,0], [1,0], [0,1], [0,1]]) # non-batched, unit charge;
@@ -305,3 +345,4 @@ if __name__ == '__main__':
     test_nd()
     test_interlaced()
     test_sym_convo1d()
+    test_nd_symm()
