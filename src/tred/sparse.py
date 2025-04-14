@@ -164,6 +164,61 @@ def chunkify(block: Block, shape: IntTensor) -> Block:
     return reshape_envelope(envelope, sgrid.spacing)
 
 
+
+def chunkify2(block: Block, shape: IntTensor) -> Block:
+    '''
+    Chunk the block into a new one with volume dimensions of given shape.
+    '''
+
+    sgrid = SGrid(shape)
+    if not isinstance(block, Block):
+        raise TypeError(f'sparse.chunkify2() block must be Block got {type(block)}')
+
+    # Find the minimum bin span that contains the block.
+    # Find the location of the bin containing the lowest point.
+    minpts = sgrid.gpoint(sgrid.spoint(block.location))
+    maxpts = sgrid.gpoint(sgrid.spoint(block.location+block.shape-1)+1)
+    shapes = maxpts - minpts
+    maxshape = torch.max(shapes, dim=0).values
+
+    # location of block inside the envelope.
+    offset = block.location
+    # if not torch.all(offset >= 0):
+    #     raise ValueError(f'fill_envelope negative locations of block {block.shape} in envelope {maxshape}')
+
+    inner = block.shape
+    outer = maxshape
+    nbatches = block.nbatches
+
+    locs = offset
+
+    cshape = sgrid.spacing.to(locs.device)
+
+    ndim = int(inner.numel())
+
+    local_grid = torch.cartesian_prod(*[torch.arange(sz, device=locs.device) for sz in inner])  # [prod(inner), ndim]
+
+    tile_coords  = (locs[:, None, :] + local_grid[None, :, :]) // cshape     # [nbatches, prod(inner), ndim]
+    local_offsets = (locs[:, None, :] + local_grid[None, :, :]) % cshape     # [nbatches, prod(inner), ndim]
+
+    bidx = torch.arange(nbatches).view(nbatches, 1, 1).expand(-1, local_grid.size(0), 1).to(locs.device)  # [nbatches, prod(inner), 1]
+
+    batch_tile_combo = torch.cat([bidx, tile_coords], dim=-1).reshape(-1, ndim + 1)
+    tile_keys, reverse_indices = torch.unique(batch_tile_combo, return_inverse=True, dim=0)
+
+    locs_new = tile_keys[:, 1:] * cshape[None,:]  # [num_tiles, ndim]
+
+    data = torch.zeros((tile_keys.size(0),) + tuple(cshape.tolist()), dtype=block.data.dtype, device=block.data.device)
+
+    tile_indices = reverse_indices.view(-1)                     # [nbatches * prod(inner)]
+    local_offsets = local_offsets.view(nbatches * local_grid.size(0), ndim)
+    values = block.data.flatten()                                        # [nbatches * prod(inner)]
+
+    index = [tile_indices] + [local_offsets[:, d] for d in range(ndim)]
+    data[tuple(index)] = values
+
+    return Block(location=locs_new, data=data)
+
 def index_chunks(sgrid: SGrid, chunk: Block) -> Block:
     '''
     Index the chunks over space by bin.

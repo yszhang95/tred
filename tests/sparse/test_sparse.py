@@ -2,7 +2,7 @@ import torch
 import pytest
 from tred.sparse import SGrid  # Replace with the actual module name where SGrid is defined
 from tred.blocking import Block  # Replace with the actual module path
-from tred.sparse import chunkify
+from tred.sparse import chunkify, chunkify2
 from tred.graph import ChunkSum
 
 import matplotlib.pyplot as plt
@@ -243,6 +243,79 @@ def plot_chunksum():
     plt.savefig('chunksum_2d.png')
     plt.close()
 
+def test_sparse_chunkify2():
+    '''
+    Test all in one chunkify2() function
+    '''
+    loc = torch.tensor([[-1,-1], [0,2], [4,5]])
+    block = Block(loc, data=torch.ones([3,12,5]))
+    chunk_shape = (10,10)
+    chunks = chunkify2(block, chunk_shape)
+    #
+    clocs = torch.tensor([
+        (-10, -10),  (-10, 0), (0, -10), (0, 0), (10, -10), (10, 0),
+        (0, 0), (10, 0),
+        (0, 0), (10, 0),
+    ])
+
+    data = torch.zeros((len(clocs), *chunk_shape))
+
+    data[0,9:,9:] = block.data[0,:1,:1]
+    data[1,9:,:4] = block.data[0,:1,1:]
+    data[2,:,9:] = block.data[0,1:11,:1]
+    data[3,:,:4] = block.data[0,1:11,1:]
+    data[4,:1,9:] = block.data[0,11:,:1]
+    data[5,:1,:4] = block.data[0,11:,1:]
+
+    data[6, :, 2:7] = block.data[1, :10, :]
+    data[7, :2, 2:7] = block.data[1, 10:, :]
+
+    data[8, 4:, 5:] = block.data[2, :6, :]
+    data[9, :6, 5:] = block.data[2, 6:, :]
+
+    assert torch.equal(clocs, chunks.location)
+    assert torch.equal(data, chunks.data)
+
+def plot_chunkify2():
+    loc = torch.tensor([[-1,-1], [0,2], [4,3]])
+    block = Block(loc, data=torch.ones([3,2,3]))
+    chunk_shape = (2,2)
+    chunks = chunkify2(block, chunk_shape)
+
+    # plotting
+    fig, axes = plt.subplots(ncols=2, nrows=2, figsize=(6*2, 6*2))
+
+    col_codes = generate_colors(block.size()[0])
+    for i in range(block.size()[0]):
+        ax = (axes.flat)[i]
+        loc = block.location[i]
+        c0 = loc.numpy()
+        c1 = c0 + block.shape.numpy()
+        grid_values = block.data[i].numpy()
+        plot_grid_on_axis(ax, c0, c1, grid_values, color=col_codes[i], linestyle='-')
+        ax.set_xlim(-3, 7)
+        ax.set_ylim(-3, 7)
+        ax.grid(True)
+        ax.set_title(f'ibatch {i}')
+
+    ax = axes.flat[-1]
+    col_codes = generate_colors(chunks.size()[0])
+    for i in range(chunks.size()[0]):
+        loc = chunks.location[i]
+        c0 = loc.numpy()
+        c1 = c0 + np.array(chunk_shape)
+        grid_values = chunks.data[i].numpy()
+        plot_grid_on_axis(ax, c0, c1, grid_values, offset=(0.01*i, 0.01*i), color=col_codes[i], linestyle='-.')
+        assert i < 50
+    ax.set_xlim(-3, 7)
+    ax.set_ylim(-3, 7)
+    ax.set_title(f'chunked; chunk_shape {chunk_shape}')
+
+    ax.grid(True)
+    plt.tight_layout()
+    plt.savefig('chunkify2_2d.png')
+    plt.close()
+
 def main():
     test_vdim()
     test_to_tensor()
@@ -252,6 +325,8 @@ def main():
     plot_chunkify()
     test_chunksum()
     plot_chunksum()
+    test_sparse_chunkify2()
+    plot_chunkify2()
 
 if __name__ == '__main__':
     main()
