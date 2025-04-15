@@ -30,8 +30,11 @@ def benchmark_chunkify(fchunkify, outpickle, devices):
 
     # Run your PyTorch Model.
     # At any point in time, save a snapshot to file for later.
+    nel = 1
     with torch.no_grad():
         o = fchunkify(Block(location=location, data=data), shape=cshape)
+        nel = o.data.numel()
+        o = None
     # In this sample, we save the snapshot after running code above
     #   - Save as many snapshots as you'd like.
     #   - Snapshots will save last `max_entries` number of memory events
@@ -45,6 +48,7 @@ def benchmark_chunkify(fchunkify, outpickle, devices):
     # Stop recording memory snapshot history.
     torch.cuda.memory._record_memory_history(enabled=None)
     print('Maximum cuda memory allocated', peak_mem/1024**2, 'MB')
+    print('Allocated for output', nel*8/1024**2, 'MB')
 
     # record time
     start_event = torch.cuda.Event(enable_timing=True)
