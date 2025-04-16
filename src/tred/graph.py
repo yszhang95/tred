@@ -24,7 +24,7 @@ Developer take note:
 
 from .blocking import Block
 from .drift import drift
-from .util import debug, tenstr
+from .util import info, debug, tenstr
 from .raster.depos import binned as raster_depos
 from .raster.steps import compute_qeff
 
@@ -327,7 +327,12 @@ class ChunkSum(nn.Module):
         Return a new block chunked to given shape and with overlaps summed.
         '''
         # fixme: May wish to put each in its own module if dynamic rebatching helps.
-        return accumulate(chunkify2(block, self.chunk_shape))
+        try:
+            return accumulate(chunkify2(block, self.chunk_shape))
+        except torch.cuda.OutOfMemoryError:
+            info("ChunkSum: Caught CUDA OutOfMemoryError using chunkify2; falling back to chunkify")
+            torch.cuda.empty_cache()
+            return accumulate(chunkify(block, self.chunk_shape))
 
 
 class LacedConvo(nn.Module):

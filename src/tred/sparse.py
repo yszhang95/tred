@@ -83,7 +83,7 @@ class SGrid:
         Inverse of `spoint`.
         '''
         return self.to_tensor(spoint) * self.spacing
-        
+
 
     def envelope(self, pbounds: Block) -> Block:
         '''
@@ -96,7 +96,7 @@ class SGrid:
 
         # Find the minimum bin span that contains the block.
         # Find the location of the bin containing the lowest point.
-        minpts = self.gpoint(self.spoint(pbounds.location)) 
+        minpts = self.gpoint(self.spoint(pbounds.location))
         # Find the location of the bin one past the bin containing the highest point.
         maxpts = self.gpoint(self.spoint(pbounds.location+pbounds.shape-1)+1)
         shapes = maxpts - minpts
@@ -219,6 +219,7 @@ def chunkify2(block: Block, shape: IntTensor) -> Block:
     inner = block.shape
     outer = envelope.shape
     nbatches = block.nbatches
+    # from location to offset/index
     locs = block.location - minpts
     cshape = sgrid.spacing.to(locs.device)
     ndim = int(inner.numel())
@@ -231,6 +232,9 @@ def chunkify2(block: Block, shape: IntTensor) -> Block:
     inner_strides = torch.tensor(calculate_strides(inner), device=ldevice)
     chunk_strides = torch.tensor(calculate_strides(cshape), device=ldevice)
     ind_strides = torch.tensor(calculate_strides(outer // cshape), device=ldevice)
+
+    max_input_offset = block.nbatches*outer_strides[0]
+    assert max_input_offset < MAX_OFFSET, f'Maximum index for the output envelope, {max_input_offset}, exceeds limit of {offset_dtype}'
 
     if torch.any(outer % cshape):
         raise ValueError("chunk shape must be dividable by SGrid.sgrid")
@@ -247,8 +251,9 @@ def chunkify2(block: Block, shape: IntTensor) -> Block:
     tile_keys, reverse_indices = torch.unique(tild_idx, return_inverse=True, sorted=True)
 
     locs_new = unflat_index(tile_keys, ind_strides)
-    locs_new[:,1:] = locs_new[:,1:] * cshape[None,:] 
+    locs_new[:,1:] = locs_new[:,1:] * cshape[None,:]
     _, reverse_bidx = torch.unique(locs_new[:,0], sorted=True, return_inverse=True)
+    # from offset to location
     locs_new = locs_new[:,1:] + minpts[reverse_bidx]
 
     # flat according to cshape
