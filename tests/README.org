@@ -19,3 +19,4 @@ Tests are
   : uv run python test_blocking.py
   : uv run python test_indexing.py
   : uv run python test_sparse.py
+  : uv run pytest --log-cli-level=INFO test_sparse.py

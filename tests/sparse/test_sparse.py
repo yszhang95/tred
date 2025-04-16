@@ -3,6 +3,7 @@ import pytest
 from tred.sparse import SGrid  # Replace with the actual module name where SGrid is defined
 from tred.blocking import Block  # Replace with the actual module path
 from tred.sparse import chunkify, chunkify2
+from tred.chunking import accumulate
 from tred.graph import ChunkSum
 
 import matplotlib.pyplot as plt
@@ -201,6 +202,19 @@ def test_chunksum():
     assert torch.equal(expected_loc, chunks.location)
     assert torch.equal(expected_data, chunks.data), f'{chunks.data}'
 
+@pytest.mark.skipif(not torch.cuda.is_available(), reason="CUDA not available")
+def test_chunksum_cuda_oom():
+    torch.manual_seed(16)
+    nbatches = 10_000
+    locs = torch.randint(0, 1000, (nbatches, 3), device='cuda')
+    data = torch.rand((nbatches, 50, 50, 50), device='cuda')
+    cshape = (40, 40, 40)
+    block = Block(location=locs, data=data)
+    chunksum = ChunkSum(cshape)
+    chunksum.to('cuda')
+    # print(torch.cuda.memory_allocated() // 1024**2)
+    with pytest.raises(torch.cuda.OutOfMemoryError):
+        chunks = chunksum(block)
 
 def plot_chunksum():
     nbatch = 2
@@ -316,6 +330,18 @@ def plot_chunkify2():
     plt.savefig('chunkify2_2d.png')
     plt.close()
 
+def test_chunkify_chunkif2_accumulate():
+    torch.manual_seed(16)
+    nbatches = 100
+    data = torch.randint(0, 16, (100,25,25,25))
+    locs = torch.randint(0, 30, (100,3))
+    cshape = torch.tensor((10, 10, 10))
+    block = Block(data=data, location=locs)
+    o1 = accumulate(chunkify(block, cshape))
+    o2 = accumulate(chunkify2(block, cshape))
+    assert torch.equal(o1.location, o2.location)
+    assert torch.equal(o1.data, o2.data)
+
 def main():
     test_vdim()
     test_to_tensor()
@@ -327,6 +353,8 @@ def main():
     plot_chunksum()
     test_sparse_chunkify2()
     plot_chunkify2()
+    test_chunksum_cuda_oom()
+    test_chunkify_chunkif2_accumulate()
 
 if __name__ == '__main__':
     main()

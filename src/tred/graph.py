@@ -24,7 +24,7 @@ Developer take note:
 
 from .blocking import Block
 from .drift import drift
-from .util import debug, tenstr
+from .util import info, debug, tenstr
 from .raster.depos import binned as raster_depos
 from .raster.steps import compute_qeff
 
@@ -328,39 +328,12 @@ class ChunkSum(nn.Module):
         Return a new block chunked to given shape and with overlaps summed.
         '''
         # fixme: May wish to put each in its own module if dynamic rebatching helps.
-        block_shape = block.data.shape[1:]
-        memsize = 4*block.nbatches
-        for num in block_shape:
-            memsize *= num
-
-        # nchunks = memsize//self.max_mem_byte + 1
-        nchunks = block.nbatches // 100 + 1
-
-        locs = torch.chunk(block.location, nchunks)
-        dats = torch.chunk(block.data, nchunks)
-
-        odata = []
-        olocs = []
-        for loc, dat in zip(locs, dats):
-            # print('per chunk', loc.shape[0], dat.shape[0])
-            chunks = accumulate(chunkify2(Block(location=loc, data=dat), self.chunk_shape))
-            olocs.append(chunks.location)
-            odata.append(chunks.data)
-            if len(olocs)>5:
-                block = Block(location=torch.cat(olocs, dim=0), data=torch.cat(odata, dim=0))
-                o = accumulate(block)
-                olocs = []
-                odata = []
-                olocs.append(o.location)
-                odata.append(o.data)
-
+        try:
+            return accumulate(chunkify2(block, self.chunk_shape))
+        except torch.cuda.OutOfMemoryError:
+            info("ChunkSum: Caught CUDA OutOfMemoryError using chunkify2; falling back to chunkify")
             torch.cuda.empty_cache()
-        if nchunks > 1:
-            block = Block(location=torch.cat(olocs, dim=0), data=torch.cat(odata, dim=0))
-            return accumulate(block)
-        else:
-            # print(olocs[0].shape[0])
-            return Block(location=olocs[0], data=odata[0])
+            return accumulate(chunkify(block, self.chunk_shape))
 
 class LacedConvo(nn.Module):
     '''
