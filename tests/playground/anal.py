@@ -3,7 +3,8 @@ import json
 import pandas as pd
 
 # File path to the log file
-log_file_path = "log3.log"  # Change this to your actual file path
+#log_file_path = "log3.log"  # Change this to your actual file path
+log_file_path = "run_chunkify2.log"  # Change this to your actual file path
 
 # Read the log from file
 with open(log_file_path, "r") as f:

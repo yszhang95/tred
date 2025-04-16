@@ -29,7 +29,7 @@ from .raster.depos import binned as raster_depos
 from .raster.steps import compute_qeff
 
 from .types import index_dtype
-from .sparse import chunkify
+from .sparse import chunkify, chunkify2
 from .chunking import accumulate
 from .convo import interlaced, interlaced_symm
 
@@ -165,7 +165,7 @@ class Drifter(nn.Module):
         Parameters:
             - tail (torch.Tensor): Tensor representing tail positions, either 1D (`(npt,)`) or 2D (`(npt, vdim)`).
             - head (torch.Tensor): Tensor representing head positions, either 1D (`(npt,)`) or 2D (`(npt, vdim)`).
-            - velocity (float): Determines the direction of drift. Positive values prioritize larger `tail[:, vaxis]`, 
+            - velocity (float): Determines the direction of drift. Positive values prioritize larger `tail[:, vaxis]`,
                             while negative values prioritize smaller ones.
             - vaxis (int): The index of the axis along which the positions are compared.
 
@@ -343,7 +343,7 @@ class ChunkSum(nn.Module):
         olocs = []
         for loc, dat in zip(locs, dats):
             # print('per chunk', loc.shape[0], dat.shape[0])
-            chunks = accumulate(chunkify(Block(location=loc, data=dat), self.chunk_shape))
+            chunks = accumulate(chunkify2(Block(location=loc, data=dat), self.chunk_shape))
             olocs.append(chunks.location)
             odata.append(chunks.data)
             if len(olocs)>5:
@@ -361,7 +361,6 @@ class ChunkSum(nn.Module):
         else:
             # print(olocs[0].shape[0])
             return Block(location=olocs[0], data=odata[0])
-
 
 class LacedConvo(nn.Module):
     '''

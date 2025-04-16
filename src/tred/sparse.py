@@ -17,6 +17,9 @@ from .util import to_tensor, to_tuple
 from .blocking import Block
 from .types import IntTensor, Shape, Tensor
 
+offset_dtype = torch.int64
+MAX_OFFSET = torch.iinfo(offset_dtype).max
+
 # fixme: Does this REALLY deserve to be a class?
 class SGrid:
     '''
@@ -162,6 +165,107 @@ def chunkify(block: Block, shape: IntTensor) -> Block:
     envelope = sgrid.envelope(block)
     fill_envelope(envelope, block)
     return reshape_envelope(envelope, sgrid.spacing)
+
+def flat_index(ten, stride):
+    if len(ten.shape) !=2:
+        raise ValueError(f'sparse.flat_index() ten must be 2D tensor, but {len(ten.shape)} is given.')
+    if ten.dtype != offset_dtype:
+        raise ValueError(f'sparse.flat_index() ten must be in {offset_dtype}, but {ten.dtype} is given.')
+    if stride.dtype != stride.dtype != offset_dtype:
+        raise ValueError(f'sparse.flat_index() stride must be in {offset_dtype}, but {stride.dtype} is given.')
+    if ten.size(1) != stride.numel():
+        raise ValueError(f'Number of components in ten must match stride. stride length is {stride.numel()} while n components of ten is {ten.size(1)}')
+
+    return torch.sum(ten * stride[None,...], dim=1)
+
+def unflat_index(index, stride):
+    if index.dim() != 1:
+        raise ValueError(f'sparse.unflat_index() index must be 1D tensor, but {index.dim()}D is given.')
+    if index.dtype != torch.int32 and index.dtype != torch.int64:
+        raise ValueError(f'sparse.unflat_index() index must be in int32 or int64, but {index.dtype} is given.')
+    if stride.dtype != torch.int32 and stride.dtype != torch.int64:
+        raise ValueError(f'sparse.unflat_index() stride must be in int32 or int64, but {stride.dtype} is given.')
+
+    coord = []
+    rem = index
+    for s in stride:
+        coord.append(rem // s)
+        rem = rem % s
+    return torch.stack(coord, dim=1)
+
+def calculate_strides(shape: tuple|list|Tensor):
+    if not isinstance(shape, Tensor):
+        shape = torch.tensor(shape, dtype=offset_dtype)
+    if shape.ndim != 1:
+        raise ValueError(f"sparse.calculate_strides must be in 1D, but {shape.ndim} is given")
+    strides = [1,]
+    for s in torch.flip(shape, dims=(0,)):
+        strides.append(strides[-1] * s)
+    return strides[::-1]
+
+
+def chunkify2(block: Block, shape: IntTensor) -> Block:
+    '''
+    Chunk the block into a new one with volume dimensions of given shape.
+    '''
+
+    sgrid = SGrid(shape)
+    if not isinstance(block, Block):
+        raise TypeError(f'sparse.chunkify2() block must be Block got {type(block)}')
+    envelope = sgrid.envelope(block)
+
+    minpts = envelope.location
+
+    inner = block.shape
+    outer = envelope.shape
+    nbatches = block.nbatches
+    locs = block.location - minpts
+    cshape = sgrid.spacing.to(locs.device)
+    ndim = int(inner.numel())
+
+    ldevice = block.location.device
+    ddevice = block.data.device
+
+    # location of block inside the envelope.
+    outer_strides = torch.tensor(calculate_strides(outer), device=ldevice)
+    inner_strides = torch.tensor(calculate_strides(inner), device=ldevice)
+    chunk_strides = torch.tensor(calculate_strides(cshape), device=ldevice)
+    ind_strides = torch.tensor(calculate_strides(outer // cshape), device=ldevice)
+
+    if torch.any(outer % cshape):
+        raise ValueError("chunk shape must be dividable by SGrid.sgrid")
+
+    local_grid = torch.cartesian_prod(*[torch.arange(sz, device=ldevice) for sz in inner])  # [prod(inner), ndim]
+
+    # flat according to outer // cshape
+    tile_coords  = (locs[:, None, :] + local_grid[None, :, :]) // cshape     # [nbatches, prod(inner), ndim]
+    tile_coords = flat_index(tile_coords.view(-1, ndim), ind_strides[1:]) # [nbatches * prod(inner),]
+    tile_coords = tile_coords.view(nbatches, local_grid.size(0))
+    bidx = torch.arange(0, nbatches*ind_strides[0]-1, ind_strides[0], dtype=offset_dtype, device=ldevice) # (nbatches,)
+    tild_idx = (bidx[:,None] + tile_coords).view(-1) # (nbatches * prod(inner))
+
+    tile_keys, reverse_indices = torch.unique(tild_idx, return_inverse=True, sorted=True)
+
+    locs_new = unflat_index(tile_keys, ind_strides)
+    locs_new[:,1:] = locs_new[:,1:] * cshape[None,:] 
+    _, reverse_bidx = torch.unique(locs_new[:,0], sorted=True, return_inverse=True)
+    locs_new = locs_new[:,1:] + minpts[reverse_bidx]
+
+    # flat according to cshape
+    local_offsets = (locs[:, None, :] + local_grid[None, :, :]) % cshape     # [nbatches, prod(inner), ndim]
+    local_offsets = local_offsets.view(-1, ndim)
+    local_offsets = flat_index(local_offsets, chunk_strides[1:]) # [nbatches * prod(inner),]
+
+    # FIXME: CUDA-CPU SYNC
+    data = torch.zeros((tile_keys.size(0),) + tuple(cshape.tolist()), dtype=block.data.dtype, device=ddevice)
+
+    tile_indices = reverse_indices.view(-1)                     # [nbatches * prod(inner)]
+    values = block.data.flatten()                               # [nbatches * prod(inner)]
+
+    index = [tile_indices, local_offsets]
+    data.view(-1, chunk_strides[0])[tuple(index)] = values
+
+    return Block(location=locs_new, data=data)
 
 
 def index_chunks(sgrid: SGrid, chunk: Block) -> Block:
