@@ -31,7 +31,7 @@ from .raster.steps import compute_qeff
 from .types import index_dtype
 from .sparse import chunkify, chunkify2
 from .chunking import accumulate
-from .convo import interlaced
+from .convo import interlaced, interlaced_symm
 
 import torch
 import torch.nn as nn
@@ -339,19 +339,20 @@ class LacedConvo(nn.Module):
     '''
     Convolve an interlaced signal and a response.
     '''
-    def __init__(self, lacing=None, taxis=-1):
+    def __init__(self, lacing=None, taxis=-1, symm_axis=0):
         super().__init__()
         if lacing is None:
             raise ValueError('a unitless, integer N-tensor lacing is required')
         constant(self, 'lacing', lacing, index_dtype)
         self._taxis = taxis
+        self._symm_axis = symm_axis
 
     def forward(self, signal, response):
         '''
         Apply laced convolution.
         '''
         # fixme: allow for response to be pre-FFT'ed
-        return interlaced(signal, response, self.lacing, self._taxis)
+        return interlaced_symm(signal, response, self.lacing, self._taxis, self._symm_axis)
 
 
 class Charge(nn.Module):
