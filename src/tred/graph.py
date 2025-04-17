@@ -24,12 +24,12 @@ Developer take note:
 
 from .blocking import Block
 from .drift import drift
-from .util import debug, tenstr
+from .util import info, debug, tenstr
 from .raster.depos import binned as raster_depos
 from .raster.steps import compute_qeff
 
 from .types import index_dtype
-from .sparse import chunkify
+from .sparse import chunkify, chunkify2
 from .chunking import accumulate
 from .convo import interlaced, interlaced_symm
 
@@ -165,7 +165,7 @@ class Drifter(nn.Module):
         Parameters:
             - tail (torch.Tensor): Tensor representing tail positions, either 1D (`(npt,)`) or 2D (`(npt, vdim)`).
             - head (torch.Tensor): Tensor representing head positions, either 1D (`(npt,)`) or 2D (`(npt, vdim)`).
-            - velocity (float): Determines the direction of drift. Positive values prioritize larger `tail[:, vaxis]`, 
+            - velocity (float): Determines the direction of drift. Positive values prioritize larger `tail[:, vaxis]`,
                             while negative values prioritize smaller ones.
             - vaxis (int): The index of the axis along which the positions are compared.
 
@@ -327,7 +327,12 @@ class ChunkSum(nn.Module):
         Return a new block chunked to given shape and with overlaps summed.
         '''
         # fixme: May wish to put each in its own module if dynamic rebatching helps.
-        return accumulate(chunkify(block, self.chunk_shape))
+        try:
+            return accumulate(chunkify2(block, self.chunk_shape))
+        except torch.cuda.OutOfMemoryError:
+            info("ChunkSum: Caught CUDA OutOfMemoryError using chunkify2; falling back to chunkify")
+            torch.cuda.empty_cache()
+            return accumulate(chunkify(block, self.chunk_shape))
 
 
 class LacedConvo(nn.Module):

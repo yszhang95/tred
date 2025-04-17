@@ -146,7 +146,7 @@ def test_sparse_funcs_multichunk():
     assert torch.equal(c0, d0), f'{c0}, {d0}'
 
 
-def test_sparse_chunkify():
+def test_sparse2d_chunkify():
     '''
     Test all in one chunkify() function
     '''
@@ -215,3 +215,4 @@ def test_sparse_chunkify():
     # b_index = ic_index[s_index]
     b_index = ic_index[s_index.tolist()]
     assert torch.all(b_index == torch.arange(chunk.nbatches)), f'{b_index}'
+
