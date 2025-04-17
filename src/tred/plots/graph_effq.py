@@ -162,9 +162,6 @@ def runit(device='cpu'):
                 t04 = time.time()
 
                 signal = chunksum(qblock)
-                print(signal.data.device)
-
-                print(signal.nbatches)
                 qblock = None
 
                 if device == 'cuda':

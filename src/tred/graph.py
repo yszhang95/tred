@@ -316,24 +316,53 @@ class ChunkSum(nn.Module):
 
     '''
 
-    def __init__(self, chunk_shape=None):
+    def __init__(self, chunk_shape=None, nbatches=1000):
         super().__init__()
         if chunk_shape is None:
             raise ValueError('a unitless, integer N-tensor chunk shape is required')
         constant(self, 'chunk_shape', chunk_shape, index_dtype)
-        constant(self, 'max_mem_byte', 5*1024**3, torch.int64)
+        # constant(self, 'max_mem_byte', 5*1024**3, torch.int64)
+        self._nbatches = nbatches
 
     def forward(self, block: Block) -> Block:
         '''
         Return a new block chunked to given shape and with overlaps summed.
         '''
         # fixme: May wish to put each in its own module if dynamic rebatching helps.
-        try:
-            return accumulate(chunkify2(block, self.chunk_shape))
-        except torch.cuda.OutOfMemoryError:
-            info("ChunkSum: Caught CUDA OutOfMemoryError using chunkify2; falling back to chunkify")
+        # try:
+        #     return accumulate(chunkify2(block, self.chunk_shape))
+        # except torch.cuda.OutOfMemoryError:
+        #     info("ChunkSum: Caught CUDA OutOfMemoryError using chunkify2; falling back to chunkify")
+        #     torch.cuda.empty_cache()
+        #     return accumulate(chunkify(block, self.chunk_shape))
+
+        nchunks = block.nbatches // self._nbatches + 1
+
+        locs = torch.chunk(block.location, nchunks)
+        dats = torch.chunk(block.data, nchunks)
+
+        odata = []
+        olocs = []
+        for loc, dat in zip(locs, dats):
+            # print('per chunk', loc.shape[0], dat.shape[0])
+            chunks = accumulate(chunkify2(Block(location=loc, data=dat), self.chunk_shape))
+            olocs.append(chunks.location)
+            odata.append(chunks.data)
+            if len(olocs)>5:
+                block = Block(location=torch.cat(olocs, dim=0), data=torch.cat(odata, dim=0))
+                o = accumulate(block)
+                olocs = []
+                odata = []
+                olocs.append(o.location)
+                odata.append(o.data)
+
             torch.cuda.empty_cache()
-            return accumulate(chunkify(block, self.chunk_shape))
+        if nchunks > 1:
+            block = Block(location=torch.cat(olocs, dim=0), data=torch.cat(odata, dim=0))
+            return accumulate(block)
+        else:
+            # print(olocs[0].shape[0])
+            return Block(location=olocs[0], data=odata[0])
 
 class LacedConvo(nn.Module):
     '''
