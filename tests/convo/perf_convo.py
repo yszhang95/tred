@@ -94,9 +94,12 @@ def main():
         print(f"{e.key:<40} |CUDA total: {e.device_time_total / 1E3:.5f}ms | "
               f"Self CUDA: {e.self_device_time_total / 1E3:.5f}ms | Calls: {e.count}")
 
+    torch.cuda.reset_peak_memory_stats()
     torch.cuda.memory._record_memory_history()
-    interlaced_symm(signal, response, torch.tensor((10,10,1), device='cuda'))
+    tred.convo.interlaced_symm(signal, response, torch.tensor((10,10,1), device='cuda'))
     torch.cuda.memory._dump_snapshot("convolution.pickle")
+    print(f"Peak CUDA memory usage: {torch.cuda.max_memory_allocated()/1024**2} MB")
+
 
 
 if __name__ == '__main__':
