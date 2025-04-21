@@ -56,8 +56,9 @@ def runit(device='cpu'):
     tspace = 50*units.ns / units.us # values are in units of us
     grid_spacing = (pspace, pspace, tspace)
     # npixpersuper = 10
-    npixpersuper = 2
-    ntickperslice = 300
+    # npixpersuper = 16+1-9
+    npixpersuper = 12+1-9
+    ntickperslice = 6912+1-6400
     chunk_shape = (npixpersuper * nimperpix, npixpersuper * nimperpix, ntickperslice)
     print(chunk_shape)
 
@@ -187,7 +188,7 @@ def runit(device='cpu'):
                 # else:
                 #     nchunks = 15
                 # print(nchunks)
-                nchunks = signal.nbatches // 300 + 1
+                nchunks = signal.nbatches // 5 + 1
                 ibs = []
                 for l, s in zip(signal.location.chunk(nchunks), signal.data.chunk(nchunks)):
                     # print(s.shape[0])

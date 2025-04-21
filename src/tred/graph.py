@@ -348,7 +348,7 @@ class ChunkSum(nn.Module):
             chunks = accumulate(chunkify2(Block(location=loc, data=dat), self.chunk_shape))
             olocs.append(chunks.location)
             odata.append(chunks.data)
-            if len(olocs)>5:
+            if len(olocs)>3:
                 block = Block(location=torch.cat(olocs, dim=0), data=torch.cat(odata, dim=0))
                 o = accumulate(block)
                 olocs = []
