@@ -104,6 +104,9 @@ def runit(device='cpu'):
 
 
     for itpc, tpcdataset in enumerate(tpcs):
+        # only look at the TPC 26 for now for the test ...
+        if (itpc!=26) : continue
+
         sampler = SortedLabelBatchSampler(tpcdataset.labels[:,0], batch_size)
         loader = CustomNDLoader(tpcdataset, sampler=sampler,
                                 batch_size=None, collate_fn=nd_collate_fn)

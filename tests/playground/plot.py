@@ -3,7 +3,7 @@ import matplotlib.pyplot as plt
 
 # ? Replace this with your actual path
 # csv_path = "path/to/your/itpc_timing_summary.csv"
-csv_path = "./itpc_timing_summary.csv"
+csv_path = "/home/xqian/work/scratch_wcgpu1/DUNE_ND_Sim/tred/itpc_timing_summary.csv"
 
 # Load CSV
 df = pd.read_csv(csv_path)
