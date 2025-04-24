@@ -224,14 +224,40 @@ def convolve_spec(signal: Block, response_spec: Tensor, taxis: int = -1) -> Bloc
     # exclude first batched dimension
     dims = to_tuple(torch.arange(signal.vdim) + 1) 
 
-    signal_spec = torch.fft.fftn(signal.data, dim=dims)
-    measure_spec = signal_spec * response_spec
-    measure = torch.fft.ifftn(measure_spec, dim=dims)
-    if not iscomplex:
-        measure = measure.real
-    return Block(location = signal.location, data = measure) # fixme: normalization
+    with torch.cuda.amp.autocast():
+        signal_spec = torch.fft.fftn(signal.data, dim=dims)
+
+        # signal_spec.mul_(response_spec)  # In-place multiplication
+        # measure = torch.fft.ifftn(signal_spec, dim=dims)  # Reuse the buffer
+
+        measure_spec = signal_spec * response_spec
+        measure = torch.fft.ifftn(measure_spec, dim=dims)
+        if not iscomplex:
+            measure = measure.real
+        return Block(location = signal.location, data = measure) # fixme: normalization
 
 
+# def convolve_spec(signal: Block, response_spec: Tensor, taxis: int = -1) -> Block:
+#     '''
+#     As convolve() but provide response in padded, Fourier representation.
+#     '''
+#     iscomplex = False
+#     if signal.data.dtype == torch.complex64 or signal.data.dtype == torch.complex128:
+#         iscomplex = True
+#     signal = signal_pad(signal, response_spec.shape, taxis)
+
+#     # exclude first batched dimension
+#     dims = to_tuple(torch.arange(signal.vdim) + 1)
+    
+#     # Use JIT-compiled core operations
+#     spec_product = _jit_fft_multiply(signal.data, response_spec, dims)
+#     measure = _jit_ifft(spec_product, dims)
+    
+#     if not iscomplex:
+#         measure = measure.real
+#     return Block(location = signal.location, data = measure)
+
+# @torch.jit.script
 def convolve(signal: Block, response: Tensor, taxis: int = -1) -> Block:
     '''
     Return a tred simple convolution of signal and response.
@@ -261,13 +287,28 @@ def convolve(signal: Block, response: Tensor, taxis: int = -1) -> Block:
     "spatially centered" and "temporarily causal" requirements and other
     details.
     '''
-    debug(f'{signal} {tenstr(response)}')
+    # debug(f'{signal} {tenstr(response)}')
     c_shape = dft_shape(signal.shape, response.shape)
-    debug(f'{c_shape=}')
+    # debug(f'{c_shape=}')
     response = response_pad(response, c_shape, taxis)
     dims = to_tuple(torch.arange(len(c_shape)))
     response_spec = torch.fft.fftn(response, dim=dims)
+
     return convolve_spec(signal, response_spec, taxis)
+
+# from typing import List
+
+
+# @torch.jit.script
+# def _jit_fft_multiply(signal_data: Tensor, response_spec: Tensor, dims: List[int]) -> Tensor:
+#     """JIT-compiled FFT and multiplication"""
+#     signal_spec = torch.fft.fftn(signal_data, dim=dims)
+#     return signal_spec * response_spec
+
+# @torch.jit.script
+# def _jit_ifft(spec_product: Tensor, dims: List[int]) -> Tensor:
+#     """JIT-compiled inverse FFT"""
+#     return torch.fft.ifftn(spec_product, dim=dims)
 
 
 def interlaced(signal: Block, response: Tensor, steps: IntTensor, taxis: int = -1) -> Block:

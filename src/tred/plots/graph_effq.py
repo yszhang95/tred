@@ -195,7 +195,11 @@ def runit(device='cpu'):
                 for l, s in zip(signal.location.chunk(nchunks), signal.data.chunk(nchunks)):
                     # print(s.shape[0])
                     if s.shape[0] > 0:
+                        # # Add before the convo operation
+                        # torch.cuda.reset_peak_memory_stats()
                         iblock = convo(Block(location=l, data=s), response)
+                        # # Print after
+                        # print(f"Memory used: {torch.cuda.max_memory_allocated() / 1e9:.2f} GB")
 
                 if device == 'cuda':
                     torch.cuda.synchronize()
