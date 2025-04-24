@@ -5,6 +5,10 @@ Some basic utility functions
 import sys
 import subprocess
 from pathlib import Path
+
+import functools
+import warnings
+
 import torch
 from torch import Tensor
 
@@ -136,3 +140,17 @@ def getattr_first(attr, *things):
         got = getattr(thing, attr, None)
         if got is not None:
             return got
+
+
+def deprecated(reason):
+    def decorator(func):
+        @functools.wraps(func)
+        def wrapped(*args, **kwargs):
+            warnings.warn(
+                f"{func.__name__} is deprecated: {reason}",
+                category=DeprecationWarning,
+                stacklevel=2,
+            )
+            return func(*args, **kwargs)
+        return wrapped
+    return decorator

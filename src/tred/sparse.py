@@ -245,7 +245,7 @@ def chunkify2(block: Block, shape: IntTensor) -> Block:
     tile_coords  = (locs[:, None, :] + local_grid[None, :, :]) // cshape     # [nbatches, prod(inner), ndim]
     tile_coords = flat_index(tile_coords.view(-1, ndim), ind_strides[1:]) # [nbatches * prod(inner),]
     tile_coords = tile_coords.view(nbatches, local_grid.size(0))
-    bidx = torch.arange(0, nbatches*ind_strides[0]-1, ind_strides[0], dtype=offset_dtype, device=ldevice) # (nbatches,)
+    bidx = torch.arange(0, nbatches*ind_strides[0], ind_strides[0], dtype=offset_dtype, device=ldevice) # (nbatches,)
     tild_idx = (bidx[:,None] + tile_coords).view(-1) # (nbatches * prod(inner))
 
     tile_keys, reverse_indices = torch.unique(tild_idx, return_inverse=True, sorted=True)

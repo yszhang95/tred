@@ -26,21 +26,31 @@ def plot_quadrant_copy():
 def plot_ndlar_response():
     response_path = '/home/yousen/Documents/NDLAr2x2/tred/response_38_v2b_50ns_ndlar.npy'
     res_np = np.load(response_path)
-    response = ndlarsim(response_path)
+    response = ndlarsim(response_path, nd_response_shape=(45,45,6400), nd_nimp=10)
+
+    nimp = 10
+
+    # center = response.shape[0] // 2, response.shape[1] // 2
+    # ctr_region = [slice(
+    #     center[i] // nimp * nimp, center[i] // nimp * nimp + nimp
+    # ) for i in range(2)]
+    # ctr_region.append(np.argmax(res_np[0,0]))
+    # Xp = response[ctr_region].numpy()
+    Xp = quadrant_copy(torch.from_numpy(res_np))[:,:,np.argmax(res_np[0,0])].numpy()
 
     Xe = response[:,:,np.argmax(res_np[0,0])].numpy()
 
-    full_response = quadrant_copy(torch.from_numpy(res_np))
-    full_response = torch.roll(full_response, shifts=(45,45), dims=(0,1))
-    Xp = full_response[:,:,np.argmax(res_np[0,0])].numpy()
-
     fig, axes = plt.subplots(nrows=1, ncols=2, figsize=(8*2, 8))
-    for ax, X in zip(axes, [Xe, Xp]):
-        cax = ax.matshow(X)
+    for ax, X, offset in zip(axes, [Xe, Xp], [[0,0], [0,0]]):
+        extent = [
+            offset[1], offset[1] + X.shape[1],  # x-axis: axis 1
+            offset[0] + X.shape[0], offset[0]   # y-axis: axis 0, inverted
+        ]
+        cax = ax.matshow(X, extent=extent)
 
         # Set ticks at intervals of 10
-        xticks = range(0, X.shape[0], 10)
-        yticks = range(0, X.shape[1], 10)
+        xticks = range(offset[0], X.shape[0]+offset[0], nimp)
+        yticks = range(offset[1], X.shape[1]+offset[1], nimp)
         ax.set_xticks(yticks)
         ax.set_yticks(xticks)
 
@@ -53,8 +63,8 @@ def plot_ndlar_response():
         cbar = fig.colorbar(cax, ax=ax)
         cbar.set_label('Amplitude')
 
-    axes[0].set_title('Electron at center pixel; collection pixel moved to [0,0];\nwhen current at the center of\n collection pixel reaches maximum')
-    axes[1].set_title('Pixel at center; original response;\nwhen current at the center of\n collection pixel reaches maximum')
+    axes[0].set_title(f'Electron fixed at center pixel, current on different pixel;\nN_imp per axis = {nimp};\nwhen current at the center of\n collection pixel reaches maximum')
+    axes[1].set_title(f'Current on pixel at the center;\nElectrons are at different positions;\nN_imp per axis = {nimp};\nwhen current at the center of\n collection pixel reaches maximum')
 
     fig.savefig('ndlar_response_peak_at_pxlctr.png')
 

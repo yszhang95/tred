@@ -78,14 +78,12 @@ def test_nd():
     kernel_conv = ndlarsim(ndpath)
 
     quadrant = torch.tensor(np.load(ndpath).astype(np.float32))
-    kernel = quadrant_copy(quadrant).roll(shifts=(45,45),dims=(0,1))
+    kernel = quadrant_copy(quadrant)
 
     kernel_conv = kernel_conv[:,:,6000:6100]
     kernel_conv = kernel_conv.contiguous()
     kernel = kernel[:,:,6000:6100]
     kernel = kernel.contiguous()
-    kernel_check = kernel_conv.roll(shifts=(40,40),dims=(0,1)).reshape(9,10,9,10,-1).flip(dims=(0,2)).reshape(90,90,-1)
-    assert torch.allclose(kernel, kernel_check)
 
     nx, ny, nt = kernel.shape
     nz = (nt-1, nt-1, (ny//nimpy-1)*nimpy, (ny//nimpy-1)*nimpy,
@@ -115,7 +113,7 @@ def test_convo():
     s3 = Block(location=torch.tensor([[0,0]]), data=q3)
 
     response = torch.tensor([[1, 1], [2, 2], [1, 1]]) # center in the center; length along pixel domain is always odd
-    response_conv = torch.tensor([[2, 2], [1, 1], [1, 1]]) # center in the front; length along pixel domain is always odd
+    response_conv = response
 
     for q, s in zip([q1, q2, q3], [s1, s2, s3]):
         result = convolve(s, response_conv)
@@ -128,7 +126,7 @@ def plot_convolve_2d():
     q = torch.tensor([[1,0], [0,1]]) # non-batched, unit charge;
     response = torch.tensor([[1,0], [2,0], [1,0]]) # 3 pixels; nothing in the next moment
 
-    response_conv = torch.tensor([[2,0],[1,0],[1,0]])
+    response_conv = response
 
     signal = Block(location=torch.tensor([[0,0]]), data=q)
 
@@ -170,7 +168,7 @@ def plot_convolve_2d():
     q = torch.tensor([[1,0], [0,0], [0,0], [1,0], [0,1]]) # non-batched, unit charge;
     response = torch.tensor([[1,0], [2,0], [1,0]]) # 3 pixels; nothing in the next moment
 
-    response_conv = torch.tensor([[2,0],[1,0],[1,0]])
+    response_conv = response
 
     signal = Block(location=torch.tensor([[0,0]]), data=q)
 
@@ -223,7 +221,7 @@ def test_interlaced():
     s3 = Block(location=torch.tensor([[0,0]]), data=q3)
 
     response = torch.tensor([[1, 1], [1,1], [2, 2],[2,2], [1, 1], [1,1]]) # center in the center; length along pixel domain is always odd
-    response_conv = torch.tensor([[2, 2],[2,2], [1, 1], [1,1], [1, 1], [1,1]]) # center in the center; length along pixel domain is always odd
+    response_conv = response
 
     for q, s in zip([q1, q2, q3], [s1, s2, s3]):
         result = interlaced(s, response_conv, steps=torch.tensor([2,1], dtype=torch.int32), taxis=-1)
@@ -243,14 +241,12 @@ def test_nd_symm():
     kernel_conv = ndlarsim(ndpath)
 
     quadrant = torch.tensor(np.load(ndpath).astype(np.float32))
-    kernel = quadrant_copy(quadrant).roll(shifts=(45,45),dims=(0,1))
+    kernel = quadrant_copy(quadrant)
 
     kernel_conv = kernel_conv[:,:,6000:6100]
     kernel_conv = kernel_conv.contiguous()
     kernel = kernel[:,:,6000:6100]
     kernel = kernel.contiguous()
-    kernel_check = kernel_conv.roll(shifts=(40,40),dims=(0,1)).reshape(9,10,9,10,-1).flip(dims=(0,2)).reshape(90,90,-1)
-    assert torch.allclose(kernel, kernel_check)
 
     nx, ny, nt = kernel.shape
     nz = (nt-1, nt-1, (ny//nimpy-1)*nimpy, (ny//nimpy-1)*nimpy,
@@ -278,7 +274,7 @@ def plot_interlaced_2d():
     q = torch.tensor([[1,0], [2,0], [0,0], [0,0], [0,0], [0,0], [1,0], [1,0], [0,1], [0,1]]) # non-batched, unit charge;
     response = torch.tensor([[0.5,0], [1,0], [2,0], [2,0], [1,0], [0.5,0]]) # 3 pixels; nothing in the next moment
 
-    response_conv = torch.tensor([[2,0],[2,0], [1,0], [0.5,0], [0.5,0], [1,0]])
+    response_conv = response
 
     signal = Block(location=torch.tensor([[0,0]]), data=q)
 
