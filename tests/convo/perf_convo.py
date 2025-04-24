@@ -6,20 +6,32 @@ from tred.partitioning import deinterlace_pairs
 from tred.response import ndlarsim
 from tred.convo import dft_shape, signal_pad, response_pad, zero_pad
 
+# uncoment the lines marked with zero padding to test zeros padding
+# uncoment the lines marked with symemtric padding to test symmetric padding
+# uncoment the lines marked with built-in padding to test built-in pading
+
 def convolve_spec(signal: Block, response_spec, taxis: int = -1) -> Block:
     iscomplex = False
     if signal.data.dtype == torch.complex64 or signal.data.dtype == torch.complex128:
         iscomplex = True
 
-    with torch.profiler.record_function("signal_pad"):
-        signal = signal_pad(signal, response_spec.shape, taxis)
-        # signal.data = zero_pad(signal.data, response_spec.shape)
+    # with torch.profiler.record_function("signal_pad"): # zero padding / symmetric padding
+    with torch.profiler.record_function("signal_shift"): # built-in padding
+        nrm1 = [i - j for i,j in zip(response_spec.shape, signal.data.size()[1:])] # Nr - 1 # built-in padding
+        nrm1[taxis] = 0 # built-in padding
+        if any(x % 2 != 0 for x in nrm1): # built-in padding
+            raise ValueError(f"Length of response tensor must always be odd. {nrm1} + 1 is given.") # built-in padding
+        nrm1 = torch.tensor(nrm1, device=signal.data.device) # built-in padding
+        fh = nrm1 // 2 # built-in padding
+        signal = Block(signal.location - fh, data=signal.data) # built-in padding
+        # signal = signal_pad(signal, response_spec.shape, taxis) # symmetric padding
+        # signal.data = zero_pad(signal.data, response_spec.shape) # zero padding
 
     # exclude first batched dimension
     dims = (torch.arange(signal.vdim) + 1).tolist()
 
     with torch.profiler.record_function("signal_fft"):
-        spec = torch.fft.fftn(signal.data, dim=dims)
+        spec = torch.fft.fftn(signal.data, s=response_spec.shape, dim=dims)
         signal.data = None # manual release memory
     with torch.profiler.record_function("signal_response_mult"):
         measure = spec * response_spec
@@ -33,11 +45,11 @@ def convolve(signal, response, taxis: int = -1) -> Block:
     with torch.profiler.record_function("convolve_prep"):
         c_shape = dft_shape(signal.shape, response.shape)
         dims = torch.arange(len(c_shape)).tolist()
-    with torch.profiler.record_function("response_pad"):
-        response = response_pad(response, c_shape, taxis)
-        # response = zero_pad(response, c_shape)
+    # with torch.profiler.record_function("response_pad"): # zero padding / symmetric padding
+    #     response = response_pad(response, c_shape, taxis) # symmetric padding
+    #     # response = zero_pad(response, c_shape) # zero padding
     with torch.profiler.record_function("response_fft"):
-        response_spec = torch.fft.fftn(response, dim=dims)
+        response_spec = torch.fft.fftn(response, s=c_shape, dim=dims)
     return convolve_spec(signal, response_spec, taxis)
 
 def interlaced_symm(signal, response, steps, symm_axis=0):
