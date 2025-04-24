@@ -102,6 +102,93 @@ def deinterlace_pairs(ten: Tensor, steps: IntTensor, pair_axis: int = 0) -> Gene
 
             yield (ten[slcs1], ten[slcs2])
 
+# #optimized
+# def deinterlace_pairs(ten: Tensor, steps: IntTensor, pair_axis: int = 0) -> list:
+#     '''
+#     Returns batched tensors in pairs that have been interlaced in `ten` at given step.
+    
+#     This optimized version returns all pairs at once as a list instead of yielding them
+#     one by one, allowing for more efficient GPU utilization.
+    
+#     - ten :: The tensor to deinterlace
+#     - steps :: The step sizes for each dimension
+#     - pair_axis :: The axis along which to create symmetric pairs
+    
+#     Returns a list of tuples, each containing a pair of tensors.
+#     '''
+#     if len(ten.shape) != len(steps):
+#         raise ValueError(f'dimensionality mismatch {len(ten.shape)} != {len(steps)}')
+
+#     if torch.any(torch.tensor(ten.shape, device=steps.device) % steps):
+#         raise ValueError(f'tensor of shape {ten.shape} not an integer multiple of {steps}')
+
+#     steps = to_tuple(steps)
+#     device = ten.device
+
+#     assert steps[pair_axis] % 2 == 0, f'Number of impact positions along axis'\
+#         f' {pair_axis} is {steps[pair_axis]}, which should be even'
+
+#     # Normalize negative pair_axis
+#     pair_axis = len(steps) + pair_axis if pair_axis < 0 else pair_axis
+    
+#     # Create indices for all dimensions except pair_axis
+#     dim_ranges = []
+#     for i, s in enumerate(steps):
+#         if i != pair_axis:
+#             dim_ranges.append(torch.arange(s, device=device))
+    
+#     # Use meshgrid to create the Cartesian product of all other dimensions
+#     # This replaces the itertools.product call
+#     if len(dim_ranges) > 0:
+#         meshes = torch.meshgrid(*dim_ranges, indexing='ij')
+#         # Flatten the meshgrid results
+#         grid_indices = [mesh.flatten() for mesh in meshes]
+#     else:
+#         # Handle case with only one dimension
+#         grid_indices = []
+    
+#     # Pre-allocate all result pairs
+#     half_pairs = steps[pair_axis] // 2
+#     other_dims_count = 1
+#     for i, s in enumerate(steps):
+#         if i != pair_axis:
+#             other_dims_count *= s
+    
+#     result_pairs = []
+    
+#     # Create all slices at once for each dimension except pair_axis
+#     all_slices = {}
+#     for dim_idx, (step, indices) in enumerate(zip([s for i, s in enumerate(steps) if i != pair_axis], 
+#                                                  grid_indices)):
+#         real_dim = dim_idx if dim_idx < pair_axis else dim_idx + 1
+#         all_slices[real_dim] = [slice(idx.item(), None, step) for idx in indices]
+    
+#     # Batch process all pairs
+#     for idx in range(other_dims_count):
+#         # Get the slice for each dimension except pair_axis
+#         for j in range(half_pairs):
+#             # Create the slices for this specific combination
+#             slcs1 = []
+#             slcs2 = []
+            
+#             for dim in range(len(steps)):
+#                 if dim == pair_axis:
+#                     slcs1.append(slice(j, None, steps[dim]))
+#                     slcs2.append(slice(steps[pair_axis]-1-j, None, steps[dim]))
+#                 else:
+#                     # Find the correct dimension index in all_slices
+#                     dim_idx = dim if dim < pair_axis else dim - 1
+#                     slc = all_slices[dim][idx % (len(all_slices[dim]))]
+#                     idx = idx // len(all_slices[dim]) if len(all_slices[dim]) > 0 else idx
+#                     slcs1.append(slc)
+#                     slcs2.append(slc)
+            
+#             # Get the tensor slices
+#             result_pairs.append((ten[slcs1], ten[slcs2]))
+    
+#     return result_pairs
+
+
 
 # Not validated and not referenced elsewhere.
 #
