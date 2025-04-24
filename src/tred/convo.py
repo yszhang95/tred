@@ -4,7 +4,7 @@ Support for DFT-based convolutions.
 
 '''
 
-from .util import to_tuple, to_tensor, debug, tenstr, getattr_first
+from .util import to_tuple, to_tensor, tenstr, getattr_first, deprecated
 from .types import IntTensor, Tensor, Shape, index_dtype
 from .blocking import Block, batchify
 from .partitioning import deinterlace, deinterlace_pairs
@@ -42,8 +42,6 @@ def zero_pad(ten : Tensor, shape: Shape|None = None) -> Tensor:
     shape then an extra first dimension is assumed to run along a batch.
 
     Zero-padding is applied to the high-side of each non-batch dimension.
-
-    See symmetric_pad() to apply padding in different per-dimension manners.
     '''
     batched = True
     if len(shape) == len(ten.shape):
@@ -63,20 +61,7 @@ def zero_pad(ten : Tensor, shape: Shape|None = None) -> Tensor:
     return padded
 
 
-def front_half(n):
-    '''
-    Return "half" of n when used at the front of a dimension.
-    '''
-    return torch.ceil(to_tensor(n, dtype=torch.int32)/2)
-
-def back_half(n):
-    '''
-    Return "half" of n when used at the back of a dimension.
-    '''
-    return torch.floor(to_tensor(n, dtype=torch.int32)/2)
-
-
-
+@deprecated('Please use zero_pad instead.')
 def symmetric_pad(ten: Tensor, shape: Shape, symmetry: tuple) -> Tensor:
     '''
     Zero-pad tensor to shape in a symmetric fashion.
@@ -182,13 +167,11 @@ def symmetric_pad(ten: Tensor, shape: Shape, symmetry: tuple) -> Tensor:
     return ten
 
 
-def response_pad(response: Tensor, shape: Shape, taxis: int = -1) -> Tensor:
+def response_pad(response: Tensor, shape: Shape) -> Tensor:
     '''
     Apply tred "response style" padding to the tensor.
     '''
-    sym = ["center"] * len(shape)
-    sym[taxis] = "append"
-    return symmetric_pad(response, shape, sym)
+    return zero_pad(response, shape)
 
 
 def signal_pad(signal: Block, shape: Shape, taxis: int = -1) -> Block:
@@ -199,16 +182,14 @@ def signal_pad(signal: Block, shape: Shape, taxis: int = -1) -> Block:
     padding so that the original signal content remains at its original
     location.
     '''
-    sym = ["edge"] * len(shape)
-    sym[taxis] = "append"
-    data = symmetric_pad(signal.data, shape, sym)
+    data = zero_pad(signal.data, shape)
     # signal is batched
     nrm1 = [i - j for i,j in zip(shape, signal.data.size()[1:])] # Nr - 1
-    nrm1 = to_tensor(nrm1, device=signal.data.device)
     nrm1[taxis] = 0
-    assert not torch.any(nrm1 % 2) # length response tensor must always be odd
+    if any(x % 2 != 0 for x in nrm1):
+        raise ValueError(f"Length of response tensor must always be odd. {nrm1} + 1 is given.")
+    nrm1 = to_tensor(nrm1, device=signal.data.device)
     fh = nrm1 // 2
-    debug(f'{fh=}')
     return Block(signal.location - fh, data=data)
 
 
@@ -222,11 +203,12 @@ def convolve_spec(signal: Block, response_spec: Tensor, taxis: int = -1) -> Bloc
     signal = signal_pad(signal, response_spec.shape, taxis)
 
     # exclude first batched dimension
-    dims = to_tuple(torch.arange(signal.vdim) + 1) 
+    dims = to_tuple(torch.arange(signal.vdim) + 1)
 
-    signal_spec = torch.fft.fftn(signal.data, dim=dims)
-    measure_spec = signal_spec * response_spec
-    measure = torch.fft.ifftn(measure_spec, dim=dims)
+    spec = torch.fft.fftn(signal.data, dim=dims)
+    signal.data = None # manual release
+    measure = spec * response_spec
+    measure = torch.fft.ifftn(measure, dim=dims)
     if not iscomplex:
         measure = measure.real
     return Block(location = signal.location, data = measure) # fixme: normalization
@@ -261,10 +243,8 @@ def convolve(signal: Block, response: Tensor, taxis: int = -1) -> Block:
     "spatially centered" and "temporarily causal" requirements and other
     details.
     '''
-    debug(f'{signal} {tenstr(response)}')
     c_shape = dft_shape(signal.shape, response.shape)
-    debug(f'{c_shape=}')
-    response = response_pad(response, c_shape, taxis)
+    response = response_pad(response, c_shape)
     dims = to_tuple(torch.arange(len(c_shape)))
     response_spec = torch.fft.fftn(response, dim=dims)
     return convolve_spec(signal, response_spec, taxis)
@@ -307,7 +287,6 @@ def interlaced(signal: Block, response: Tensor, steps: IntTensor, taxis: int = -
     Block.location of the returned Block positions the result in the
     "super-grid" and is signal.location/steps.
     '''
-    debug(f'interlaced: signal:{signal} response:{tenstr(response)} steps:{tenstr(steps)}')
 
     super_location = signal.location / steps
 
@@ -333,7 +312,6 @@ def interlaced_symm(signal: Block, response: Tensor, steps: IntTensor, taxis: in
 
     symm_axis :: The axis (excluding batch) along which mirror symmetry is present in `response`.
     '''
-    debug(f'interlaced: signal:{signal} response:{tenstr(response)} steps:{tenstr(steps)}')
 
     symm_axis = symm_axis if symm_axis >=0 else steps.shape[0] + symm_axis
 

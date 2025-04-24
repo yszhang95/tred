@@ -7,6 +7,77 @@ Tests are spread in three parts.
 ** Drift
 ** Rasterization
 ** Convolution
+*** Loading the response
+Two functions in ~tests/convo/test_response.py~.
+It generates two plots when it is executed, =uv run python tests/convo/test_response.py=.
+- Plot ~quadrant_copy.png~ :: It is generated from
+  ~plot_quadrant_copy~. Two panels are generated. The time axis is the
+  first axis. The left one is for the first time tick, while the right
+  one is the second time tick.  The quadrant is set to be [0,0,0]->0,
+  [0,0,1]->1,...[0,4,4]->15, [1,0,0]->16,...,[1,4,4]->31. We expect
+  the plot has the minimum in the center of the full plane and larger
+  values are at the corners.
+- Plot =ndlar_response_peak_at_pxlctr.png= :: It is generated from
+  function ~plot_ndlar_response~. The response of both panels should
+  hold reflection symmetry, $R_{i}^{j} = R_{-i}^{N_{imp}-1-j}$, for i
+  from $-N_{pxl}$ to $N_{pxl}$, and j from 0 to $N_{imp}-1$. The left
+  one is from the quadrant copy and reverse in pixel domain. The right
+  one is just from the quadrant copy. We should clearly see the peak
+  response in the centered pixel. The left and right plot should have
+  a reflection symmetry, $R_{i}^j=r_{-i}^j$, or equivalently,
+  $R_{i}^{j}=r_{i}^{N_{imp}-1-j}. Note: the pixel line are shifted to
+  larger value by half unit because of the plotting function =matshow=.
+
+**** TODO Add a proper reference for the expected ND response in full plane.
+TBD.
+
+*** Interlaced convolution
+Test script =tests/convo/test_convo.py=.
+
+- =plot_symmetric_pad_1d= :: Visualizes 1D symmetric padding for
+  different styles ("append", "prepend", "center", "edge") on small
+  test signals. Warning: symmetric padding is deprecated.
+- =plot_sr_pad_1d= :: Demonstrates signal and response padding for 1D
+  convolution, comparing 'edge' padding for the signal and 'center'
+  padding for the response. Warning: symmetric padding is deprecated.
+- =direct_convo_pixel_time_2d= :: Performs a direct unbatched 2D
+  convolution (with optional kernel flipping) using
+  ~torch.nn.functional.conv2d~.
+- =direct_hybrid_conv_corr_nd_unbatch= :: Applies a hybrid ND
+  convolution: cross-correlation along spatial axes and convolution
+  along the time axis.
+- =test_nd= :: Validates ND convolution using `interlaced` against
+  direct 3D operation, cross-correlation along spatial axes and
+  convolution along the time axis, with stride and padding.
+- =test_convo= :: Verifies 2D convolution between signals and symmetric
+  responses using both direct and wrapped `convolve` methods.
+- =plot_convolve_2d= :: Plots 2D convolution results of a simple
+  unit-charge pattern using a symmetric response kernel; includes
+  annotated bar plots for each time slice.
+- =test_interlaced= :: Tests the correctness of the `interlaced` method
+  against direct 2D convolution with temporal stacking and stride
+  simulation.
+- =test_nd_symm= :: Validates `interlaced_symm` against direct 3D
+  operation, cross-correlation along spatial axes and convolution
+  along the time axis, with stride and padding. The response must
+  follow a reflection symmetry.
+- =plot_interlaced_2d= :: Visualizes the `interlaced` 2D convolution
+  result on a test input with a symmetric response, shown across time
+  slices.
+- =test_sym_convo1d= :: Demonstrates 1D convolution symmetry. When one
+  input sequence is reflected, the other must also be flipped to
+  ensure the output is correspondingly reversed.
+
+Plotting functions generate three figures:
+- ='unitq_convolve_2d.png'=
+- ='unitq_convolve_2d_long.png'=
+- ='interlaced_convolve_2d.png'=
+The three plots are expected to match those shown in the [GitHub
+discussion](https://github.com/yszhang95/tred/issues/32#issuecomment-2768147153).
+
+All assertions in the tests below must pass.
+: uv run pytest test_convo.py
+
 ** Sparse
 Tests are
 - Scripts under =tests=,
