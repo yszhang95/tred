@@ -224,17 +224,17 @@ def convolve_spec(signal: Block, response_spec: Tensor, taxis: int = -1) -> Bloc
     # exclude first batched dimension
     dims = to_tuple(torch.arange(signal.vdim) + 1) 
 
-    with torch.cuda.amp.autocast():
-        signal_spec = torch.fft.fftn(signal.data, dim=dims)
+    # with torch.cuda.amp.autocast():
+    signal_spec = torch.fft.fftn(signal.data, dim=dims)
 
-        # signal_spec.mul_(response_spec)  # In-place multiplication
-        # measure = torch.fft.ifftn(signal_spec, dim=dims)  # Reuse the buffer
+    signal_spec.mul_(response_spec)  # In-place multiplication
+    measure = torch.fft.ifftn(signal_spec, dim=dims)  # Reuse the buffer
 
-        measure_spec = signal_spec * response_spec
-        measure = torch.fft.ifftn(measure_spec, dim=dims)
-        if not iscomplex:
-            measure = measure.real
-        return Block(location = signal.location, data = measure) # fixme: normalization
+    # measure_spec = signal_spec * response_spec
+    # measure = torch.fft.ifftn(measure_spec, dim=dims)
+    if not iscomplex:
+        measure = measure.real
+    return Block(location = signal.location, data = measure) # fixme: normalization
 
 
 # def convolve_spec(signal: Block, response_spec: Tensor, taxis: int = -1) -> Block:
@@ -257,7 +257,19 @@ def convolve_spec(signal: Block, response_spec: Tensor, taxis: int = -1) -> Bloc
 #         measure = measure.real
 #     return Block(location = signal.location, data = measure)
 
+# from typing import List
+
 # @torch.jit.script
+# def _jit_fft_multiply(signal_data: Tensor, response_spec: Tensor, dims: List[int]) -> Tensor:
+#     """JIT-compiled FFT and multiplication"""
+#     signal_spec = torch.fft.fftn(signal_data, dim=dims)
+#     return signal_spec * response_spec
+
+# @torch.jit.script
+# def _jit_ifft(spec_product: Tensor, dims: List[int]) -> Tensor:
+#     """JIT-compiled inverse FFT"""
+#     return torch.fft.ifftn(spec_product, dim=dims)
+
 def convolve(signal: Block, response: Tensor, taxis: int = -1) -> Block:
     '''
     Return a tred simple convolution of signal and response.
@@ -296,19 +308,7 @@ def convolve(signal: Block, response: Tensor, taxis: int = -1) -> Block:
 
     return convolve_spec(signal, response_spec, taxis)
 
-# from typing import List
 
-
-# @torch.jit.script
-# def _jit_fft_multiply(signal_data: Tensor, response_spec: Tensor, dims: List[int]) -> Tensor:
-#     """JIT-compiled FFT and multiplication"""
-#     signal_spec = torch.fft.fftn(signal_data, dim=dims)
-#     return signal_spec * response_spec
-
-# @torch.jit.script
-# def _jit_ifft(spec_product: Tensor, dims: List[int]) -> Tensor:
-#     """JIT-compiled inverse FFT"""
-#     return torch.fft.ifftn(spec_product, dim=dims)
 
 
 def interlaced(signal: Block, response: Tensor, steps: IntTensor, taxis: int = -1) -> Block:
@@ -391,10 +391,92 @@ def interlaced_symm(signal: Block, response: Tensor, steps: IntTensor, taxis: in
         sig_lace_block = Block(super_location, data=torch.complex(sig_lace[0], sig_lace[1].flip(dims=flipdims)))
         # res_lace[1] is not used as it is a flipped copy, given the reflection symmetry
         meas_lace_block = convolve(sig_lace_block, res_lace[0])
+
+        # # Before creating the block, get real part in-place
+        # real_part = meas_lace_block.data.real  # This creates a view, not a copy
+        # # Flip imag part in-place and add to real part
+        # imag_flipped = torch.flip(meas_lace_block.data.imag, dims=flipdims)
+        # real_part.add_(imag_flipped)  # In-place addition
+        # # Now create a new block with the optimized data
+        # meas_lace_block = Block(location=meas_lace_block.location, data=real_part)
+        # if meas is None:
+        #     meas = meas_lace_block
+        # else:
+        #     # In-place addition to existing data
+        #     meas.data.add_(meas_lace_block.data)
+
         meas_lace_block = Block(location = meas_lace_block.location,
                                 data = meas_lace_block.data.real + torch.flip(meas_lace_block.data.imag, dims=flipdims))
         if meas is None:
             meas = meas_lace_block
             continue
-        meas.data += meas_lace_block.data
+        # meas.data += meas_lace_block.data
+        meas.data.add_(meas_lace_block.data)
+
     return meas
+
+
+# def interlaced_symm(signal: Block, response: Tensor, steps: IntTensor, taxis: int = -1, symm_axis: int = 0) -> Block:
+#     '''
+#     Memory-optimized version of interlaced symmetric convolution.
+#     '''
+#     debug(f'interlaced: signal:{signal} response:{tenstr(response)} steps:{tenstr(steps)}')
+
+#     symm_axis = symm_axis if symm_axis >= 0 else steps.shape[0] + symm_axis
+#     super_location = signal.location / steps
+    
+#     # Create generators instead of materializing all pairs at once
+#     batched_steps = torch.cat([torch.tensor([1], device=steps.device), steps])
+#     sig_laces_gen = deinterlace_pairs(signal.data, batched_steps, 1+symm_axis)
+#     res_laces_gen = deinterlace_pairs(response, steps, symm_axis)
+    
+#     flipdims = (1+symm_axis,)
+#     meas = None
+#     meas_location = None
+    
+#     # First pass to determine output shape and location
+#     for sig_lace, res_lace in zip(sig_laces_gen, res_laces_gen):
+#         # Create complex tensor for first pair only to get shape
+#         sig_lace_block = Block(super_location, data=torch.complex(sig_lace[0], sig_lace[1].flip(dims=flipdims)))
+#         temp_meas = convolve(sig_lace_block, res_lace[0])
+        
+#         if meas is None:
+#             # Pre-allocate output tensor with correct shape
+#             meas_location = temp_meas.location
+#             meas = Block(location=meas_location, 
+#                          data=torch.zeros_like(temp_meas.data, dtype=torch.float32))
+        
+#         # Compute and accumulate in-place
+#         meas.data.add_(temp_meas.data.real)
+#         meas.data.add_(torch.flip(temp_meas.data.imag, dims=flipdims))
+        
+#         # Clear temporary tensors
+#         del sig_lace_block, temp_meas
+#         torch.cuda.empty_cache()  # Optional: aggressive memory cleanup
+        
+#         # Process just the first pair to determine shape, then break
+#         break
+    
+#     # Reset generators for actual computation
+#     sig_laces_gen = deinterlace_pairs(signal.data, batched_steps, 1+symm_axis)
+#     res_laces_gen = deinterlace_pairs(response, steps, symm_axis)
+    
+#     # Skip first pair (already processed)
+#     next(sig_laces_gen)
+#     next(res_laces_gen)
+    
+#     # Process remaining pairs
+#     for sig_lace, res_lace in zip(sig_laces_gen, res_laces_gen):
+#         # Process in batches if tensors are very large
+#         sig_lace_block = Block(super_location, data=torch.complex(sig_lace[0], sig_lace[1].flip(dims=flipdims)))
+#         temp_meas = convolve(sig_lace_block, res_lace[0])
+        
+#         # Accumulate in-place
+#         meas.data.add_(temp_meas.data.real)
+#         meas.data.add_(torch.flip(temp_meas.data.imag, dims=flipdims))
+        
+#         # Clear temporary tensors
+#         del sig_lace_block, temp_meas
+#         torch.cuda.empty_cache()  # Optional: aggressive memory cleanup
+    
+#     return meas
