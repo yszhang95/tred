@@ -1,6 +1,8 @@
 import torch
 from tred.response import ndlarsim, quadrant_copy
-from tred.convo import symmetric_pad, convolve, interlaced, interlaced_symm
+from tred.convo import symmetric_pad, convolve, interlaced
+# from tred.convo import interlaced_symm_v2 as interlaced_symm
+from tred.convo import interlaced_symm_v2, interlaced_symm
 from tred.blocking import Block
 import matplotlib.pyplot as plt
 from matplotlib.ticker import MaxNLocator
@@ -257,10 +259,17 @@ def test_nd_symm():
     data = data.repeat((2,1,1,1))
     data[1] = 2*data[1]
     signal = Block(location=torch.tensor([[0,0,0],[0,0,0]]), data=data)
+
     output = interlaced_symm(signal, kernel_conv, steps=torch.tensor((nimpx,nimpy,1)), taxis=-1, symm_axis=0)
     for i in range(2):
         assert torch.allclose(output.data[i], (i+1)*results, atol=1E-5, rtol=1E-5)
     output = interlaced_symm(signal, kernel_conv, steps=torch.tensor((nimpx,nimpy,1)), taxis=-1, symm_axis=1)
+    for i in range(2):
+        assert torch.allclose(output.data[i], (i+1)*results, atol=1E-5, rtol=1E-5)
+    output = interlaced_symm_v2(signal, kernel_conv, steps=torch.tensor((nimpx,nimpy,1)), taxis=-1, symm_axis=0)
+    for i in range(2):
+        assert torch.allclose(output.data[i], (i+1)*results, atol=1E-5, rtol=1E-5)
+    output = interlaced_symm_v2(signal, kernel_conv, steps=torch.tensor((nimpx,nimpy,1)), taxis=-1, symm_axis=1)
     for i in range(2):
         assert torch.allclose(output.data[i], (i+1)*results, atol=1E-5, rtol=1E-5)
 
@@ -276,9 +285,9 @@ def plot_interlaced_2d():
 
     response_conv = response
 
-    signal = Block(location=torch.tensor([[0,0]]), data=q)
+    signal = Block(location=torch.tensor([[0,0]]), data=q.to(torch.float32))
 
-    result = interlaced(signal, response_conv, steps=torch.tensor([2,1], dtype=torch.int32), taxis=-1)
+    result = interlaced_symm_v2(signal, response_conv, steps=torch.tensor([2,1], dtype=torch.int32), taxis=-1)
 
     X = result.data[0].numpy().T
     loc = result.location[0][[1,0]]

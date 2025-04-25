@@ -72,12 +72,17 @@ Plotting functions generate three figures:
 - ='unitq_convolve_2d.png'=
 - ='unitq_convolve_2d_long.png'=
 - ='interlaced_convolve_2d.png'=
-The three plots are expected to match those shown in the [GitHub
-discussion](https://github.com/yszhang95/tred/issues/32#issuecomment-2768147153).
+The three plots are expected to match those shown in the *missing link*.
+
+Test script =tests/test_convo.py=. Zero padding and calculations of DFT
+shape are validated.
 
 All assertions in the tests below must pass.
+: uv run pytest convo/test_convo.py
 : uv run pytest test_convo.py
 
+**** TODO Add a link for plots.
+TBD.
 ** Sparse
 Tests are
 - Scripts under =tests=,
