@@ -6,6 +6,8 @@ from tred.partitioning import deinterlace_pairs
 from tred.response import ndlarsim
 from tred.convo import dft_shape, signal_pad, response_pad, zero_pad
 
+import time
+
 # uncoment the lines marked with zero padding to test zeros padding
 # uncoment the lines marked with symemtric padding to test symmetric padding
 # uncoment the lines marked with built-in padding to test built-in pading
@@ -75,10 +77,10 @@ def interlaced_symm(signal, response, steps, symm_axis=0):
         return meas
 
 
-def main():
+def perf_interlaced_symm():
     response = ndlarsim('response_38_v2b_50ns_ndlar.npy')
     response = response.to('cuda')
-    data = torch.rand((100, 50,50,500), device='cuda')
+    data = torch.rand((50, 80,80, 513), device='cuda')
     location = torch.ones((data.size(0), 3), dtype=torch.int32, device='cuda')
     signal = Block(data=data, location=location)
     with torch.profiler.profile(
@@ -93,7 +95,7 @@ def main():
     entries = prof.key_averages()
     # cuda events only
     entries = [e for e in prof.key_averages()
-               if e.cpu_time_total == 0 and e.device_time_total > 0]
+               if e.device_time_total > 0 and e.cpu_time_total == 0]
 
     # Filter out raw CUDA kernels (e.g., cuFFT kernels like void multi_bluestein_fft...)
     filtered = [e for e in entries if not e.key.startswith("void")]
@@ -102,17 +104,70 @@ def main():
     filtered = [e for e in filtered if not e.key.startswith("aten::")]
     sorted_filtered = sorted(filtered, key=lambda e: e.device_time_total, reverse=True)
 
+    print('Summary table from profiler')
     for e in sorted_filtered[:10]:  # top 10
-        print(f"{e.key:<40} |CUDA total: {e.device_time_total / 1E3:.5f}ms | "
-              f"Self CUDA: {e.self_device_time_total / 1E3:.5f}ms | Calls: {e.count}")
+        print(f"{e.key:<40} |CUDA total: {e.device_time_total / 1E3:11.5f}ms | "
+              f"Self CUDA: {e.self_device_time_total / 1E3:11.5f}ms | Calls: {e.count}")
 
     torch.cuda.reset_peak_memory_stats()
     torch.cuda.memory._record_memory_history()
     tred.convo.interlaced_symm(signal, response, torch.tensor((10,10,1), device='cuda'))
-    torch.cuda.memory._dump_snapshot("convolution.pickle")
+    torch.cuda.memory._dump_snapshot("convolution_interlaced_sym.pickle")
+    print(f"Peak CUDA memory usage: {torch.cuda.max_memory_allocated()/1024**2} MB")
+    torch.cuda.synchronize()
+    s = time.time()
+    tred.convo.interlaced_symm(signal, response, torch.tensor((10,10,1), device='cuda'))
+    torch.cuda.synchronize()
+    e = time.time()
+    print('Manual Measured time', (e-s)*1E3, 'ms')
+    print('Finished analyzing interlaced_symm\n')
+
+def perf_interlaced_symm_v2():
+    response = ndlarsim('response_38_v2b_50ns_ndlar.npy')
+    response = response.to('cuda')
+    data = torch.rand((50, 80,80, 513), device='cuda')
+    location = torch.ones((data.size(0), 3), dtype=torch.int32, device='cuda')
+    signal = Block(data=data, location=location)
+    with torch.profiler.profile(
+            activities=[torch.profiler.ProfilerActivity.CPU, torch.profiler.ProfilerActivity.CUDA],
+            record_shapes=True,
+            profile_memory=True,
+            with_stack=False
+    ) as prof:
+
+        tred.convo.interlaced_symm_v2(signal, response, torch.tensor((10,10,1), device='cuda'))
+
+    entries = prof.key_averages()
+    # cuda events only
+    entries = [e for e in prof.key_averages()
+               if e.device_time_total > 0]
+
+    filtered = [e for e in entries if e.key.startswith("aten::")]
+    sorted_filtered = sorted(filtered, key=lambda e: e.device_time_total, reverse=True)
+    # print(sorted_filtered[0], sorted_filtered[0].self_device_time_total)
+
+    print('Summary table from profiler')
+    for e in sorted_filtered[:10]:  # top 10
+        print(f"{e.key:<40} |CUDA total: {e.device_time_total / 1E3 :11.5f}ms | "
+              f"Self CUDA: {e.self_device_time_total / 1E3 :11.5f}ms | Calls: {e.count}")
+
+    torch.cuda.reset_peak_memory_stats()
+    torch.cuda.memory._record_memory_history()
+    tred.convo.interlaced_symm_v2(signal, response, torch.tensor((10,10,1), device='cuda'))
+    torch.cuda.memory._dump_snapshot("convolution_interlaced_symm_v2.pickle")
     print(f"Peak CUDA memory usage: {torch.cuda.max_memory_allocated()/1024**2} MB")
 
+    torch.cuda.synchronize()
+    s = time.time()
+    tred.convo.interlaced_symm_v2(signal, response, torch.tensor((10,10,1), device='cuda'))
+    torch.cuda.synchronize()
+    e = time.time()
+    print('Manual Measured time', (e-s)*1E3, 'ms')
+    print('Finished analyzing interlaced_symm_v2\n')
 
+def main():
+    perf_interlaced_symm()
+    perf_interlaced_symm_v2()
 
 if __name__ == '__main__':
     main()
