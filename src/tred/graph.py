@@ -31,7 +31,7 @@ from .raster.steps import compute_qeff
 from .types import index_dtype
 from .sparse import chunkify, chunkify2
 from .chunking import accumulate
-from .convo import interlaced, interlaced_symm
+from .convo import interlaced, interlaced_symm, interlaced_symm_v2
 
 import torch
 import torch.nn as nn
@@ -352,7 +352,7 @@ class LacedConvo(nn.Module):
         Apply laced convolution.
         '''
         # fixme: allow for response to be pre-FFT'ed
-        return interlaced_symm(signal, response, self.lacing, self._taxis, self._symm_axis)
+        return interlaced_symm_v2(signal, response, self.lacing, self._taxis, self._symm_axis)
 
 
 class Charge(nn.Module):

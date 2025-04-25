@@ -167,6 +167,7 @@ def symmetric_pad(ten: Tensor, shape: Shape, symmetry: tuple) -> Tensor:
     return ten
 
 
+@deprecated("Not used in interlaced_symm_v2")
 def response_pad(response: Tensor, shape: Shape) -> Tensor:
     '''
     Apply tred "response style" padding to the tensor.
@@ -174,6 +175,7 @@ def response_pad(response: Tensor, shape: Shape) -> Tensor:
     return zero_pad(response, shape)
 
 
+@deprecated("Not used in interlaced_symm_v2")
 def signal_pad(signal: Block, shape: Shape, taxis: int = -1) -> Block:
     '''
     Apply tred "signal style" padding to the block.
@@ -193,6 +195,7 @@ def signal_pad(signal: Block, shape: Shape, taxis: int = -1) -> Block:
     return Block(signal.location - fh, data=data)
 
 
+@deprecated("Not used in interlaced_symm_v2")
 def convolve_spec(signal: Block, response_spec: Tensor, taxis: int = -1) -> Block:
     '''
     As convolve() but provide response in padded, Fourier representation.
@@ -214,6 +217,7 @@ def convolve_spec(signal: Block, response_spec: Tensor, taxis: int = -1) -> Bloc
     return Block(location = signal.location, data = measure) # fixme: normalization
 
 
+@deprecated("Not used in interlaced_symm_v2")
 def convolve(signal: Block, response: Tensor, taxis: int = -1) -> Block:
     '''
     Return a tred simple convolution of signal and response.
@@ -249,7 +253,7 @@ def convolve(signal: Block, response: Tensor, taxis: int = -1) -> Block:
     response_spec = torch.fft.fftn(response, dim=dims)
     return convolve_spec(signal, response_spec, taxis)
 
-
+@deprecated("Use interlaced_symm_v2 instead")
 def interlaced(signal: Block, response: Tensor, steps: IntTensor, taxis: int = -1) -> Block:
     '''
     Return a tred interlaced convolution of signal and response.
@@ -304,7 +308,7 @@ def interlaced(signal: Block, response: Tensor, steps: IntTensor, taxis: int = -
         meas.data += meas_lace_block.data
     return meas
 
-
+@deprecated("Use interlaced_symm_v2 instead")
 def interlaced_symm(signal: Block, response: Tensor, steps: IntTensor, taxis: int = -1, symm_axis: int = 0) -> Block:
     '''
     Return a tred interlaced convolution of signal and response, similar to `interlaced`,
@@ -335,3 +339,54 @@ def interlaced_symm(signal: Block, response: Tensor, steps: IntTensor, taxis: in
             continue
         meas.data += meas_lace_block.data
     return meas
+
+
+def interlaced_symm_v2(signal: Block, response: Tensor, steps: IntTensor, taxis: int = -1, symm_axis: int = 0, o_shape=None) -> Block:
+    '''
+    Return a tred interlaced convolution of signal and response, similar to `interlaced`,
+    with the additional use of reflection symmetry in the response tensor.
+
+    symm_axis :: The axis (excluding batch) along which mirror symmetry is present in `response`.
+    '''
+    # DFT shape
+    c_shape = dft_shape(torch.tensor(signal.data.shape[1:]).to(steps.device)//steps, torch.tensor(response.shape).to(steps.device)//steps)
+    if o_shape is None:
+        o_shape = c_shape
+    elif any(tuple(s1 >= s2 for s1,s2 in zip(c_shape, o_shape))):
+        raise ValueError(f"Invalid output shape after padding: expected at least Ns + Nr - 1, {c_shape}, but got {o_shape}")
+
+    # output locations
+    nrm1 = to_tensor(response.shape, device='cpu') // steps.cpu() - 1
+    nrm1[taxis] = 0
+    if torch.any(nrm1 % 2):
+        raise ValueError(f"Length of response tensor must always be odd. {nrm1} + 1 is given.")
+    nrm1 = to_tensor(nrm1, device=signal.data.device)
+    fh = nrm1 // 2
+    super_location = signal.location // steps - fh
+
+    # deinterlace
+    symm_axis = symm_axis if symm_axis >=0 else steps.shape[0] + symm_axis
+    flipdims = (1+symm_axis,) # batch dim == 0, dims for flipping
+
+    batched_steps = torch.cat([torch.tensor([1], device=steps.device), steps])
+    sig_laces = deinterlace_pairs(signal.data, batched_steps, 1+symm_axis) # one extra dim for batch dim
+    res_laces = deinterlace_pairs(response, steps, symm_axis)
+
+    # FFT preparation
+    dims = tuple(i+1 for i in range(len(c_shape))) # dims for FFT
+
+    meas = None
+
+    for sig_lace, res_lace in zip(sig_laces, res_laces):
+        sig_lace_complex = torch.complex(sig_lace[0], sig_lace[1].flip(dims=flipdims))
+        # res_lace[1] is not used as it is a flipped copy, given the reflection symmetry
+        res_  = zero_pad(res_lace[0], o_shape)
+        meas_ = zero_pad(sig_lace_complex, o_shape)
+        meas_ = torch.fft.fftn(res_[None,...], dim=dims) * torch.fft.fftn(meas_, dim=dims)
+        if meas is None:
+            meas = meas_
+        else:
+            meas += meas_
+    meas = torch.fft.ifftn(meas, dim=dims)
+    meas.real = meas.real + torch.flip(meas.imag, dims=flipdims)
+    return Block(data=meas.real, location=super_location)
