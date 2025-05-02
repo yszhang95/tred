@@ -11,6 +11,7 @@ from tred.io_nd import (
 )
 from tred.recombination import birks, box
 from tred.io import write_npz
+from tred import chunking
 
 import sys
 import h5py
@@ -58,7 +59,8 @@ def runit(device='cpu'):
     # npixpersuper = 10
     # npixpersuper = 16+1-9
     npixpersuper = 12+1-9
-    ntickperslice = 6912+1-6400
+    # ntickperslice = 6912+1-6400
+    ntickperslice = 384 # 128*3
     chunk_shape = (npixpersuper * nimperpix, npixpersuper * nimperpix, ntickperslice)
     print(chunk_shape)
 
@@ -78,7 +80,8 @@ def runit(device='cpu'):
     drifter = Drifter(diffusion, lifetime, velocity)
     raster = Raster(velocity, grid_spacing)
     chunksum = ChunkSum(chunk_shape)
-    convo = LacedConvo(lacing)
+    convo = LacedConvo(lacing, o_shape=(12, 12, 6912))
+    chunksum_i = ChunkSum((4, 4, 128), method='chunksum_inplace_v2')
 
     t1 = time.time()
 
@@ -98,9 +101,9 @@ def runit(device='cpu'):
 
     # Start recording memory snapshot history, initialized with a buffer
     # capacity of 100,000 memory events, via the `max_entries` field.
-    MAX_NUM_OF_MEM_EVENTS_PER_SNAPSHOT = 100_000
+    # MAX_NUM_OF_MEM_EVENTS_PER_SNAPSHOT = 100_000
     torch.cuda.memory._record_memory_history(
-        max_entries=MAX_NUM_OF_MEM_EVENTS_PER_SNAPSHOT
+        # max_entries=MAX_NUM_OF_MEM_EVENTS_PER_SNAPSHOT
     )
 
 
@@ -117,6 +120,9 @@ def runit(device='cpu'):
         convo = convo.to(device=device)
 
         tpc_lower_left = tpcdataset.lower_left_corner.to(device).unsqueeze(0)
+
+        # if itpc < 25:
+        #     continue
 
         for ibatch, (features, labels) in enumerate(loader):
             stime = time.time()
@@ -144,62 +150,74 @@ def runit(device='cpu'):
                 head[:,[1,2]] -= tpc_lower_left
 
                 # dsigma, dtime, dcharge, dtail, dhead
-                drifted = drifter(local_time, charge, tail, head)
+                # drifted = drifter(local_time, charge, tail, head)
+                dsigma, dtime, dcharge, dtail, dhead = drifter(local_time, charge, tail, head)
 
                 if device == 'cuda':
                     torch.cuda.synchronize()
                 t03 = time.time()
 
-                qblock = raster(*drifted)
+                nbchunk = 100
 
-                # print('drifted', 'sigma>1E-2', torch.all(drifted[0]>1E-2), torch.all(drifted[1]>0), 'input charge >1000', torch.all(drifted[2]>1000))
-                # print('sum of qblock', torch.sum(qblock.data))
-                # print('drifted', 'sigma', drifted[0][:2],
-                #       'time', drifted[1][:2], 'charge', drifted[2][:2],
-                #       'tail', drifted[3][:2], 'head', drifted[4][:2])
+                current_blocks_d = []
+                current_blocks_l = []
+                Nqblock = 0
+                for ichunk in range(0, tail.size(0), nbchunk):
+                    qblock = raster(dsigma[ichunk:ichunk+nbchunk], dtime[ichunk:ichunk+nbchunk],
+                                    dcharge[ichunk:ichunk+nbchunk], dtail[ichunk:ichunk+nbchunk], dhead[ichunk:ichunk+nbchunk])
 
-                if device == 'cuda':
-                    torch.cuda.synchronize()
-                t04 = time.time()
 
-                signal = chunksum(qblock)
-                qblock = None
+                    # if device == 'cuda':
+                    #     torch.cuda.synchronize()
+                    # t04 = time.time()
 
-                if device == 'cuda':
-                    torch.cuda.synchronize()
-                t05 = time.time()
+                    signal = chunksum(qblock)
+                    qblock = None
+                    Nqblock += signal.nbatches
 
-                # free_mem, total_mem = torch.cuda.mem_get_info()
-                # total_mem = torch.cuda.get_device_properties(0).total_memory
-                # # r = torch.cuda.memory_reserved(0)
-                # allocated = torch.cuda.memory_allocated(0)
-                # free_mem = total_mem - allocated
-                # print('mem snapshot', free_mem/1024**3, total_mem/1024**3)
+                    # if device == 'cuda':
+                    #     torch.cuda.synchronize()
+                    # t05 = time.time()
 
-                # if free_mem/total_mem > 0.7:
-                #     print(free_mem/total_mem)
-                #     nchunks = 1
-                # elif free_mem/total_mem > 0.5:
-                #     nchunks = 3
-                # elif free_mem/total_mem > 0.3:
-                #     nchunks = 6
-                # elif free_mem/total_mem > 0.2:
-                #     nchunks = 9
-                # else:
-                #     nchunks = 15
-                # print(nchunks)
-                nchunks = signal.nbatches // 5 + 1
-                ibs = []
-                for l, s in zip(signal.location.chunk(nchunks), signal.data.chunk(nchunks)):
-                    # print(s.shape[0])
-                    if s.shape[0] > 0:
-                        iblock = convo(Block(location=l, data=s), response)
 
+                    nchunks = signal.nbatches // 50 + 1
+                    ibs = []
+                    currents_l = []
+                    currents_d = []
+                    currents = None
+                    for l, s in zip(signal.location.chunk(nchunks), signal.data.chunk(nchunks)):
+                        # print(s.shape[0])
+                        if s.shape[0] > 0:
+                            iblock = convo(Block(location=l, data=s), response)
+                            current = chunksum_i(iblock)
+                            currents_l.append(current.location)
+                            currents_d.append(current.data)
+                    # currents = Block(data=torch.cat(currents_d, dim=0).to('cpu'), location=torch.cat(currents_l, dim=0).to('cpu'))
+                    if len(currents_l) > 0:
+                        currents_d = torch.cat(currents_d, dim=0)
+                        currents_l = torch.cat(currents_l, dim=0)
+                        currents = Block(data=currents_d, location=currents_l)
+                        currents = chunking.accumulate(currents)
+
+                    if currents is not None:
+                        currents.data = currents.data.to('cpu')
+                        currents.location = currents.location.to('cpu')
+                        current_blocks_d.append(currents.data)
+                        current_blocks_l.append(currents.location)
+                if len(current_blocks_d) > 0:
+                    current_blocks_d = torch.cat(current_blocks_d, dim=0)
+                    current_blocks_l = torch.cat(current_blocks_l, dim=0)
+                    currents = Block(data=current_blocks_d, location=current_blocks_l)
+                    currents = chunking.accumulate(currents)
+                else:
+                    currents = None
+
+                t04 = t03
+                t05 = t04
                 if device == 'cuda':
                     torch.cuda.synchronize()
                 t06 = time.time()
 
-                # current =chunksum(iblock)
 
                 if device == 'cuda':
                     torch.cuda.synchronize()
@@ -227,9 +245,12 @@ def runit(device='cpu'):
 
                 info(f'itpc{itpc}, tpc label {tpcdataset.tpc_id}, batch label {ibatch}, '
                       f'N segments {len(features[0])}, '
+                      f'N qblock {Nqblock}, '
                       f'elapsed {t07 - stime} sec on {device}.')
 
-                # waveforms[f'current_tpc{tpcdataset.tpc_id}_batch{ibatch}'] = current
+                if currents is not None:
+                    waveforms[f'current_tpc{tpcdataset.tpc_id}_batch{ibatch}'] = currents.data
+                    waveforms[f'current_tpc{tpcdataset.tpc_id}_batch{ibatch}_location'] = currents.location
                 # waveforms[f'effq_tpc{tpcdataset.tpc_id}_batch{ibatch}'] = signal
 
                 torch.cuda.reset_peak_memory_stats()
@@ -249,13 +270,8 @@ def runit(device='cpu'):
             #         f'total: {total:.2f} MB.'
             #         f' {e}')
 
-    try:
-        torch.cuda.memory._dump_snapshot(f"crop_batched.pickle")
-    except Exception as e:
-        logger.error(f"Failed to capture memory snapshot {e}")
 
     # Stop recording memory snapshot history.
-    torch.cuda.memory._record_memory_history(enabled=None)
 
     write_npz("waveforms.npz", **waveforms)
 
@@ -271,6 +287,13 @@ def runit(device='cpu'):
     info(f'{sum(runtime["chunksum_current"])} chunksum_current')
 
     info(f'Total elapsed time {time.time() - t0} seconds')
+
+    print('Porting memory usage')
+    try:
+        torch.cuda.memory._dump_snapshot(f"crop_batched.pickle")
+    except Exception as e:
+        logger.error(f"Failed to capture memory snapshot {e}")
+    torch.cuda.memory._record_memory_history(enabled=None)
 
 def plots(out):
     with torch.no_grad():
