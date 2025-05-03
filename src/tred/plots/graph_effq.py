@@ -12,6 +12,7 @@ from tred.io_nd import (
 from tred.recombination import birks, box
 from tred.io import write_npz
 from tred import chunking
+from tred.readout import nd_readout
 
 import sys
 import h5py
@@ -30,8 +31,8 @@ def make_nd(device='cpu'):
     '''
 
     borders = simple_geo_parser('tests/nd_geometry/ndlar-module.yaml', 'tests/nd_geometry/multi_tile_layout-3.0.40.yaml')
-    # path = '/home/yousen/Public/ndlar_shared/data/segments_a_muon_first_event.hdf5'
-    path = '/home/yousen/Public/ndlar_shared/data/segments_first_event.hdf5'
+    path = '/home/yousen/Public/ndlar_shared/data/segments_a_muon_first_event.hdf5'
+    # path = '/home/yousen/Public/ndlar_shared/data/segments_first_event.hdf5'
     d0 = StepLoader(h5py.File(path), transform=steps_from_ndh5)
     f0, f1, i0 = d0[:]
     return (f0, f1, i0), i0, borders
@@ -62,13 +63,17 @@ def runit(device='cpu'):
     # ntickperslice = 6912+1-6400
     ntickperslice = 384 # 128*3
     chunk_shape = (npixpersuper * nimperpix, npixpersuper * nimperpix, ntickperslice)
-    print(chunk_shape)
 
     efield = 0.5 # kV/cm
     rho = 1.38 # g/cm^3
     A3t = 0.8 # birks
     k3t = 0.0486 # (g/MeV cm^2) (kV/cm); birks
     Wi = 23.6E-6 # MeV/pair
+
+    threshold = 5_000
+    adc_hold_delay = 30 # 30 * 50ns = 1.5us
+    adc_down_time = 22 # 22 * 50ns = 1.1us
+    csa_reset_time = 2 # 2 * 50ns = 100ns
 
     lacing = torch.tensor([nimperpix, nimperpix, 1])
 
@@ -80,6 +85,7 @@ def runit(device='cpu'):
     drifter = Drifter(diffusion, lifetime, velocity)
     raster = Raster(velocity, grid_spacing)
     chunksum = ChunkSum(chunk_shape)
+    chunksum_readout = ChunkSum((1,1,12000))
     convo = LacedConvo(lacing, o_shape=(12, 12, 6912))
     chunksum_i = ChunkSum((4, 4, 128), method='chunksum_inplace_v2')
 
@@ -120,6 +126,9 @@ def runit(device='cpu'):
         convo = convo.to(device=device)
 
         tpc_lower_left = tpcdataset.lower_left_corner.to(device).unsqueeze(0)
+        waveforms[f'tpc_lower_left_tpc{tpcdataset.tpc_id}'] = tpc_lower_left.cpu().squeeze(0)
+        waveforms[f'drift_direction_tpc{tpcdataset.tpc_id}'] = tpcdataset.drift
+        waveforms[f'tpc_anode_{tpcdataset.tpc_id}'] = tpcdataset.anode
 
         # if itpc < 25:
         #     continue
@@ -152,6 +161,10 @@ def runit(device='cpu'):
                 # dsigma, dtime, dcharge, dtail, dhead
                 # drifted = drifter(local_time, charge, tail, head)
                 dsigma, dtime, dcharge, dtail, dhead = drifter(local_time, charge, tail, head)
+                # print(dtail[:,[1,2]]-tail[:,[1,2]])
+                # dtail =
+                # dsigma =
+                # dcharge =
 
                 if device == 'cuda':
                     torch.cuda.synchronize()
@@ -166,6 +179,7 @@ def runit(device='cpu'):
                     qblock = raster(dsigma[ichunk:ichunk+nbchunk], dtime[ichunk:ichunk+nbchunk],
                                     dcharge[ichunk:ichunk+nbchunk], dtail[ichunk:ichunk+nbchunk], dhead[ichunk:ichunk+nbchunk])
 
+                    print(qblock.location[0])
 
                     # if device == 'cuda':
                     #     torch.cuda.synchronize()
@@ -218,10 +232,24 @@ def runit(device='cpu'):
                     torch.cuda.synchronize()
                 t06 = time.time()
 
-
                 if device == 'cuda':
                     torch.cuda.synchronize()
                 t07 = time.time()
+
+                currents = chunksum_readout(currents)
+                currents.data = currents.data * tspace
+                uqt = torch.unique(currents.location[:,-1])
+                uqpxl = torch.unique(currents.location[:,0:2], dim=0)
+                info(f'----------------- unique pixels {currents.nbatches}')
+                info(f'----------------- unique time offsets {uqt.size(0)}')
+                info(f'----------------- unique pixel offsets {uqpxl.size(0)}')
+
+                info(f'----------------- max Q {torch.max(currents.data)}')
+
+                hits = nd_readout(currents, threshold, adc_hold_delay, adc_down_time, csa_reset_time, pixel_axes=(1,2))
+                # print(hits[0][0], hits[1][0])
+                # hits = Block()
+                # info(f'len(hits.data)')
 
                 runtime['to_device'].append(t01-t00)
                 runtime['recomb'].append(t02-t01)
@@ -248,14 +276,16 @@ def runit(device='cpu'):
                       f'N qblock {Nqblock}, '
                       f'elapsed {t07 - stime} sec on {device}.')
 
-                if currents is not None:
-                    waveforms[f'current_tpc{tpcdataset.tpc_id}_batch{ibatch}'] = currents.data
-                    waveforms[f'current_tpc{tpcdataset.tpc_id}_batch{ibatch}_location'] = currents.location
+                # if currents is not None:
+                #     waveforms[f'current_tpc{tpcdataset.tpc_id}_batch{ibatch}'] = currents.data
+                #     waveforms[f'current_tpc{tpcdataset.tpc_id}_batch{ibatch}_location'] = currents.location
                 # waveforms[f'effq_tpc{tpcdataset.tpc_id}_batch{ibatch}'] = signal
+                waveforms[f'hits_tpc{tpcdataset.tpc_id}_batch{ibatch}'] = hits[1]
+                waveforms[f'hits_tpc{tpcdataset.tpc_id}_batch{ibatch}_location'] = hits[0]
 
                 torch.cuda.reset_peak_memory_stats()
-            except IndexError:
-                pass
+            except IndexError as e:
+                raise e
             # except torch.OutOfMemoryError as e:
             #     current_device = torch.cuda.current_device()
             #     allocated = torch.cuda.memory_allocated(current_device) / (1024 ** 2)  # in MB
@@ -290,7 +320,7 @@ def runit(device='cpu'):
 
     print('Porting memory usage')
     try:
-        torch.cuda.memory._dump_snapshot(f"crop_batched.pickle")
+        torch.cuda.memory._dump_snapshot(f"graph_effq.pickle")
     except Exception as e:
         logger.error(f"Failed to capture memory snapshot {e}")
     torch.cuda.memory._record_memory_history(enabled=None)
