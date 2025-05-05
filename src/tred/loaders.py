@@ -188,7 +188,7 @@ def steps_from_ndh5(data, type_map=None):
         The output data is a tuple of a tensor for float and a tensor for integer.
         - The tensor in float type spans (N_batch, 8), by 'dE', 'dEdx', 'x_start', 'y_start', 'z_start', 'x_end', 'y_end', 'z_end'.
         - The tensor in double type spans (N_batch, ) by 't0'.
-        - the tensor in integer type spans (N_batch, 2), by 'pdg_id', 'event_id'.
+        - the tensor in integer type spans (N_batch, 3), by 'event_id', 'vertex_id', 'pdg_id'.
 
     FIXME: Unsigned integers are implicitly converted to signed integers.
     '''
@@ -222,7 +222,7 @@ class StepLoader:
     The output data is a tuple of a tensor for float, double and a tensor for integer.
     - The tensor in float type spans (N_batch, 8), by 'dE', 'dEdx', 'x_start', 'y_start', 'z_start', 'x_end', 'y_end', 'z_end'.
     - The tensor in double type spans (N_batch, ) by 't0'.
-    - the tensor in integer type spans (N_batch, 2), by 'pdg_id', 'event_id'.
+    - the tensor in integer type spans (N_batch, 3), by 'event_id', 'vertex_id', 'pdg_id'.
 
     Random access is only available for batch dimension, not along feature dimension.
 

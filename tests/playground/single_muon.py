@@ -32,7 +32,7 @@ charges = {
 for i in [27, 29]:
     locs = f[f'effq_tpc{i}_batch0'][:,:3]
     drift_direction = f[f'drift_direction_tpc{i}']
-    tpc_anode = f[f'tpc_anode_{i}']
+    tpc_anode = f[f'tpc_anode_tpc{i}']
 
     print('lower left', f[f'tpc_lower_left_tpc{i}'])
     print(f'direction {i}', drift_direction)
@@ -78,7 +78,7 @@ with open("myfile/data/0/0-mueffq.json", "w") as fjson:
 for i in [27, 29]:
     locs = f[f'hits_tpc{i}_batch0'][:,:3]
     drift_direction = f[f'drift_direction_tpc{i}']
-    tpc_anode = f[f'tpc_anode_{i}']
+    tpc_anode = f[f'tpc_anode_tpc{i}']
     positions[f'tpc{i}'] = locs
     charges[f'tpc{i}'] = f[f'hits_tpc{i}_batch0'][:,-1]
 

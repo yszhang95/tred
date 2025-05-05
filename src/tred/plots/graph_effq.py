@@ -40,7 +40,7 @@ def make_nd(device='cpu'):
 
 
 def segment_to_tpc(features, labels, borders):
-    tpcs = create_tpc_datasets_from_steps(features, labels, borders, sort_index=1)
+    tpcs = create_tpc_datasets_from_steps(features, labels, borders, sort_index=0)
     return tpcs
 
 
@@ -161,10 +161,12 @@ def runit(device='cpu'):
 
         tpc_lower_left = tpcdataset.lower_left_corner.to(device).unsqueeze(0)
         waveforms[f'tpc_lower_left_tpc{tpcdataset.tpc_id}'] = tpc_lower_left.cpu().squeeze(0)
+        waveforms[f'tpc_upper_tpc{tpcdataset.tpc_id}'] = tpcdataset.upper_corner.cpu()
         waveforms[f'drift_direction_tpc{tpcdataset.tpc_id}'] = tpcdataset.drift
-        waveforms[f'tpc_anode_{tpcdataset.tpc_id}'] = tpcdataset.anode
-        waveforms[f'pixel_pitch_{tpcdataset.tpc_id}'] = pitch
-        waveforms[f'time_tick_{tpcdataset.tpc_id}'] = tspace
+        waveforms[f'tpc_anode_tpc{tpcdataset.tpc_id}'] = tpcdataset.anode
+        waveforms[f'tpc_cathode_tpc{tpcdataset.tpc_id}'] = tpcdataset.cathode
+        waveforms[f'pixel_pitch_tpc{tpcdataset.tpc_id}'] = pitch
+        waveforms[f'time_tick_tpc{tpcdataset.tpc_id}'] = tspace
 
         # if itpc < 25:
         #     continue
@@ -175,7 +177,7 @@ def runit(device='cpu'):
 
                 global_tref = [features[0][0,-2].numpy(), torch.min(features[0][:,-1]).numpy()] # assume it is in us
                 waveforms[f'global_tref_tpc{tpcdataset.tpc_id}_batch{ibatch}'] = np.array(global_tref)
-                waveforms[f'event_id_tpc{tpcdataset.tpc_id}_batch{ibatch}'] = labels[2][0,1].numpy()
+                waveforms[f'event_id_tpc{tpcdataset.tpc_id}_batch{ibatch}'] = labels[0,0].numpy()
                 # assume there is only one particle in the event
                 waveforms[f'event_start_tpc{tpcdataset.tpc_id}_batch{ibatch}'] = features[0][0,2:5].numpy()
                 waveforms[f'event_end_tpc{tpcdataset.tpc_id}_batch{ibatch}'] = features[0][-1,5:8].numpy()
@@ -184,7 +186,6 @@ def runit(device='cpu'):
                     torch.cuda.synchronize()
                 t00 = time.time()
                 features = [f.to(device=device) for f in features]
-                labels = labels.to(device=device)
 
                 if device == 'cuda':
                     torch.cuda.synchronize()
