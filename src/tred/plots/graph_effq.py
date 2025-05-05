@@ -73,7 +73,7 @@ def runit(device='cpu'):
     diffusion = torch.tensor([DL, DT, DT])
     lifetime = 8*units.ms / units.us # values are in units of us
     velocity = 1.6 * units.mm/units.us / (units.cm/units.us) # values are in units of cm/us
-    pitch = 4.43*units.mm / units.cm # values are in units of cm
+    pitch = 4.434*units.mm / units.cm # values are in units of cm
     nimperpix=10
     pspace = pitch/nimperpix
     tspace = 50*units.ns / units.us # values are in units of us
@@ -167,6 +167,11 @@ def runit(device='cpu'):
         waveforms[f'tpc_cathode_tpc{tpcdataset.tpc_id}'] = tpcdataset.cathode
         waveforms[f'pixel_pitch_tpc{tpcdataset.tpc_id}'] = pitch
         waveforms[f'time_tick_tpc{tpcdataset.tpc_id}'] = tspace
+
+
+        inds_range = (tpcdataset.upper_corner - tpcdataset.lower_left_corner) // pitch
+        inds_range = inds_range.to(torch.int32)
+        # print('ind_range', inds_range)
 
         # if itpc < 25:
         #     continue
@@ -336,14 +341,18 @@ def runit(device='cpu'):
                 qbd = torch.cat(effq_blocks_d).sum(dim=(1,2,3))
                 qbd = torch.cat([qblf32, qbd[:,None]], dim=1)
 
+
                 hitl = hits[0].cpu()
+                mask = (hitl[:,[0,1]] <= inds_range) & (hitl[:,[0,1]] >= 0)
+                mask = mask.all(dim=1)
+                hitl = hitl[mask]
                 # FIXME: :,:3 is hard-coded
                 hoff = torch.tensor([1/2, 1/2, adc_hold_delay-global_tref[1]//tspace]).to(torch.float32)
                 hitlf32 = transform_indices_to_coord_3d(hitl[:,:3], pitch, tspace, velocity,
                                                         tpc_lower_left.to(torch.float32), tpcdataset.anode, tpcdataset.drift,
                                                         paxes=(0,1), taxis=-1, offset=hoff)
                 hitlf32 = hitlf32[:, [2,0,1]]
-                hitd = torch.cat([hitlf32, hits[1][:,None].cpu()], dim=1)
+                hitd = torch.cat([hitlf32, hits[1][:,None].cpu()[mask]], dim=1)
 
                 waveforms[f'hits_tpc{tpcdataset.tpc_id}_batch{ibatch}'] = hitd.numpy()
                 waveforms[f'hits_tpc{tpcdataset.tpc_id}_batch{ibatch}_location'] = hitl.numpy()
