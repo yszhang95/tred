@@ -32,7 +32,8 @@ def make_nd(device='cpu'):
     '''
 
     borders = simple_geo_parser('tests/nd_geometry/ndlar-module.yaml', 'tests/nd_geometry/multi_tile_layout-3.0.40.yaml')
-    path = '/home/yousen/Public/ndlar_shared/data/segments_a_muon_first_event.hdf5'
+    # path = '/home/yousen/Public/ndlar_shared/data/segments_a_muon_first_event.hdf5'
+    path = '/home/yousen/Public/ndlar_shared/data/segments_pid13.hdf5'
     # path = '/home/yousen/Public/ndlar_shared/data/segments_first_event.hdf5'
     d0 = StepLoader(h5py.File(path), transform=steps_from_ndh5)
     f0, f1, i0 = d0[:]
@@ -66,12 +67,13 @@ def transform_indices_to_coord_3d(location, pitch, tick, velocity,
 def runit(device='cpu'):
     '''
     '''
+    export_pickle = False
 
     # eventually replace this hard-wire with configuration
-    DL = 7.2 * units.cm2/units.s / (units.cm2/units.us) # value are in cm2/us
-    DT = 12.0 * units.cm2/units.s / (units.cm2/units.us) # value are in cm2/us
+    DL = 4.4 * units.cm2/units.s / (units.cm2/units.us) # value are in cm2/us
+    DT = 8.8 * units.cm2/units.s / (units.cm2/units.us) # value are in cm2/us
     diffusion = torch.tensor([DL, DT, DT])
-    lifetime = 8*units.ms / units.us # values are in units of us
+    lifetime = 2.2*units.ms / units.us # values are in units of us
     velocity = 1.6 * units.mm/units.us / (units.cm/units.us) # values are in units of cm/us
     pitch = 4.434*units.mm / units.cm # values are in units of cm
     nimperpix=10
@@ -224,9 +226,36 @@ def runit(device='cpu'):
                 effq_blocks_d = []
                 effq_blocks_l = []
                 for ichunk in range(0, tail.size(0), nbchunk):
+                    # print(ichunk, ibatch, 'log')
+                    charge_this = charge[ichunk:ichunk+nbchunk]
                     qblock = raster(dsigma[ichunk:ichunk+nbchunk], dtime[ichunk:ichunk+nbchunk],
                                     dcharge[ichunk:ichunk+nbchunk], dtail[ichunk:ichunk+nbchunk], dhead[ichunk:ichunk+nbchunk])
 
+                    # invalid = torch.isnan(qblock.data).any(dim=(1,2,3))
+
+                    p0 = tail[ichunk:ichunk+nbchunk]
+                    p1 = head[ichunk:ichunk+nbchunk]
+                    length2 = torch.sum((p0-p1)**2, dim=1)
+                    invalid2 = length2 < 1E-9
+                    qblock.data[invalid2] = 0
+
+                    # print('tail', tail[ichunk:ichunk+nbchunk][invalid])
+                    # print('head', head[ichunk:ichunk+nbchunk][invalid])
+                    # print('charge', charge_this[invalid])
+                    # print('length', torch.sqrt(torch.sum((p1-p0)**2, dim=1))[invalid])
+                    # d1 = dsigma[ichunk:ichunk+nbchunk]
+                    # d2 = dtime[ichunk:ichunk+nbchunk]
+                    # d3 = dcharge[ichunk:ichunk+nbchunk]
+                    # d4 = dtail[ichunk:ichunk+nbchunk]
+                    # d5 = dhead[ichunk:ichunk+nbchunk]
+                    # print('qblock', torch.isnan(qblock.data).any())
+                    # print('qblock data', qblock.location[torch.isnan(qblock.data).any(dim=(1,2,3))])
+                    # print('qblock data', qblock.data[torch.isnan(qblock.data).any(dim=(1,2,3))])
+                    # print('d1', d1[torch.isnan(qblock.data).any(dim=(1,2,3))])
+                    # print('d2', d2[torch.isnan(qblock.data).any(dim=(1,2,3))])
+                    # print('d3', d3[torch.isnan(qblock.data).any(dim=(1,2,3))])
+                    # print('d4', d4[torch.isnan(qblock.data).any(dim=(1,2,3))])
+                    # print('d5', d5[torch.isnan(qblock.data).any(dim=(1,2,3))])
                     # if device == 'cuda':
                     #     torch.cuda.synchronize()
                     # t04 = time.time()
@@ -292,9 +321,14 @@ def runit(device='cpu'):
                 currents.data = currents.data * tspace
                 uqt = torch.unique(currents.location[:,-1])
                 uqpxl = torch.unique(currents.location[:,0:2], dim=0)
-                info(f'----------------- unique pixels {currents.nbatches}')
-                info(f'----------------- unique time offsets {uqt.size(0)}')
-                info(f'----------------- unique pixel offsets {uqpxl.size(0)}')
+                # print('currents', torch.isnan(currents.data).any())
+                if torch.isnan(currents.data).any():
+                    raise ValueError
+                # print('currents data', currents.location[torch.isnan(currents.data).any(dim=(1,2,3))])
+                # info(f'----------------- unique pixels {currents.nbatches}')
+                # info(f'----------------- unique time offsets {uqt.size(0)}')
+                # info(f'----------------- unique pixel offsets {uqpxl.size(0)}')
+                # info(f'----------------- max Q {torch.max(torch.sum(currents.data, dim=-1))}')
 
                 hits = nd_readout(currents, threshold, adc_hold_delay, adc_down_time, csa_reset_time, pixel_axes=(1,2))
 
@@ -396,7 +430,8 @@ def runit(device='cpu'):
 
     print('Porting memory usage')
     try:
-        torch.cuda.memory._dump_snapshot(f"graph_effq.pickle")
+        if export_pickle:
+            torch.cuda.memory._dump_snapshot(f"graph_effq.pickle")
     except Exception as e:
         logger.error(f"Failed to capture memory snapshot {e}")
     torch.cuda.memory._record_memory_history(enabled=None)

@@ -32,8 +32,8 @@ def nd_readout(block, threshold, adc_hold_delay, adc_down_time, csa_reset_time=1
         raise ValueError('csa_reset_time > adc_down_time')
 
     # FIXME: start should be initialized according to leftover
-    start = torch.zeros((*tuple(X.shape[i] for i in [0,]+list(pixel_axes)), 1), dtype=torch.int64)
-    trange = torch.arange(X.shape[taxis]).view(*[1 for i in range(X.ndim-1)], -1)
+    start = torch.zeros((*tuple(X.shape[i] for i in [0,]+list(pixel_axes)), 1), dtype=torch.int64, device=locations.device)
+    trange = torch.arange(X.shape[taxis], device=locations.device).view(*[1 for i in range(X.ndim-1)], -1)
     # info(f'start shape {start .shape}')
     # info(f'trange shape {trange.shape}')
 
@@ -105,5 +105,7 @@ def nd_readout(block, threshold, adc_hold_delay, adc_down_time, csa_reset_time=1
         Xacc[triggered.squeeze(taxis)] -= Xacc_next_to_hold_t[triggered.squeeze(taxis)]
         iteration += 1
     if len(olocs) == 0:
+        return torch.zeros((0, len(pixel_axes)+3), dtype=torch.int32, device=locations.device), \
+            torch.zeros((0,), dtype=torch.float32, device=X.device)
         raise NotImplementedError("Not sure how to handle empty hit collection")
     return torch.cat(olocs, dim=0), torch.cat(ocharges, dim=0)

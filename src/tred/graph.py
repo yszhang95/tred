@@ -197,7 +197,7 @@ class Drifter(nn.Module):
             )
 
         # Identify indices where swapping is needed
-        mask = (tail_new[:, vaxis] < head_new[:, vaxis]) if velocity > 0 else (tail_new[:, vaxis] > head_new[:, vaxis])
+        mask = (tail_new[:, vaxis] > head_new[:, vaxis]) if velocity > 0 else (tail_new[:, vaxis] < head_new[:, vaxis])
         swap_idx = torch.nonzero(mask, as_tuple=True)[0]
 
         # Swap elements in-place
