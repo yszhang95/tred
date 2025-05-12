@@ -95,7 +95,7 @@ def runit(device='cpu'):
     adc_down_time = 24 # 24 * 50ns = 1.2us
     csa_reset_time = 2 # 2 * 50ns = 100ns
 
-    noises = 900 # electrons; including CSA and discriminator
+    noises = 900. # electrons; including CSA and discriminator
 
     drtoa = 10.431 * units.cm / units.cm # values are in units of cm
     # drtoa = 50.4 * units.cm / units.cm # values are in units of cm
@@ -339,7 +339,7 @@ def runit(device='cpu'):
                 # info(f'----------------- unique pixel offsets {uqpxl.size(0)}')
                 # info(f'----------------- max Q {torch.max(torch.sum(currents.data, dim=-1))}')
 
-                hits = nd_readout(currents, threshold, adc_hold_delay, adc_down_time, csa_reset_time, pixel_axes=(1,2), noises=noises)
+                hits = nd_readout(currents, threshold, adc_hold_delay, adc_down_time, csa_reset_time, pixel_axes=(1,2), noises=noises, reset_noises=noises)
 
                 runtime['to_device'].append(t01-t00)
                 runtime['recomb'].append(t02-t01)

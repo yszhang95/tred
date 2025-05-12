@@ -3,7 +3,8 @@ import torch
 
 from tred.blocking import Block
 
-def nd_readout(block, threshold, adc_hold_delay, adc_down_time, csa_reset_time=1, pixel_axes=(), taxis=-1, noises=None, leftover=None, niter=10):
+def nd_readout(block, threshold, adc_hold_delay, adc_down_time, csa_reset_time=1, pixel_axes=(), taxis=-1, noises=None,
+               reset_noises=None, leftover=None, niter=10):
     '''
     locs :: (N, nxpl, nxpl, ..., vdim)
     X :: (N, npxl, npxl, ..., Nt)
@@ -105,6 +106,12 @@ def nd_readout(block, threshold, adc_hold_delay, adc_down_time, csa_reset_time=1
         Xacc_next_to_hold_t = torch.gather(Xacc, taxis, torch.clamp(hold_t+csa_reset_time, min=0, max=Nt-1))
         # only update the triggered positions
         Xacc[triggered.squeeze(taxis)] -= Xacc_next_to_hold_t[triggered.squeeze(taxis)]
+        if reset_noises is not None:
+            # FIXME: taxis is assumed to be -1
+            Xacc_baseline = torch.normal(0, torch.full(Xacc.shape[:-1], fill_value=reset_noises, device=Xacc.device))
+            # print('shape', Xacc_baseline[triggered.squeeze(taxis)].unsqueeze(-1))
+            Xacc[triggered.squeeze(taxis)] += Xacc_baseline[triggered.squeeze(taxis)].unsqueeze(-1)
+
         iteration += 1
     if len(olocs) == 0:
         return torch.zeros((0, len(pixel_axes)+3), dtype=torch.int32, device=locations.device), \
