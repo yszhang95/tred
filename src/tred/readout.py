@@ -3,7 +3,7 @@ import torch
 
 from tred.blocking import Block
 
-def nd_readout(block, threshold, adc_hold_delay, adc_down_time, csa_reset_time=1, pixel_axes=(), taxis=-1, leftover=None, niter=10):
+def nd_readout(block, threshold, adc_hold_delay, adc_down_time, csa_reset_time=1, pixel_axes=(), taxis=-1, noises=None, leftover=None, niter=10):
     '''
     locs :: (N, nxpl, nxpl, ..., vdim)
     X :: (N, npxl, npxl, ..., Nt)
@@ -44,6 +44,8 @@ def nd_readout(block, threshold, adc_hold_delay, adc_down_time, csa_reset_time=1
     Xacc = X.cumsum(dim=taxis)
     # logging.debug(f'Xacc shape {Xacc.shape}')
     # info(f'Xacc shape {Xacc.shape}')
+    if noises is not None:
+        Xacc += torch.normal(0, torch.full_like(Xacc, fill_value=noises, device=Xacc.device))
 
     pxl_indices = slice(None, -1, None) # FIXME: hard coded
 

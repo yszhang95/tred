@@ -31,10 +31,8 @@ def make_nd(device='cpu'):
     This mocks up some file of depo sets.
     '''
 
-    borders = simple_geo_parser('tests/nd_geometry/ndlar-module.yaml', 'tests/nd_geometry/multi_tile_layout-3.0.40.yaml')
-    # path = '/home/yousen/Public/ndlar_shared/data/segments_a_muon_first_event.hdf5'
-    path = '/home/yousen/Public/ndlar_shared/data/segments_pid13.hdf5'
-    # path = '/home/yousen/Public/ndlar_shared/data/segments_first_event.hdf5'
+    borders = simple_geo_parser('tests/playground/2x2_mod2mod_variation.yaml', 'tests/playground/multi_tile_layout-2.4.16.yaml')
+    path = '/home/yousen/Public/ndlar_shared/data/tred_2x2_2025010/filtered_MiniRun5_1E19_RHC.convert2h5.0000000.EDEPSIM.hdf5'
     d0 = StepLoader(h5py.File(path), transform=steps_from_ndh5)
     f0, f1, i0 = d0[:]
     return (f0, f1, i0), i0, borders
@@ -94,8 +92,10 @@ def runit(device='cpu'):
 
     threshold = 5_000
     adc_hold_delay = 30 # 30 * 50ns = 1.5us
-    adc_down_time = 22 # 22 * 50ns = 1.1us
+    adc_down_time = 24 # 24 * 50ns = 1.2us
     csa_reset_time = 2 # 2 * 50ns = 100ns
+
+    noises = 900 # electrons; including CSA and discriminator
 
     drtoa = 10.431 * units.cm / units.cm # values are in units of cm
     # drtoa = 50.4 * units.cm / units.cm # values are in units of cm
@@ -173,12 +173,14 @@ def runit(device='cpu'):
 
         inds_range = (tpcdataset.upper_corner - tpcdataset.lower_left_corner) // pitch
         inds_range = inds_range.to(torch.int32)
-        # print('ind_range', inds_range)
 
         # if itpc < 25:
         #     continue
 
         for ibatch, (features, labels) in enumerate(loader):
+            # if itpc != 0: continue
+            # if ibatch !=41: continue
+
             stime = time.time()
             try:
 
@@ -317,6 +319,13 @@ def runit(device='cpu'):
                     torch.cuda.synchronize()
                 t07 = time.time()
 
+                if currents is None:
+                    info(f'itpc{itpc}, tpc label {tpcdataset.tpc_id}, batch label {ibatch}, '
+                         f'N segments {len(features[0])}, '
+                         f'N qblock {Nqblock}, '
+                         f'elapsed {t07 - stime} sec on {device}. Skipped empty batch.')
+                    continue
+
                 currents = chunksum_readout(currents)
                 currents.data = currents.data * tspace
                 uqt = torch.unique(currents.location[:,-1])
@@ -330,7 +339,7 @@ def runit(device='cpu'):
                 # info(f'----------------- unique pixel offsets {uqpxl.size(0)}')
                 # info(f'----------------- max Q {torch.max(torch.sum(currents.data, dim=-1))}')
 
-                hits = nd_readout(currents, threshold, adc_hold_delay, adc_down_time, csa_reset_time, pixel_axes=(1,2))
+                hits = nd_readout(currents, threshold, adc_hold_delay, adc_down_time, csa_reset_time, pixel_axes=(1,2), noises=noises)
 
                 runtime['to_device'].append(t01-t00)
                 runtime['recomb'].append(t02-t01)
