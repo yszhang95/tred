@@ -31,8 +31,10 @@ def make_nd(device='cpu'):
     This mocks up some file of depo sets.
     '''
 
-    borders = simple_geo_parser('tests/playground/2x2_mod2mod_variation.yaml', 'tests/playground/multi_tile_layout-2.4.16.yaml')
-    path = '/home/yousen/Public/ndlar_shared/data/tred_2x2_2025010/filtered_MiniRun5_1E19_RHC.convert2h5.0000000.EDEPSIM.hdf5'
+    #borders = simple_geo_parser('tests/playground/2x2_mod2mod_variation.yaml', 'tests/playground/multi_tile_layout-2.4.16.yaml')
+    # path = '/home/yousen/Public/ndlar_shared/data/tred_2x2_2025010/filtered_MiniRun5_1E19_RHC.convert2h5.0000000.EDEPSIM.hdf5'
+    borders = simple_geo_parser('tests/nd_geometry/ndlar-module.yaml', 'tests/nd_geometry/multi_tile_layout-3.0.40.yaml')
+    path = '/home/yousen/Public/ndlar_shared/data/segments_pid13.hdf5'
     d0 = StepLoader(h5py.File(path), transform=steps_from_ndh5)
     f0, f1, i0 = d0[:]
     return (f0, f1, i0), i0, borders
@@ -95,7 +97,8 @@ def runit(device='cpu'):
     adc_down_time = 24 # 24 * 50ns = 1.2us
     csa_reset_time = 2 # 2 * 50ns = 100ns
 
-    noises = 900. # electrons; including CSA and discriminator
+    # noises = 900. # electrons; including CSA and discriminator
+    noises = None # electrons; including CSA and discriminator
 
     drtoa = 10.431 * units.cm / units.cm # values are in units of cm
     # drtoa = 50.4 * units.cm / units.cm # values are in units of cm
@@ -127,7 +130,8 @@ def runit(device='cpu'):
     t1 = time.time()
 
     # response = get_ndlarsim()
-    response = ndlarsim("response_v2a_distance_10p431cm_binsize_0p04434cm_tick0p05us.npy")
+    # response = ndlarsim("response_v2a_distance_10p431cm_binsize_0p04434cm_tick0p05us.npy")
+    response = ndlarsim("unipolar_response.npy")
 
     response = response.to(device=device)
 
@@ -180,6 +184,10 @@ def runit(device='cpu'):
         for ibatch, (features, labels) in enumerate(loader):
             # if itpc != 0: continue
             # if ibatch !=41: continue
+
+
+            if ibatch > 10:
+                break
 
             stime = time.time()
             try:
