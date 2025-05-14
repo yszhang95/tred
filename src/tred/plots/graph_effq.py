@@ -130,8 +130,8 @@ def runit(device='cpu'):
     t1 = time.time()
 
     # response = get_ndlarsim()
-    # response = ndlarsim("response_v2a_distance_10p431cm_binsize_0p04434cm_tick0p05us.npy")
-    response = ndlarsim("unipolar_response.npy")
+    response = ndlarsim("response_v2a_distance_10p431cm_binsize_0p04434cm_tick0p05us.npy")
+    # response = ndlarsim("unipolar_response.npy")
 
     response = response.to(device=device)
 
