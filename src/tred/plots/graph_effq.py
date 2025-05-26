@@ -92,7 +92,7 @@ def runit(device='cpu'):
     k3t = 0.0486 # (g/MeV cm^2) (kV/cm); birks
     Wi = 23.6E-6 # MeV/pair
 
-    threshold = 5_000
+    threshold = 12_000
     adc_hold_delay = 30 # 30 * 50ns = 1.5us
     adc_down_time = 24 # 24 * 50ns = 1.2us
     csa_reset_time = 2 # 2 * 50ns = 100ns
@@ -130,8 +130,8 @@ def runit(device='cpu'):
     t1 = time.time()
 
     # response = get_ndlarsim()
-    response = ndlarsim("response_v2a_distance_10p431cm_binsize_0p04434cm_tick0p05us.npy")
-    # response = ndlarsim("unipolar_response.npy")
+    # response = ndlarsim("response_v2a_distance_10p431cm_binsize_0p04434cm_tick0p05us.npy")
+    response = ndlarsim("unipolar_response.npy")
 
     response = response.to(device=device)
 
