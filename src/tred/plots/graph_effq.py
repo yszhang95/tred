@@ -84,6 +84,7 @@ def runit(device='cpu'):
     nimperpix=10
     pspace = pitch/nimperpix
     tspace = 50*units.ns / units.us # values are in units of us
+    one_tick = 2 # 2 points in grid along time is one time tick 100 ns in experiment
     grid_spacing = (pspace, pspace, tspace)
     # npixpersuper = 16+1-9
     npixpersuper = 12+1-9
@@ -249,27 +250,6 @@ def runit(device='cpu'):
                     invalid2 = length2 < 1E-9
                     qblock.data[invalid2] = 0
 
-                    # print('tail', tail[ichunk:ichunk+nbchunk][invalid])
-                    # print('head', head[ichunk:ichunk+nbchunk][invalid])
-                    # print('charge', charge_this[invalid])
-                    # print('length', torch.sqrt(torch.sum((p1-p0)**2, dim=1))[invalid])
-                    # d1 = dsigma[ichunk:ichunk+nbchunk]
-                    # d2 = dtime[ichunk:ichunk+nbchunk]
-                    # d3 = dcharge[ichunk:ichunk+nbchunk]
-                    # d4 = dtail[ichunk:ichunk+nbchunk]
-                    # d5 = dhead[ichunk:ichunk+nbchunk]
-                    # print('qblock', torch.isnan(qblock.data).any())
-                    # print('qblock data', qblock.location[torch.isnan(qblock.data).any(dim=(1,2,3))])
-                    # print('qblock data', qblock.data[torch.isnan(qblock.data).any(dim=(1,2,3))])
-                    # print('d1', d1[torch.isnan(qblock.data).any(dim=(1,2,3))])
-                    # print('d2', d2[torch.isnan(qblock.data).any(dim=(1,2,3))])
-                    # print('d3', d3[torch.isnan(qblock.data).any(dim=(1,2,3))])
-                    # print('d4', d4[torch.isnan(qblock.data).any(dim=(1,2,3))])
-                    # print('d5', d5[torch.isnan(qblock.data).any(dim=(1,2,3))])
-                    # if device == 'cuda':
-                    #     torch.cuda.synchronize()
-                    # t04 = time.time()
-
                     signal = chunksum(qblock)
                     effqb = chunksum_effq_out(qblock)
                     effq_blocks_d.append(effqb.data.cpu())
@@ -349,7 +329,8 @@ def runit(device='cpu'):
 
                 if isinstance(threshold, str):
                     raise NotImplementedError("To add support for loading a threshold file.")
-                hits = nd_readout(currents, threshold, adc_hold_delay, adc_down_time, csa_reset_time, pixel_axes=(1,2), noises=noises, reset_noises=noises)
+                hits = nd_readout(currents, threshold, adc_hold_delay, adc_down_time, csa_reset_time, one_tick=one_tick,
+                                  pixel_axes=(1,2), noises=noises, reset_noises=noises)
 
                 runtime['to_device'].append(t01-t00)
                 runtime['recomb'].append(t02-t01)

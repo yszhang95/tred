@@ -3,7 +3,7 @@ import torch
 
 from tred.blocking import Block
 
-def nd_readout(block, threshold, adc_hold_delay, adc_down_time, csa_reset_time=1, pixel_axes=(), taxis=-1, noises=None,
+def nd_readout(block, threshold, adc_hold_delay, adc_down_time, csa_reset_time=1, one_tick=1, pixel_axes=(), taxis=-1, noises=None,
                reset_noises=None, leftover=None, niter=10):
     '''
     locs :: (N, nxpl, nxpl, ..., vdim)
@@ -14,6 +14,10 @@ def nd_readout(block, threshold, adc_hold_delay, adc_down_time, csa_reset_time=1
     Do it iteratively is easier but complicated...
 
     Let us do it once.
+
+    one_tick :: how many points in time for one time tick. Useful for next-to action,
+                for instance, threshold-crossing check after CSA reset and ADC down time,
+                counting ADC HOLD DELAY after trigger crossing.
     '''
     X = block.data
     locations = block.location
@@ -92,12 +96,12 @@ def nd_readout(block, threshold, adc_hold_delay, adc_down_time, csa_reset_time=1
         hold_times = gtimes + hold_t[triggered]
         hits = torch.gather(Xacc, taxis, hold_t_inrange)[triggered] # 1D array
         # start = hold_t + adc_down_time + 1
-        start[triggered] = hold_t[triggered] + adc_down_time + 1 # on discriminator, controlled by adc down time
+        start[triggered] = hold_t[triggered] + adc_down_time + one_tick # on discriminator, controlled by adc down time
         start_times = gtimes + start[triggered]
         oloc = torch.cat([pixels, times.unsqueeze(1), hold_times.unsqueeze(1), start_times.unsqueeze(1)], dim=1)
         olocs.append(oloc)
         ocharges.append(hits)
-        start[~triggered] = hold_t[~triggered]+1
+        start[~triggered] = hold_t[~triggered] + one_tick
         start[~crossed] = Nt # crossed not triggered should be at hold_t+1; never crossed needs to be at start.
         # at triggered positions, charges are reset and there is one timestamp missing;
         # everything happens on CSA
