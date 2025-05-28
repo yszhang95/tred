@@ -20,6 +20,8 @@ def cli(ctx, config, log_output, log_level):
     '''
     Command line interface to the tred simulation.
     '''
+    ctx.ensure_object(dict)
+    ctx.obj['config'] = config
     setup_logging(log_output, log_level)
     # ... make context object
 
@@ -37,7 +39,7 @@ def plots(output, categories):
     from tred.plots.util import pages
 
     all_categories = [m for m in dir(tred.plots) if hasattr(getattr(tred.plots, m), "plots")]
-    
+
     if not categories:
         categories = all_categories
     categories = [c for c in categories if c in all_categories]
@@ -52,7 +54,7 @@ def plots(output, categories):
         for category in categories:
             mod = getattr(tred.plots, category)
             mod.plots(out)
-        
+
     info(output)
 
 
@@ -73,4 +75,16 @@ def dummy(output, response):
     debug(f'Loading {fname} from {response}')
     r = ndlarsim(fname)
     print(f'response of shape {r.shape}')
-    
+
+
+@cli.command('fullsim')
+@click.option('-i','--infile', default="test.hdf5")
+@click.option('-o','--outfile', default="waveforms.npz")
+@click.pass_context
+def fullsim(ctx, infile, outfile):
+    '''
+    This command does not exist.
+    '''
+    from .plots.graph_effq import fullsim as tred_fullsim
+    tred_fullsim(ctx.obj.get("config"), infile, outfile)
+

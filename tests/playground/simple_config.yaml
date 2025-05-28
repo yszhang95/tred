@@ -1,0 +1,6 @@
+drtoa: 10.431 # cm
+response_path: "response_v2a_distance_10p431cm_binsize_0p04434cm_tick0p05us.npy"
+module_yaml: "tests/playground/2x2_mod2mod_variation.yaml"
+tile_yaml: "tests/playground/multi_tile_layout-2.4.16.yaml"
+lifetime: 1.0 # ms
+threshold: 5000 # electrons

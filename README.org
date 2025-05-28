@@ -66,4 +66,7 @@ $ uv run tred plots
 
 It produces a PDF of diagnostic plots.
 
-
+To run a full simulation:
+#+begin_src shell
+  uv run tred -c config.yaml fullsim -i fhin.hdf5 -o fout.npz
+#+end_src

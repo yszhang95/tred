@@ -26,16 +26,22 @@ import time
 import torch
 import time
 
+module_yaml = None
+tile_yaml = None
+response_path = None
+lifetime = None
+input_path = None
+output_path = None
+drtoa = None
+threshold = None
+
 def make_nd(device='cpu'):
     '''
     This mocks up some file of depo sets.
     '''
 
-    #borders = simple_geo_parser('tests/playground/2x2_mod2mod_variation.yaml', 'tests/playground/multi_tile_layout-2.4.16.yaml')
-    # path = '/home/yousen/Public/ndlar_shared/data/tred_2x2_2025010/filtered_MiniRun5_1E19_RHC.convert2h5.0000000.EDEPSIM.hdf5'
-    borders = simple_geo_parser('tests/nd_geometry/ndlar-module.yaml', 'tests/nd_geometry/multi_tile_layout-3.0.40.yaml')
-    path = '/home/yousen/Public/ndlar_shared/data/segments_pid13.hdf5'
-    d0 = StepLoader(h5py.File(path), transform=steps_from_ndh5)
+    borders = simple_geo_parser(module_yaml, tile_yaml)
+    d0 = StepLoader(h5py.File(input_path), transform=steps_from_ndh5)
     f0, f1, i0 = d0[:]
     return (f0, f1, i0), i0, borders
 
@@ -73,7 +79,6 @@ def runit(device='cpu'):
     DL = 4.4 * units.cm2/units.s / (units.cm2/units.us) # value are in cm2/us
     DT = 8.8 * units.cm2/units.s / (units.cm2/units.us) # value are in cm2/us
     diffusion = torch.tensor([DL, DT, DT])
-    lifetime = 2.2*units.ms / units.us # values are in units of us
     velocity = 1.6 * units.mm/units.us / (units.cm/units.us) # values are in units of cm/us
     pitch = 4.434*units.mm / units.cm # values are in units of cm
     nimperpix=10
@@ -92,16 +97,12 @@ def runit(device='cpu'):
     k3t = 0.0486 # (g/MeV cm^2) (kV/cm); birks
     Wi = 23.6E-6 # MeV/pair
 
-    threshold = 12_000
     adc_hold_delay = 30 # 30 * 50ns = 1.5us
     adc_down_time = 24 # 24 * 50ns = 1.2us
     csa_reset_time = 2 # 2 * 50ns = 100ns
 
     # noises = 900. # electrons; including CSA and discriminator
     noises = None # electrons; including CSA and discriminator
-
-    drtoa = 10.431 * units.cm / units.cm # values are in units of cm
-    # drtoa = 50.4 * units.cm / units.cm # values are in units of cm
 
     lacing = torch.tensor([nimperpix, nimperpix, 1])
 
@@ -129,9 +130,7 @@ def runit(device='cpu'):
 
     t1 = time.time()
 
-    # response = get_ndlarsim()
-    # response = ndlarsim("response_v2a_distance_10p431cm_binsize_0p04434cm_tick0p05us.npy")
-    response = ndlarsim("unipolar_response.npy")
+    response = ndlarsim(response_path)
 
     response = response.to(device=device)
 
@@ -148,9 +147,10 @@ def runit(device='cpu'):
     # Start recording memory snapshot history, initialized with a buffer
     # capacity of 100,000 memory events, via the `max_entries` field.
     # MAX_NUM_OF_MEM_EVENTS_PER_SNAPSHOT = 100_000
-    torch.cuda.memory._record_memory_history(
+    if export_pickle:
+        torch.cuda.memory._record_memory_history(
         # max_entries=MAX_NUM_OF_MEM_EVENTS_PER_SNAPSHOT
-    )
+        )
 
 
     for itpc, tpcdataset in enumerate(tpcs):
@@ -347,6 +347,8 @@ def runit(device='cpu'):
                 # info(f'----------------- unique pixel offsets {uqpxl.size(0)}')
                 # info(f'----------------- max Q {torch.max(torch.sum(currents.data, dim=-1))}')
 
+                if isinstance(threshold, str):
+                    raise NotImplementedError("To add support for loading a threshold file.")
                 hits = nd_readout(currents, threshold, adc_hold_delay, adc_down_time, csa_reset_time, pixel_axes=(1,2), noises=noises, reset_noises=noises)
 
                 runtime['to_device'].append(t01-t00)
@@ -430,7 +432,7 @@ def runit(device='cpu'):
 
     # Stop recording memory snapshot history.
 
-    write_npz("waveforms.npz", **waveforms)
+    write_npz(output_path, **waveforms)
 
     info(f'{t1-t0} construct')
     info(f'{t2-t1} get response')
@@ -460,3 +462,37 @@ def plots(out):
         # info('FINISHED CPU')
         runit('cuda')
         info('FINISHED CUDA')
+
+def fullsim(config, finpath, foutpath):
+
+    global tile_yaml
+    global module_yaml
+    global response_path
+    global lifetime
+    global drtoa
+    global threshold
+
+    global input_path
+    global output_path
+
+    with open(config, "r") as fconfig:
+        config = yaml.safe_load(fconfig)
+    tile_yaml = config.get('tile_yaml',  "tests/playground/multi_tile_layout-2.4.16.yaml")
+    module_yaml = config.get('module_yaml',  "tests/playground/2x2_mod2mod_variation.yaml")
+    response_path = config.get("response_path",  "response_v2a_distance_10p431cm_binsize_0p04434cm_tick0p05us.npy")
+    drtoa = config.get("drtoa", 10.431) * units.cm / units.cm # values are in units of cm to cm
+    lifetime = config.get("lifetime", 2.0) * units.ms / units.us # values are from ms units of us
+    threshold = config.get("threshold", 5_000) # electrons # it can also be a path to threshold
+
+    if finpath is None:
+        input_path = "/home/yousen/Public/ndlar_shared/data/tred_2x2_2025010/filtered_MiniRun5_1E19_RHC.convert2h5.0000000.EDEPSIM.hdf5"
+    else:
+        input_path = finpath
+
+    if foutpath is None:
+        output_path = "waveforms.npz"
+    else:
+        output_path = foutpath
+
+    with torch.no_grad():
+        runit('cuda')
