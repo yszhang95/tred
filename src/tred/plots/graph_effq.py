@@ -34,6 +34,9 @@ input_path = None
 output_path = None
 drtoa = None
 threshold = None
+event_list = None
+save_waveform = None
+
 uncorr_noise = None
 reset_noise = None
 thres_noise = None
@@ -275,6 +278,7 @@ def runit(device='cpu'):
                 waveforms[f'event_start_tpc{tpcdataset.tpc_id}_batch{ibatch}'] = features[0][0,2:5].numpy()
                 waveforms[f'event_end_tpc{tpcdataset.tpc_id}_batch{ibatch}'] = features[0][-1,5:8].numpy()
 
+
                 if device == 'cuda':
                     torch.cuda.synchronize()
                 t00 = time.time()
@@ -348,6 +352,7 @@ def runit(device='cpu'):
                         # print(s.shape[0])
                         if s.shape[0] > 0:
                             iblock = convo(Block(location=l, data=s), response)
+
                             current = chunksum_i(iblock)
                             currents_l.append(current.location)
                             currents_d.append(current.data)
@@ -432,12 +437,9 @@ def runit(device='cpu'):
                       f'N qblock {Nqblock}, '
                       f'elapsed {t07 - stime} sec on {device}.')
 
-                # if currents is not None:
-                #     waveforms[f'current_tpc{tpcdataset.tpc_id}_batch{ibatch}'] = currents.data
-                #     waveforms[f'current_tpc{tpcdataset.tpc_id}_batch{ibatch}_location'] = currents.location
-                # waveforms[f'effq_tpc{tpcdataset.tpc_id}_batch{ibatch}'] = signal
-
-
+                if save_waveform and currents is not None:
+                    waveforms[f'current_tpc{tpcdataset.tpc_id}_batch{ibatch}'] = currents.data.cpu().numpy()
+                    waveforms[f'current_tpc{tpcdataset.tpc_id}_batch{ibatch}_location'] = currents.location.cpu().numpy()
 
                 # FIXME: global time offset
                 qbl = torch.cat(effq_blocks_l).to('cpu')
@@ -499,7 +501,6 @@ def runit(device='cpu'):
 
     info(f'Total elapsed time {time.time() - t0} seconds')
 
-    print('Porting memory usage')
     try:
         if export_pickle:
             torch.cuda.memory._dump_snapshot(f"graph_effq.pickle")
@@ -523,6 +524,8 @@ def fullsim(config, finpath, foutpath):
     global lifetime
     global drtoa
     global threshold
+    global event_list
+    global save_waveform
     global uncorr_noise
     global thres_noise
     global reset_noise
@@ -538,6 +541,8 @@ def fullsim(config, finpath, foutpath):
     drtoa = config.get("drtoa", 10.431) * units.cm / units.cm # values are in units of cm to cm
     lifetime = config.get("lifetime", 2.0) * units.ms / units.us # values are from ms units of us
     threshold = config.get("threshold", 5_000) # electrons # it can also be a path to threshold
+    event_list = config.get("event_list", None) # None means select all
+    save_waveform = config.get("save_waveform", False)
     uncorr_noise = config.get("uncorr_noise", None)
     thres_noise = config.get("thres_noise", None)
     reset_noise = config.get("reset_noise", None)
