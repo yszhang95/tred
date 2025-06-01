@@ -3,8 +3,8 @@ import torch
 
 from tred.blocking import Block
 
-def nd_readout(block, threshold, adc_hold_delay, adc_down_time, csa_reset_time=1, one_tick=1, pixel_axes=(), taxis=-1, noises=None,
-               reset_noises=None, leftover=None, niter=10):
+def nd_readout(block, threshold, adc_hold_delay, adc_down_time, csa_reset_time=1, one_tick=1, pixel_axes=(), taxis=-1,
+               uncorr_noise=None, thres_noise=None, reset_noise=None, leftover=None, niter=10):
     '''
     locs :: (N, nxpl, nxpl, ..., vdim)
     X :: (N, npxl, npxl, ..., Nt)
@@ -21,8 +21,16 @@ def nd_readout(block, threshold, adc_hold_delay, adc_down_time, csa_reset_time=1
     '''
     X = block.data
     locations = block.location
+    if threshold.ndim > 0:
+        loc_inds = locations.view(-1,block.vdim)[:,:-1].T
+        threshold = threshold[list(loc_inds[i] for i in range(loc_inds.shape[0]))]
+        # threshold = threshold[loc_inds.tolist()]
+    else:
+        threshold = threshold.unsqueeze(0).expand(block.nbatches)
     for i in pixel_axes:
         locations = locations.unsqueeze(1)
+        threshold = threshold.unsqueeze(1)
+    threshold = threshold.unsqueeze(-1)
     olocs = []
     ocharges = []
     if taxis < 0:
@@ -49,8 +57,8 @@ def nd_readout(block, threshold, adc_hold_delay, adc_down_time, csa_reset_time=1
     Xacc = X.cumsum(dim=taxis)
     # logging.debug(f'Xacc shape {Xacc.shape}')
     # info(f'Xacc shape {Xacc.shape}')
-    if noises is not None:
-        Xacc += torch.normal(0, torch.full_like(Xacc, fill_value=noises, device=Xacc.device))
+    if uncorr_noise is not None:
+        Xacc += torch.normal(0, torch.full_like(Xacc, fill_value=uncorr_noise, device=Xacc.device))
 
     pxl_indices = slice(None, -1, None) # FIXME: hard coded
 
@@ -59,16 +67,21 @@ def nd_readout(block, threshold, adc_hold_delay, adc_down_time, csa_reset_time=1
         # logging.debug(f'Iteration {iteration}')
         # info(f'Iteration {iteration}')
 
+        if thres_noise:
+            thres = threshold + torch.normal(0, torch.full_like(threshold, fill_value=thres_noise, device=threshold.device))
+        else:
+            thres = threshold
+
         mvalid = trange >= start # shape (npxl, npxl, ..., Nt) if taxis = -1
         # logging.debug(f'mvalid shape {mvalid.shape}')
         # info(f'mvalid shape {mvalid.shape}')
         Xacc = Xacc * mvalid # FIXME: start > trange; we need leftover information
 
-        crossed = (Xacc >= threshold) & mvalid # check after start # shape (N, nxpl, ..., Nt) if taxis = -1
+        crossed = (Xacc >= thres) & mvalid # check after start # shape (N, nxpl, ..., Nt) if taxis = -1
         cross_t = torch.argmax(crossed.to(torch.int32), dim=taxis, keepdim=True) # shape (N, npxl, .., 1) if taxis = -1
 
         # logging.debug(f'cross_t shape {cross_t.shape}')
-        crossed = torch.gather(Xacc, taxis, cross_t) >= threshold # is it really cross at cross_t?
+        crossed = torch.gather(Xacc, taxis, cross_t) >= thres # is it really cross at cross_t?
         # crossed shape: (N, npxl, ..., Nt) if taxis = -1
         # logging.debug(f'crossed shape {crossed.shape}')
         # hold_t = cross_t + adc_hold_delay - 1  # samed as cross_t shape, element at adc_hold_delay - 1 is from 0 to adc_hold_delay-1
@@ -78,7 +91,7 @@ def nd_readout(block, threshold, adc_hold_delay, adc_down_time, csa_reset_time=1
         # logging.debug(f'hold_t_inrange shape {hold_t_inrange.shape}')
         Xacc_hold_t = torch.gather(Xacc, taxis, hold_t_inrange) # shape (N, npxl, ..., 1) if taxis = -1
         # logging.debug(f'Xacc_hold_t shape {Xacc_hold_t.shape}')
-        delay_crossed = Xacc_hold_t >= threshold # shape (N, npxl, ..., 1) if taxis = -1
+        delay_crossed = Xacc_hold_t >= thres # shape (N, npxl, ..., 1) if taxis = -1
         # logging.debug(f'delay_crossed shape {delay_crossed.shape}')
         triggered = crossed & delay_crossed & (hold_t < Nt) # shape (N, npxl, ..., 1) if taxis = -1
         # logging.debug(f'triggered shape {triggered.shape}')
@@ -101,6 +114,8 @@ def nd_readout(block, threshold, adc_hold_delay, adc_down_time, csa_reset_time=1
         oloc = torch.cat([pixels, times.unsqueeze(1), hold_times.unsqueeze(1), start_times.unsqueeze(1)], dim=1)
         olocs.append(oloc)
         ocharges.append(hits)
+        if thres_noise is None:
+            assert torch.all(hits > thres[triggered]).item()
         start[~triggered] = hold_t[~triggered] + one_tick
         start[~crossed] = Nt # crossed not triggered should be at hold_t+1; never crossed needs to be at start.
         # at triggered positions, charges are reset and there is one timestamp missing;
@@ -110,9 +125,9 @@ def nd_readout(block, threshold, adc_hold_delay, adc_down_time, csa_reset_time=1
         Xacc_next_to_hold_t = torch.gather(Xacc, taxis, torch.clamp(hold_t+csa_reset_time, min=0, max=Nt-1))
         # only update the triggered positions
         Xacc[triggered.squeeze(taxis)] -= Xacc_next_to_hold_t[triggered.squeeze(taxis)]
-        if reset_noises is not None:
+        if reset_noise is not None:
             # FIXME: taxis is assumed to be -1
-            Xacc_baseline = torch.normal(0, torch.full(Xacc.shape[:-1], fill_value=reset_noises, device=Xacc.device))
+            Xacc_baseline = torch.normal(0, torch.full(Xacc.shape[:-1], fill_value=reset_noise, device=Xacc.device))
             # print('shape', Xacc_baseline[triggered.squeeze(taxis)].unsqueeze(-1))
             Xacc[triggered.squeeze(taxis)] += Xacc_baseline[triggered.squeeze(taxis)].unsqueeze(-1)
 

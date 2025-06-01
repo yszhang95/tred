@@ -34,6 +34,26 @@ input_path = None
 output_path = None
 drtoa = None
 threshold = None
+uncorr_noise = None
+reset_noise = None
+thres_noise = None
+
+def load_threshold(threshold):
+    '''
+    A map of io group from data to MC should be done.
+    Hard-coded map is provided for 2x2 geometry.
+    Assume thresholds are aligned from lower to high ends.
+    '''
+    if not isinstance(threshold, str):
+        return [torch.tensor(threshold), ] * 1000 # FIXME: A large enough number
+    thresholds = []
+    # io_groups = [1, 2, 3, 4, 5, 6, 7, 8]
+    # io_indices_tred = [1, 0, 3, 2, 5, 4, 7, 6]
+    with h5py.File(threshold, 'r') as fthres:
+        for ig in [2,1,4,3,6,5,8,7]:
+            thresholds.append(torch.tensor(fthres[f'io_group{ig}/threshold']['Q'][:], dtype=torch.float32))
+    return thresholds
+
 def concatenate_waveforms(sparse_currents, Nt):
     '''
      Assume there is no overlap.
@@ -151,9 +171,6 @@ def runit(device='cpu'):
     adc_down_time = 24 # 24 * 50ns = 1.2us
     csa_reset_time = 2 # 2 * 50ns = 100ns
 
-    # noises = 900. # electrons; including CSA and discriminator
-    noises = None # electrons; including CSA and discriminator
-
     lacing = torch.tensor([nimperpix, nimperpix, 1])
 
     batch_size = 4096
@@ -204,6 +221,8 @@ def runit(device='cpu'):
         )
 
 
+    thresholds = load_threshold(threshold)
+
     for itpc, tpcdataset in enumerate(tpcs):
         info(f"Drift direction: {tpcdataset.drift} in tpcid {tpcdataset.tpc_id}.")
         info(f"TPC lower corner: {tpcdataset.lower_left_corner} in itpc {tpcdataset.tpc_id}.")
@@ -241,12 +260,13 @@ def runit(device='cpu'):
             # if itpc != 0: continue
             # if ibatch !=41: continue
 
-
             if ibatch > 10:
                 break
 
             stime = time.time()
             try:
+                if isinstance(event_list, list) and int(labels[0,0].numpy()) not in event_list:
+                    continue
 
                 global_tref = [features[0][0,-2].numpy(), torch.min(features[0][:,-1]).numpy()] # assume it is in us
                 waveforms[f'global_tref_tpc{tpcdataset.tpc_id}_batch{ibatch}'] = np.array(global_tref)
@@ -379,10 +399,13 @@ def runit(device='cpu'):
                 if torch.isnan(currents.data).any():
                     raise ValueError
 
-                if isinstance(threshold, str):
-                    raise NotImplementedError("To add support for loading a threshold file.")
-                hits = nd_readout(currents, threshold, adc_hold_delay, adc_down_time, csa_reset_time, one_tick=one_tick,
-                                  pixel_axes=(1,2), noises=noises, reset_noises=noises)
+                # if isinstance(threshold, str):
+                #     raise NotImplementedError("To add support for loading a threshold file.")
+                thres = thresholds[tpcdataset.tpc_id].to(device)
+                if thres.ndim > 0:
+                    thres[thres<2] = 1E16 # FIXME: Temporarily disable low threshold channels
+                hits = nd_readout(currents, thres, adc_hold_delay, adc_down_time, csa_reset_time, one_tick=one_tick,
+                                  pixel_axes=(1,2), uncorr_noise=uncorr_noise, thres_noise=thres_noise, reset_noise=reset_noise)
 
                 runtime['to_device'].append(t01-t00)
                 runtime['recomb'].append(t02-t01)
@@ -500,6 +523,9 @@ def fullsim(config, finpath, foutpath):
     global lifetime
     global drtoa
     global threshold
+    global uncorr_noise
+    global thres_noise
+    global reset_noise
 
     global input_path
     global output_path
@@ -512,6 +538,9 @@ def fullsim(config, finpath, foutpath):
     drtoa = config.get("drtoa", 10.431) * units.cm / units.cm # values are in units of cm to cm
     lifetime = config.get("lifetime", 2.0) * units.ms / units.us # values are from ms units of us
     threshold = config.get("threshold", 5_000) # electrons # it can also be a path to threshold
+    uncorr_noise = config.get("uncorr_noise", None)
+    thres_noise = config.get("thres_noise", None)
+    reset_noise = config.get("reset_noise", None)
 
     if finpath is None:
         input_path = "/home/yousen/Public/ndlar_shared/data/tred_2x2_2025010/filtered_MiniRun5_1E19_RHC.convert2h5.0000000.EDEPSIM.hdf5"
