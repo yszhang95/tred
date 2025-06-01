@@ -34,6 +34,54 @@ input_path = None
 output_path = None
 drtoa = None
 threshold = None
+def concatenate_waveforms(sparse_currents, Nt):
+    '''
+     Assume there is no overlap.
+     Assume location is binned into 1x1 pixel groups.
+     location: shape (Nbatch, vdim)
+     data: shape (Nbatch, 1, 1, ,1, ..., Mt)
+     Nt is the length of output along time axis (last axis). It must be divisible by Mt.
+     '''
+    data = sparse_currents.data
+    location = sparse_currents.location
+    Mt = data.shape[-1]
+    if Nt % Mt:
+        raise ValueError(f'Nt: {Nt} must be divisible by Mt: {Mt}')
+    if any(l != 1 for l in data.shape[1:-1]):
+        raise ValueError(f'Size in pixel domains must be 1, but {data.shape[1:-1]} is given.')
+
+    vdim = location.shape[1]
+    pixel_locs, rev_ind = torch.unique(location[:, :-1], dim=0, return_inverse=True, sorted=True)
+    Npix = pixel_locs.size(0)
+    Nbatch = location.shape[0]
+
+    # Construct loc_out = [pixel_coords..., min_time_per_pixel]
+    min_time = torch.full((Npix,), Nt+torch.max(location[:,-1]), device=location.device, dtype=location.dtype)
+    min_time.scatter_reduce_(0, rev_ind, location[:, -1], reduce='amin', include_self=False)
+    loc_out = torch.cat([pixel_locs, min_time.unsqueeze(1)], dim=1)  # shape (Npix, vdim)
+
+    tref = min_time[rev_ind]
+
+    # Initialize output waveform
+    wf_out = torch.zeros((Npix, Nt), device=data.device, dtype=data.dtype)
+
+    # Time assignment
+    t_start = location[:, -1] - tref
+    if torch.any(t_start<0):
+        raise ValueError
+    time_offsets = torch.arange(Mt, device=data.device).view(1, -1)
+    time_indices = t_start.view(-1, 1) + time_offsets
+    batch_indices = rev_ind.view(-1, 1).expand(-1, Mt).clone().detach()
+    flat_batch = batch_indices.reshape(-1)
+    flat_time = time_indices.reshape(-1)
+    flat_values = data.view(-1, Mt).reshape(-1)
+    wf_out.index_put_((flat_batch, flat_time), flat_values, accumulate=False)
+
+
+    # Reshape waveform output to match original spatial dims
+    wf_out = wf_out.view(Npix, *data.shape[1:-1], Nt)
+    return Block(data=wf_out, location=loc_out)
+
 
 def make_nd(device='cpu'):
     '''
@@ -76,6 +124,7 @@ def runit(device='cpu'):
     export_pickle = False
 
     # eventually replace this hard-wire with configuration
+    twindow_max = 12_000 # 12_000 * 50ns = 600us
     DL = 4.4 * units.cm2/units.s / (units.cm2/units.us) # value are in cm2/us
     DT = 8.8 * units.cm2/units.s / (units.cm2/units.us) # value are in cm2/us
     diffusion = torch.tensor([DL, DT, DT])
@@ -120,13 +169,14 @@ def runit(device='cpu'):
 
     chunksum_effq_out = ChunkSum(cshape_effq_out) # 1 pixel, 1 pixel, 60*0.05us*1.6cm/us=4.8mm
 
-    chunksum_readout = ChunkSum((1,1,12000))
+    chunksum_readout = ChunkSum((1,1,120))
+    # chunksum_readout = ChunkSum((1,1,12000))
     # convo = LacedConvo(lacing, o_shape=(12, 12, 6912))
     convo = LacedConvo(lacing, o_shape=(12, 12, 2048))
     chunksum_i = ChunkSum((4, 4, 128), method='chunksum_inplace_v2')
 
     chunksum_i = chunksum_i.to('cuda')
-    # chunksum_readout = chunksum_readout.to('cuda')
+    chunksum_readout = chunksum_readout.to('cuda')
     chunksum_effq_out = chunksum_effq_out.to('cuda')
 
     t1 = time.time()
@@ -155,6 +205,11 @@ def runit(device='cpu'):
 
 
     for itpc, tpcdataset in enumerate(tpcs):
+        info(f"Drift direction: {tpcdataset.drift} in tpcid {tpcdataset.tpc_id}.")
+        info(f"TPC lower corner: {tpcdataset.lower_left_corner} in itpc {tpcdataset.tpc_id}.")
+        info(f"TPC upper corner: {tpcdataset.upper_corner} in itpc {tpcdataset.tpc_id}.")
+        info(f"TPC anode: {tpcdataset.anode} in itpc {tpcdataset.tpc_id}.")
+        info(f"TPC cathode: {tpcdataset.cathode} in itpc {tpcdataset.tpc_id}.")
         sampler = SortedLabelBatchSampler(tpcdataset.labels[:,0], batch_size)
         loader = CustomNDLoader(tpcdataset, sampler=sampler,
                                 batch_size=None, collate_fn=nd_collate_fn)
@@ -177,7 +232,7 @@ def runit(device='cpu'):
 
 
         inds_range = (tpcdataset.upper_corner - tpcdataset.lower_left_corner) // pitch
-        inds_range = inds_range.to(torch.int32)
+        inds_range = inds_range.to(torch.int32).to(device)
 
         # if itpc < 25:
         #     continue
@@ -284,8 +339,8 @@ def runit(device='cpu'):
                         currents = chunking.accumulate(currents)
 
                     if currents is not None:
-                        currents.data = currents.data.to('cpu')
-                        currents.location = currents.location.to('cpu')
+                        # currents.data = currents.data.to('cpu')
+                        # currents.location = currents.location.to('cpu')
                         current_blocks_d.append(currents.data)
                         current_blocks_l.append(currents.location)
 
@@ -315,17 +370,14 @@ def runit(device='cpu'):
                     continue
 
                 currents = chunksum_readout(currents)
-                currents.data = currents.data * tspace
-                uqt = torch.unique(currents.location[:,-1])
-                uqpxl = torch.unique(currents.location[:,0:2], dim=0)
-                # print('currents', torch.isnan(currents.data).any())
+                currents = concatenate_waveforms(currents, twindow_max)
+                currents.data = currents.data * tspace / 1E3 # to ke-
+                current_mask = (currents.location[:,[0,1]] <= inds_range) & (currents.location[:,[0,1]] >= 0)
+                current_mask = current_mask.all(dim=1)
+                currents = Block(data=currents.data[current_mask], location=currents.location[current_mask])
+
                 if torch.isnan(currents.data).any():
                     raise ValueError
-                # print('currents data', currents.location[torch.isnan(currents.data).any(dim=(1,2,3))])
-                # info(f'----------------- unique pixels {currents.nbatches}')
-                # info(f'----------------- unique time offsets {uqt.size(0)}')
-                # info(f'----------------- unique pixel offsets {uqpxl.size(0)}')
-                # info(f'----------------- max Q {torch.max(torch.sum(currents.data, dim=-1))}')
 
                 if isinstance(threshold, str):
                     raise NotImplementedError("To add support for loading a threshold file.")
@@ -375,18 +427,14 @@ def runit(device='cpu'):
                 qbd = torch.cat(effq_blocks_d).sum(dim=(1,2,3))
                 qbd = torch.cat([qblf32, qbd[:,None]], dim=1)
 
-
                 hitl = hits[0].cpu()
-                mask = (hitl[:,[0,1]] <= inds_range) & (hitl[:,[0,1]] >= 0)
-                mask = mask.all(dim=1)
-                hitl = hitl[mask]
                 # FIXME: :,:3 is hard-coded
                 hoff = torch.tensor([1/2, 1/2, adc_hold_delay-global_tref[1]//tspace]).to(torch.float32)
                 hitlf32 = transform_indices_to_coord_3d(hitl[:,:3], pitch, tspace, velocity,
                                                         tpc_lower_left.to(torch.float32), tpcdataset.anode, tpcdataset.drift,
                                                         paxes=(0,1), taxis=-1, offset=hoff)
                 hitlf32 = hitlf32[:, [2,0,1]]
-                hitd = torch.cat([hitlf32, hits[1][:,None].cpu()[mask]], dim=1)
+                hitd = torch.cat([hitlf32, hits[1][:,None].cpu()], dim=1)
 
                 waveforms[f'hits_tpc{tpcdataset.tpc_id}_batch{ibatch}'] = hitd.numpy()
                 waveforms[f'hits_tpc{tpcdataset.tpc_id}_batch{ibatch}_location'] = hitl.numpy()
