@@ -103,6 +103,20 @@ def concatenate_waveforms(sparse_currents, Nt):
 
     # Reshape waveform output to match original spatial dims
     wf_out = wf_out.view(Npix, *data.shape[1:-1], Nt)
+
+    # filter negative ticks
+    pm = torch.nonzero(loc_out[:,-1] < 0)
+    if pm.numel() > 0:
+        pm = pm[0]
+        tind = torch.arange(Nt, device=wf_out.device).view(1, Nt).expand(wf_out.shape).clone().detach()
+        print(wf_out.shape, tind.shape)
+        print(torch.abs(loc_out[:,-1]).unsqueeze(-1).shape)
+        tpos = torch.abs(loc_out[:,-1])
+        print(wf_out.ndim-1)
+        for i in range(wf_out.ndim-1):
+            tpos = tpos.unsqueeze(-1)
+        tm = tind < tpos
+        wf_out[pm] *= tm[pm]
     return Block(data=wf_out, location=loc_out)
 
 

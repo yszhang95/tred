@@ -3,11 +3,11 @@ response_path: "response_v2a_distance_10p431cm_binsize_0p04434cm_tick0p05us.npy"
 module_yaml: "tests/playground/2x2_mod2mod_variation.yaml"
 tile_yaml: "tests/playground/multi_tile_layout-2.4.16.yaml"
 lifetime: 1.0 # ms
-threshold: 5 # ke
+threshold: 5. # ke
 # threshold: "/home/yousen/Documents/NDLAr2x2/2x2_ql/filter_mc_events/threshold_summary.hdf5"
 event_list: null
 uncorr_noise: 0.500 #ke
 reset_noise: 0.900 #ke
-# thres_noise: 0.650 #ke
-thres_noise: null #ke
+thres_noise: 0.650 #ke
+# thres_noise: null #ke
 save_waveform: false
