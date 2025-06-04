@@ -40,6 +40,8 @@ save_waveform = None
 uncorr_noise = None
 reset_noise = None
 thres_noise = None
+fluctuate = False
+effq_out_nt = 1
 
 def load_threshold(threshold):
     '''
@@ -109,10 +111,7 @@ def concatenate_waveforms(sparse_currents, Nt):
     if pm.numel() > 0:
         pm = pm[0]
         tind = torch.arange(Nt, device=wf_out.device).view(1, Nt).expand(wf_out.shape).clone().detach()
-        print(wf_out.shape, tind.shape)
-        print(torch.abs(loc_out[:,-1]).unsqueeze(-1).shape)
         tpos = torch.abs(loc_out[:,-1])
-        print(wf_out.ndim-1)
         for i in range(wf_out.ndim-1):
             tpos = tpos.unsqueeze(-1)
         tm = tind < tpos
@@ -199,7 +198,7 @@ def runit(device='cpu'):
     raster = Raster(velocity, grid_spacing)
     chunksum = ChunkSum(chunk_shape)
 
-    cshape_effq_out = torch.tensor([10, 10, 60])
+    cshape_effq_out = torch.tensor([nimperpix, nimperpix, effq_out_nt])
 
     chunksum_effq_out = ChunkSum(cshape_effq_out) # 1 pixel, 1 pixel, 60*0.05us*1.6cm/us=4.8mm
 
@@ -249,7 +248,7 @@ def runit(device='cpu'):
         sampler = SortedLabelBatchSampler(tpcdataset.labels[:,0], batch_size)
         loader = CustomNDLoader(tpcdataset, sampler=sampler,
                                 batch_size=None, collate_fn=nd_collate_fn)
-        drifter = Drifter(diffusion, lifetime, tpcdataset.drift*velocity,
+        drifter = Drifter(diffusion, lifetime, tpcdataset.drift*velocity, fluctuate=fluctuate,
                           target=tpcdataset.anode, drtoa=drtoa)
         drifter = drifter.to(device=device)
 
@@ -264,21 +263,12 @@ def runit(device='cpu'):
         waveforms[f'tpc_anode_tpc{tpcdataset.tpc_id}'] = tpcdataset.anode
         waveforms[f'tpc_cathode_tpc{tpcdataset.tpc_id}'] = tpcdataset.cathode
         waveforms[f'pixel_pitch_tpc{tpcdataset.tpc_id}'] = pitch
-        waveforms[f'time_tick_tpc{tpcdataset.tpc_id}'] = tspace
 
 
         inds_range = (tpcdataset.upper_corner - tpcdataset.lower_left_corner) // pitch
         inds_range = inds_range.to(torch.int32).to(device)
 
-        # if itpc < 25:
-        #     continue
-
         for ibatch, (features, labels) in enumerate(loader):
-            # if itpc != 0: continue
-            # if ibatch !=41: continue
-
-            if ibatch > 10:
-                break
 
             stime = time.time()
             try:
@@ -459,6 +449,7 @@ def runit(device='cpu'):
                 qbl = torch.cat(effq_blocks_l).to('cpu')
                 qoff = cshape_effq_out / 2
                 qoff[[0,1]] = qoff[[0,1]] / nimperpix
+                qoff[2] -= global_tref[1]//tspace
                 qblf32 = transform_indices_to_coord_3d(qbl, pitch, tspace, velocity,
                                                        tpc_lower_left.to(torch.float32), tpcdataset.anode, tpcdataset.drift,
                                                        paxes=(0,1), taxis=-1, offset=qoff)
@@ -483,22 +474,28 @@ def runit(device='cpu'):
                 torch.cuda.reset_peak_memory_stats()
             except IndexError as e:
                 raise e
-            # except torch.OutOfMemoryError as e:
-            #     current_device = torch.cuda.current_device()
-            #     allocated = torch.cuda.memory_allocated(current_device) / (1024 ** 2)  # in MB
-            #     reserved = torch.cuda.memory_reserved(current_device) / (1024 ** 2)    # in MB
-            #     total = torch.cuda.get_device_properties(current_device).total_memory / (1024 ** 2)  # in MB
-
-            #     info('torch.OutOfMemoryError, '
-            #         f'tpc label {itpc}, batch label {ibatch}, '
-            #         f'N segments {len(features[0])}, '
-            #         f'elapsed {time.time() - stime} sec on {device}. '
-            #         f'Memory allocated: {allocated:.2f} MB, reserved: {reserved:.2f} MB, '
-            #         f'total: {total:.2f} MB.'
-            #         f' {e}')
-
 
     # Stop recording memory snapshot history.
+    waveforms["tile_yaml"] = tile_yaml
+    waveforms["module_yaml"] = module_yaml
+    waveforms["response_path"] = response_path
+    waveforms["lifetime"] = lifetime
+    waveforms["drtoa"] = drtoa
+    waveforms["threshold"] = threshold
+    waveforms["event_list"] = event_list
+    waveforms["save_waveform"] = save_waveform
+    waveforms["uncorr_noise"] = uncorr_noise
+    waveforms["thres_noise"] = thres_noise
+    waveforms["reset_noise"] = reset_noise
+    waveforms["fluctuate"] = fluctuate
+    waveforms["effq_out_nt"] = effq_out_nt
+    waveforms["input_path"] = input_path
+    waveforms["drtoa"] = input_path
+    waveforms["adc_hold_delay"] = adc_hold_delay
+    waveforms["adc_down_time"] = adc_down_time
+    waveforms["csa_reset_time "] = csa_reset_time
+    waveforms["one_tick"] = one_tick
+    waveforms[f'time_spacing'] = tspace
 
     write_npz(output_path, **waveforms)
 
@@ -543,6 +540,8 @@ def fullsim(config, finpath, foutpath):
     global uncorr_noise
     global thres_noise
     global reset_noise
+    global fluctuate
+    global effq_out_nt
 
     global input_path
     global output_path
@@ -560,6 +559,8 @@ def fullsim(config, finpath, foutpath):
     uncorr_noise = config.get("uncorr_noise", None)
     thres_noise = config.get("thres_noise", None)
     reset_noise = config.get("reset_noise", None)
+    fluctuate = config.get("fluctuate", False)
+    effq_out_nt = config.get("effq_out_nt", 1)
 
     if finpath is None:
         input_path = "/home/yousen/Public/ndlar_shared/data/tred_2x2_2025010/filtered_MiniRun5_1E19_RHC.convert2h5.0000000.EDEPSIM.hdf5"
