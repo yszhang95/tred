@@ -153,7 +153,8 @@ def accumulate(chunk : Block) -> Block:
     summed = summed.index_add(dim=0, index=inv, source=dat, alpha=1)
 
     # Step 4: Drop zero contents
-    indices = torch.where(summed.sum(dim=[i+1 for i in range(chunk.vdim)]))
+    # indices = torch.where(summed.sum(dim=[i+1 for i in range(chunk.vdim)]))
+    indices = torch.where((torch.abs(summed) > 1e-3).any(dim=[i+1 for i in range(chunk.vdim)]))
 
     return Block(location=unique_locs[indices], data=summed[indices])
 

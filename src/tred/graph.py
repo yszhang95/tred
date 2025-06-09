@@ -354,6 +354,8 @@ class ChunkSum(nn.Module):
         #     torch.cuda.empty_cache()
         #     return accumulate(chunkify(block, self.chunk_shape))
 
+        return accumulate(chunkify(block, self.chunk_shape))
+
         nchunks = block.nbatches // self._nbatches + 1
 
         locs = torch.chunk(block.location, nchunks)
