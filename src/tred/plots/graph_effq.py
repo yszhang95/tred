@@ -22,6 +22,7 @@ import yaml
 from collections import defaultdict
 import torch
 import time
+import os
 
 import torch
 import time
@@ -33,6 +34,7 @@ lifetime = None
 input_path = None
 output_path = None
 drtoa = None
+tspace = None
 threshold = None
 event_list = None
 save_waveform = None
@@ -42,6 +44,8 @@ reset_noise = None
 thres_noise = None
 fluctuate = False
 effq_out_nt = 1
+
+response = None
 
 def load_threshold(threshold):
     '''
@@ -161,14 +165,13 @@ def runit(device='cpu'):
 
     # eventually replace this hard-wire with configuration
     twindow_max = 12_000 # 12_000 * 50ns = 600us
-    DL = 4.4 * units.cm2/units.s / (units.cm2/units.us) # value are in cm2/us
+    DL = 4.0 * units.cm2/units.s / (units.cm2/units.us) # value are in cm2/us
     DT = 8.8 * units.cm2/units.s / (units.cm2/units.us) # value are in cm2/us
     diffusion = torch.tensor([DL, DT, DT])
-    velocity = 1.6 * units.mm/units.us / (units.cm/units.us) # values are in units of cm/us
+    velocity = 1.59645 * units.mm/units.us / (units.cm/units.us) # values are in units of cm/us
     pitch = 4.434*units.mm / units.cm # values are in units of cm
     nimperpix=10
     pspace = pitch/nimperpix
-    tspace = 50*units.ns / units.us # values are in units of us
     one_tick = 2 # 2 points in grid along time is one time tick 100 ns in experiment
     grid_spacing = (pspace, pspace, tspace)
     # npixpersuper = 16+1-9
@@ -214,8 +217,9 @@ def runit(device='cpu'):
 
     t1 = time.time()
 
-    response = ndlarsim(response_path)
+    # response = ndlarsim(response_path) # response is loaded in main function
 
+    global response
     response = response.to(device=device)
 
     t2 = time.time()
@@ -324,6 +328,7 @@ def runit(device='cpu'):
                     charge_this = charge[ichunk:ichunk+nbchunk]
                     qblock = raster(dsigma[ichunk:ichunk+nbchunk], dtime[ichunk:ichunk+nbchunk],
                                     dcharge[ichunk:ichunk+nbchunk], dtail[ichunk:ichunk+nbchunk], dhead[ichunk:ichunk+nbchunk])
+                    print(torch.sum(qblock.data.cpu()))
 
                     # invalid = torch.isnan(qblock.data).any(dim=(1,2,3))
 
@@ -534,6 +539,7 @@ def fullsim(config, finpath, foutpath):
     global response_path
     global lifetime
     global drtoa
+    global tspace
     global threshold
     global event_list
     global save_waveform
@@ -546,12 +552,16 @@ def fullsim(config, finpath, foutpath):
     global input_path
     global output_path
 
+    global response
+
     with open(config, "r") as fconfig:
         config = yaml.safe_load(fconfig)
+
     tile_yaml = config.get('tile_yaml',  "tests/playground/multi_tile_layout-2.4.16.yaml")
     module_yaml = config.get('module_yaml',  "tests/playground/2x2_mod2mod_variation.yaml")
     response_path = config.get("response_path",  "response_v2a_distance_10p431cm_binsize_0p04434cm_tick0p05us.npy")
     drtoa = config.get("drtoa", 10.431) * units.cm / units.cm # values are in units of cm to cm
+    tspace = config.get("tspace", 0.05) * units.us/ units.us # values are in units of us
     lifetime = config.get("lifetime", 2.0) * units.ms / units.us # values are from ms units of us
     threshold = config.get("threshold", 5_000) # electrons # it can also be a path to threshold
     event_list = config.get("event_list", None) # None means select all
@@ -561,6 +571,16 @@ def fullsim(config, finpath, foutpath):
     reset_noise = config.get("reset_noise", None)
     fluctuate = config.get("fluctuate", False)
     effq_out_nt = config.get("effq_out_nt", 1)
+
+    # loading response
+    if os.path.splitext(response_path)[1] == '.npz':
+        fres = np.load(response_path)
+        response = ndlarsim(fres['response'])
+        tspace = fres['time_tick']  * units.us / units.us # us
+        drtoa = fres['drift_length'] * units.cm / units.cm # cm
+        print(f'[Warning] drtoa, tspace, will be overridden to {drtoa} cm, {tspace} us. Please manually check pspace. pspace in response file is {fres["bin_size"]} cm. pspace in config.')
+    else:
+        response = ndlarsim(response_path)
 
     if finpath is None:
         input_path = "/home/yousen/Public/ndlar_shared/data/tred_2x2_2025010/filtered_MiniRun5_1E19_RHC.convert2h5.0000000.EDEPSIM.hdf5"

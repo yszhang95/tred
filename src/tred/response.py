@@ -122,7 +122,11 @@ def ndlarsim(npy_path, nd_response_shape=None, nd_nimp=10):
     response_nimp = nd_nimp
     response_npxl = nd_response_shape[0]*2//response_nimp
 
-    raw = numpy.load(npy_path)
+    print(type(npy_path))
+    if isinstance(npy_path, numpy.ndarray):
+        raw = numpy.copy(npy_path)
+    else:
+        raw = numpy.load(npy_path)
     if raw.shape[0] != raw.shape[1]:
         raise ValueError(f"Number of pixels along each dimension must be equal. {raw.shape[:2]} is given.")
     if len(nd_response_shape) == 3:
