@@ -459,7 +459,8 @@ def runit(device='cpu'):
                                                        tpc_lower_left.to(torch.float32), tpcdataset.anode, tpcdataset.drift,
                                                        paxes=(0,1), taxis=-1, offset=qoff)
                 qblf32 = qblf32[:, [2,0,1]]
-                qbd = torch.cat(effq_blocks_d).sum(dim=(1,2,3))
+                qbd_fg = torch.cat(effq_blocks_d)
+                qbd = qbd_fg.sum(dim=(1,2,3))
                 qbd = torch.cat([qblf32, qbd[:,None]], dim=1)
 
                 hitl = hits[0].cpu()
@@ -475,6 +476,8 @@ def runit(device='cpu'):
                 waveforms[f'hits_tpc{tpcdataset.tpc_id}_batch{ibatch}_location'] = hitl.numpy()
                 waveforms[f'effq_tpc{tpcdataset.tpc_id}_batch{ibatch}'] = qbd
                 waveforms[f'effq_tpc{tpcdataset.tpc_id}_batch{ibatch}_location'] = qbl
+                waveforms[f'effq_fine_grain_tpc{tpcdataset.tpc_id}_batch{ibatch}'] = qbd_fg
+                waveforms[f'effq_fine_grain_tpc{tpcdataset.tpc_id}_batch{ibatch}_location'] = qbl
 
                 torch.cuda.reset_peak_memory_stats()
             except IndexError as e:
