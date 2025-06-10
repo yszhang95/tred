@@ -702,6 +702,10 @@ def compute_qeff(Q, X0, X1, Sigma, n_sigma, origin, grid_spacing, method, npoint
         if not kwargs.get('skippad', False):
             kwargs['skippad'] = True
             logger.warning('Option "skippad" is overwritten to True, complying with option "recenter"')
-    offset, shape = compute_charge_box(X0, X1, Sigma, n_sigma, origin, grid_spacing, **kwargs)
-    qeff, offset = eval_qeff(Q, X0, X1, Sigma, offset, shape, origin, grid_spacing, method, npoints, **kwargs)
+    # X0, X1 shifted by half bin, as in responses.org
+    # FIXME: how to handle the case when X0,X1 hit the anode?
+    X0shift = X0 - 1/2.*grid_spacing
+    X1shift = X1 - 1/2.*grid_spacing
+    offset, shape = compute_charge_box(X0shift, X1shift, Sigma, n_sigma, origin, grid_spacing, **kwargs)
+    qeff, offset = eval_qeff(Q, X0shift, X1shift, Sigma, offset, shape, origin, grid_spacing, method, npoints, **kwargs)
     return qeff, offset
