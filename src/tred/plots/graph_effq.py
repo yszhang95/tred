@@ -118,7 +118,7 @@ def concatenate_waveforms(sparse_currents, Nt):
         tpos = torch.abs(loc_out[:,-1])
         for i in range(wf_out.ndim-1):
             tpos = tpos.unsqueeze(-1)
-        tm = tind < tpos
+        tm = tind > tpos
         wf_out[pm] *= tm[pm]
     return Block(data=wf_out, location=loc_out)
 
@@ -207,8 +207,8 @@ def runit(device='cpu'):
 
     chunksum_readout = ChunkSum((1,1,120))
     # chunksum_readout = ChunkSum((1,1,12000))
-    # convo = LacedConvo(lacing, o_shape=(12, 12, 6912))
-    convo = LacedConvo(lacing, o_shape=(12, 12, 2048))
+    convo = LacedConvo(lacing, o_shape=(12, 12, 6912))
+    # convo = LacedConvo(lacing, o_shape=(12, 12, 2048))
     chunksum_i = ChunkSum((4, 4, 128), method='chunksum_inplace_v2')
 
     chunksum_i = chunksum_i.to('cuda')
@@ -498,7 +498,6 @@ def runit(device='cpu'):
     waveforms["fluctuate"] = fluctuate
     waveforms["effq_out_nt"] = effq_out_nt
     waveforms["input_path"] = input_path
-    waveforms["drtoa"] = input_path
     waveforms["adc_hold_delay"] = adc_hold_delay
     waveforms["adc_down_time"] = adc_down_time
     waveforms["csa_reset_time "] = csa_reset_time
