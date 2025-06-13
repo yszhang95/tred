@@ -47,6 +47,8 @@ effq_out_nt = 1
 
 response = None
 
+old_geo_config = True
+
 def load_threshold(threshold):
     '''
     A map of io group from data to MC should be done.
@@ -128,7 +130,7 @@ def make_nd(device='cpu'):
     This mocks up some file of depo sets.
     '''
 
-    borders = simple_geo_parser(module_yaml, tile_yaml)
+    borders = simple_geo_parser(module_yaml, tile_yaml, old_geo_config)
     d0 = StepLoader(h5py.File(input_path), transform=steps_from_ndh5)
     f0, f1, i0 = d0[:]
     return (f0, f1, i0), i0, borders
@@ -311,6 +313,7 @@ def runit(device='cpu'):
                 # dsigma, dtime, dcharge, dtail, dhead
                 # drifted = drifter(local_time, charge, tail, head)
                 dsigma, dtime, dcharge, dtail, dhead = drifter(local_time, charge, tail, head)
+                print('dtime', dtime, 'dtail', dtail, 'dhead', dhead)
 
                 if device == 'cuda':
                     torch.cuda.synchronize()
@@ -551,6 +554,8 @@ def fullsim(config, finpath, foutpath):
     global fluctuate
     global effq_out_nt
 
+    global old_geo_config
+
     global input_path
     global output_path
 
@@ -573,6 +578,7 @@ def fullsim(config, finpath, foutpath):
     reset_noise = config.get("reset_noise", None)
     fluctuate = config.get("fluctuate", False)
     effq_out_nt = config.get("effq_out_nt", 1)
+    old_geo_config = config.get("old_geo_config", True)
 
     # loading response
     if os.path.splitext(response_path)[1] == '.npz':

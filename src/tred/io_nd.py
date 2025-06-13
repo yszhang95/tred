@@ -13,10 +13,12 @@ from tred.types import index_dtype
 from tred.types import index_dtype
 from tred.units import cm, mm
 
+from tred.util import warning
+
 from importlib import reload  # Python 3.4+
 import tred.loaders
 
-def simple_geo_parser(det_yaml, tile_yaml):
+def simple_geo_parser(det_yaml, tile_yaml, old_version=True):
     '''
     FIXME: slight difference between GDML and YAMLs
 
@@ -27,7 +29,7 @@ def simple_geo_parser(det_yaml, tile_yaml):
         detprop = yaml.safe_load(f)
     with open(tile_yaml, 'r') as f:
         tile_layout = yaml.safe_load(f)
-            
+
     PIXEL_PITCH = tile_layout['pixel_pitch'] * mm / cm
     chip_channel_to_position = tile_layout['chip_channel_to_position']
 
@@ -40,15 +42,35 @@ def simple_geo_parser(det_yaml, tile_yaml):
 
     tile_indeces = tile_layout['tile_indeces']
     TILE_POSITIONS = tile_layout['tile_positions']
+    TILE_ORIENTATIONS = tile_layout['tile_orientations']
     tpc_ids = np.unique(np.array(list(tile_indeces.values()))[:,0], axis=0)
 
     anodes = defaultdict(list)
+    cathode_directions = dict() # What direction the cathode is relative to anode
     for tpc_id in tpc_ids:
+        tile_cathode_directions = []
         for tile in tile_indeces:
             if tile_indeces[tile][0] == tpc_id:
                 anodes[tpc_id].append(TILE_POSITIONS[tile])
+                tile_cathode_directions.append(TILE_ORIENTATIONS[tile][0])
 
-    DRIFT_LENGTH = detprop['drift_length']
+        if len(set(tile_cathode_directions)) != 1:
+            raise ValueError("Tiles in same anode plane have different drift directions.")
+
+        if tile_cathode_directions[0] not in [1, -1]:
+            raise ValueError("Cathode direction should be either 1 or -1.")
+        cathode_directions[tpc_id] = tile_cathode_directions[0]
+
+
+    if old_version:
+        DRIFT_LENGTH = detprop['drift_length'] * cm / cm
+    else:
+        try:
+            DRIFT_LENGTH = tile_layout['drift_length'] * mm / cm
+        except:
+            warning(f"{tile_yaml} does not contain drift_length. Use 0.5*(max(mod_anodes) - min(mod_anodes))")
+            mod_anodes = np.array(list(TILE_POSITIONS.values()))[:, 0]
+            DRIFT_LENGTH = 0.5 * (max(mod_anodes) - min(mod_anodes)) * mm / cm
 
     TPC_OFFSETS = np.array(detprop['tpc_offsets'])
 
@@ -57,7 +79,10 @@ def simple_geo_parser(det_yaml, tile_yaml):
     for it, tpc_offset in enumerate(TPC_OFFSETS):
         for ia, anode in enumerate(anodes):
             tiles = np.vstack(anodes[anode]) * mm /cm
-            drift_direction = 1 if anode == 1 else -1
+            if old_version:
+                drift_direction = 1 if anode == 1 else -1
+            else:
+                drift_direction = cathode_directions[anode]
             z_border = min(tiles[:,2]) + TILE_BORDERS[0][0] + tpc_offset[2], \
                        max(tiles[:,2]) + TILE_BORDERS[0][1] + tpc_offset[2]
             y_border = min(tiles[:,1]) + TILE_BORDERS[1][0] + tpc_offset[1], \
@@ -66,6 +91,13 @@ def simple_geo_parser(det_yaml, tile_yaml):
             x_border = min(tiles[:,0]) + tpc_offset[0], \
                        max(tiles[:,0]) + DRIFT_LENGTH * drift_direction + tpc_offset[0]
             TPC_BORDERS[it*2+ia] = (x_border, y_border, z_border)
+    # reorder new output to fit to old version
+    if not old_version:
+        if cathode_directions[1] == 1:
+            pass
+        else:
+            TPC_BORDERS = TPC_BORDERS.reshape(-1, 2, 3, 2)[:,[1,0]].reshape(-1, 3, 2)
+    print(TPC_BORDERS)
     return torch.tensor(TPC_BORDERS, requires_grad=False)
 
 def tpc_label(borders, X0, X1=None, **kwargs):

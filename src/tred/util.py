@@ -22,6 +22,7 @@ import logging
 
 log = logging.getLogger("tred")
 debug = log.debug
+warning = log.warning
 info = log.info
 
 def tenstr(ten):

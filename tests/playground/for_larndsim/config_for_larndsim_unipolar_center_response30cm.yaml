@@ -1,8 +1,11 @@
 drtoa: 30.431 # cm
 tspace: 0.05 # us
 response_path: "/home/yousen/Public/ndlar_shared/data/responses/response_v2a_center_unipolar_30p431cm_0p050us_bin_size0p04434.npz"
-module_yaml: "/home/yousen/Documents/NDLAr2x2/tred/tests/playground/2x2_mod2mod_variation.yaml"
-tile_yaml: "/home/yousen/Documents/NDLAr2x2/tred/tests/playground/multi_tile_layout-2.4.16.yaml"
+old_geo_config: false
+# module_yaml: "/home/yousen/Documents/NDLAr2x2/tred/tests/playground/2x2_mod2mod_variation.yaml"
+module_yaml: "/home/yousen/Documents/NDLAr2x2/tred/tests/playground/2x2.yaml"
+# tile_yaml: "/home/yousen/Documents/NDLAr2x2/tred/tests/playground/multi_tile_layout-2.4.16.yaml"
+tile_yaml: "/home/yousen/Documents/NDLAr2x2/tred/tests/playground/multi_tile_layout-2.4.16_v4.yaml"
 lifetime: 2.2 # ms
   # threshold: 5. # ke
 threshold: "/home/yousen/Documents/NDLAr2x2/2x2_ql/filter_mc_events/threshold_summary.hdf5"
