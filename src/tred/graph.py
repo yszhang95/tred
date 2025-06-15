@@ -216,6 +216,7 @@ class Raster(nn.Module):
     '''
     def __init__(self, velocity, grid_spacing, pdims=(1,2), tdim=-1, nsigma=3.0):
         '''
+        - velocity :: signed velocity for computing time difference between tail and head
         - pdims :: the N-1 dimensions for transverse pitch indexing into input points.
                    They are axes in the original tensor.
         - tdim :: the 1 dimension for time/drift.
@@ -302,7 +303,7 @@ class Raster(nn.Module):
 
         head = self._transform(head, dt+time)
         sigma = self._transform(sigma, None)
-        sigma[:, self._tdim] = sigma[:, self._tdim] / self.velocity # distance to time
+        sigma[:, self._tdim] = sigma[:, self._tdim] / torch.abs(self.velocity) # distance to time
         rasters, offsets = raster_steps(self.grid_spacing, tail, head, sigma, charge, nsigma=self.nsigma)
 
         return Block(location = offsets, data=rasters)

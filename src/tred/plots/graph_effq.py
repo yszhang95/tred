@@ -258,7 +258,8 @@ def runit(device='cpu'):
                           target=tpcdataset.anode, drtoa=drtoa)
         drifter = drifter.to(device=device)
 
-        raster = raster.to(device=device)
+        raster = Raster(tpcdataset.drift*velocity, grid_spacing).to(device=device)
+        # raster = raster.to(device=device)
         chunksum = chunksum.to(device=device)
         convo = convo.to(device=device)
 
