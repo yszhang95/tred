@@ -4,7 +4,7 @@ from tred.response import ndlarsim
 from tred.blocking import Block
 from tred import units
 from .response import get_ndlarsim
-from tred.util import debug, info, tenstr
+from tred.util import debug, info, tenstr, warning
 from tred.loaders import StepLoader, steps_from_ndh5
 from tred.io_nd import (
     nd_collate_fn, create_tpc_datasets_from_steps,
@@ -279,7 +279,7 @@ def runit(device='cpu'):
 
             stime = time.time()
             try:
-                if isinstance(event_list, list) and int(labels[0,0].numpy()) not in event_list:
+                if isinstance(event_list, list) and len(event_list)>0 and int(labels[0,0].numpy()) not in event_list:
                     continue
 
                 global_tref = [features[0][0,-2].numpy(), torch.min(features[0][:,-1]).numpy()] # assume it is in us
@@ -314,7 +314,6 @@ def runit(device='cpu'):
                 # dsigma, dtime, dcharge, dtail, dhead
                 # drifted = drifter(local_time, charge, tail, head)
                 dsigma, dtime, dcharge, dtail, dhead = drifter(local_time, charge, tail, head)
-                print('dtime', dtime, 'dtail', dtail, 'dhead', dhead)
 
                 if device == 'cuda':
                     torch.cuda.synchronize()
@@ -332,7 +331,6 @@ def runit(device='cpu'):
                     charge_this = charge[ichunk:ichunk+nbchunk]
                     qblock = raster(dsigma[ichunk:ichunk+nbchunk], dtime[ichunk:ichunk+nbchunk],
                                     dcharge[ichunk:ichunk+nbchunk], dtail[ichunk:ichunk+nbchunk], dhead[ichunk:ichunk+nbchunk])
-                    print(torch.sum(qblock.data.cpu()))
 
                     # invalid = torch.isnan(qblock.data).any(dim=(1,2,3))
 
@@ -587,7 +585,7 @@ def fullsim(config, finpath, foutpath):
         response = ndlarsim(fres['response'])
         tspace = fres['time_tick']  * units.us / units.us # us
         drtoa = fres['drift_length'] * units.cm / units.cm # cm
-        print(f'[Warning] drtoa, tspace, will be overridden to {drtoa} cm, {tspace} us. Please manually check pspace. pspace in response file is {fres["bin_size"]} cm. pspace in config.')
+        warning(f'drtoa, tspace, will be overridden to {drtoa} cm, {tspace} us. Please manually check pspace. pspace in response file is {fres["bin_size"]} cm. pspace in config.')
     else:
         response = ndlarsim(response_path)
 
