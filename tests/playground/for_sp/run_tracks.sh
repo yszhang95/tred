@@ -5,6 +5,7 @@ set -euo pipefail
 
 # directory where your .hdf5 files live
 INPUT_DIR="/nfs/data/1/yousen/signal_processing/20250616"
+OUTPUT_DIR="/nfs/data/1/yousen/signal_processing/20250617"
 
 # suffixes for your thresholded configs:
 #   ""               ? config_for_sp.yaml
@@ -31,7 +32,7 @@ for file in "${INPUT_DIR}"/segments_pid*_angle*.hdf5; do
 
     echo "? Running SP:   uv run tred -c ${cfg_sp} fullsim -i ${file} -o ${out_sp}"
     uv run tred -c "${cfg_sp}" fullsim -i "${file}" -o "${out_sp}"
-    mv ${out_sp} $INPUT_DIR
+    mv ${out_sp} $OUTPUT_DIR
 
     # build config + output names for the "unipolar_sp" run
     cfg_up="config_for_sp_unipolar${suf}.yaml"
@@ -39,6 +40,6 @@ for file in "${INPUT_DIR}"/segments_pid*_angle*.hdf5; do
 
     echo "? Running UNI:  uv run tred -c ${cfg_up} fullsim -i ${file} -o ${out_up}"
     uv run tred -c "${cfg_up}" fullsim -i "${file}" -o "${out_up}"
-    mv ${out_up} $INPUT_DIR
+    mv ${out_up} $OUTPUT_DIR
   done
 done

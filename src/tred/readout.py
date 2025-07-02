@@ -3,7 +3,8 @@ import torch
 
 from tred.blocking import Block
 
-def nd_readout(block, threshold, adc_hold_delay, adc_down_time, csa_reset_time=1, one_tick=1, pixel_axes=(), taxis=-1,
+def nd_readout(block, threshold, adc_hold_delay, adc_down_time, csa_reset_time=1, one_tick=1,
+               offset_to_align=0, pixel_axes=(), taxis=-1,
                uncorr_noise=None, thres_noise=None, reset_noise=None, leftover=None, niter=10):
     '''
     locs :: (N, nxpl, nxpl, ..., vdim)
@@ -77,7 +78,9 @@ def nd_readout(block, threshold, adc_hold_delay, adc_down_time, csa_reset_time=1
         # info(f'mvalid shape {mvalid.shape}')
         Xacc = Xacc * mvalid # FIXME: start > trange; we need leftover information
 
-        crossed = (Xacc >= thres) & mvalid # check after start # shape (N, nxpl, ..., Nt) if taxis = -1
+        crossed = torch.zeros_like(Xacc, dtype=torch.int32, device=Xacc.device)
+        crossed[...,offset_to_align::one_tick] = (Xacc[...,offset_to_align::one_tick] >= thres) & mvalid[...,offset_to_align::one_tick] # check after start # shape (N, nxpl, ..., Nt) if taxis = -1
+        # FIXME:
         cross_t = torch.argmax(crossed.to(torch.int32), dim=taxis, keepdim=True) # shape (N, npxl, .., 1) if taxis = -1
 
         # logging.debug(f'cross_t shape {cross_t.shape}')

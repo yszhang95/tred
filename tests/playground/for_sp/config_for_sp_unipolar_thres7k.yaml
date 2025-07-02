@@ -5,7 +5,7 @@ tile_yaml: "/home/yousen/Documents/NDLAr2x2/tred/tests/playground/multi_tile_lay
 lifetime: 2.2 # ms
 threshold: 7 # ke
 # threshold: "/home/yousen/Documents/NDLAr2x2/2x2_ql/filter_mc_events/threshold_summary.hdf5"
-event_list: []
+event_list: [1025,]
   # uncorr_noise: 0.500 #ke
 uncorr_noise: null #ke
   # reset_noise: 0.900 #ke

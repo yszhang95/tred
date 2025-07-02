@@ -38,6 +38,7 @@ tspace = None
 threshold = None
 event_list = None
 save_waveform = None
+const_recomb = None
 
 uncorr_noise = None
 reset_noise = None
@@ -65,7 +66,7 @@ def load_threshold(threshold):
             thresholds.append(torch.tensor(fthres[f'io_group{ig}/threshold']['Q'][:], dtype=torch.float32))
     return thresholds
 
-def concatenate_waveforms(sparse_currents, Nt):
+def concatenate_waveforms(sparse_currents, Nt, event_t=0):
     '''
      Assume there is no overlap.
      Assume location is binned into 1x1 pixel groups.
@@ -113,15 +114,25 @@ def concatenate_waveforms(sparse_currents, Nt):
     wf_out = wf_out.view(Npix, *data.shape[1:-1], Nt)
 
     # filter negative ticks
-    pm = torch.nonzero(loc_out[:,-1] < 0)
-    if pm.numel() > 0:
-        pm = pm[0]
-        tind = torch.arange(Nt, device=wf_out.device).view(1, Nt).expand(wf_out.shape).clone().detach()
-        tpos = torch.abs(loc_out[:,-1])
-        for i in range(wf_out.ndim-1):
-            tpos = tpos.unsqueeze(-1)
-        tm = tind > tpos
-        wf_out[pm] *= tm[pm]
+    # Zero out any samples before event_t
+    # For each pixel, if its start-time < event_t, zero samples index < event_t - start_time
+    global_start = loc_out[:, -1]
+    offsets = (event_t - global_start).clamp(min=0).to(torch.long)
+    for i in range(Npix):
+        off = offsets[i].item()
+        if off > 0:
+            wf_out[i, ..., :off] = 0
+
+    # pm = torch.nonzero(loc_out[:,-1] < event_t)
+    # if pm.numel() > 0:
+    #     print('---------------------------found pm')
+    #     pm = pm[0]
+    #     tind = torch.arange(Nt, device=wf_out.device).view(1, Nt).expand(wf_out.shape).clone().detach()
+    #     tpos = torch.abs(loc_out[:,-1] - event_t)
+    #     for i in range(wf_out.ndim-1):
+    #         tpos = tpos.unsqueeze(-1)
+    #     tm = tind > tpos
+    #     wf_out[pm] *= tm[pm]
     return Block(data=wf_out, location=loc_out)
 
 
@@ -188,8 +199,10 @@ def runit(device='cpu'):
     k3t = 0.0486 # (g/MeV cm^2) (kV/cm); birks
     Wi = 23.6E-6 # MeV/pair
 
-    adc_hold_delay = 30 # 30 * 50ns = 1.5us
-    adc_down_time = 24 # 24 * 50ns = 1.2us
+    # adc_hold_delay = 30 # 30 * 50ns = 1.5us
+    adc_hold_delay = 30 + 6 # 30 * 50ns = 1.5us + 6 * 0.05 = 0.3us
+    # adc_down_time = 24 # 24 * 50ns = 1.2us
+    adc_down_time = 18 # 18 * 50ns = 0.9us
     csa_reset_time = 2 # 2 * 50ns = 100ns
 
     lacing = torch.tensor([nimperpix, nimperpix, 1])
@@ -301,6 +314,9 @@ def runit(device='cpu'):
 
                 charge = birks(dE=features[0][:,0], dEdx=features[0][:,1],
                           efield=efield, rho=rho, A3t=A3t, k3t=k3t, Wi=Wi)
+                if const_recomb:
+                    charge = features[0][:,0] / Wi * const_recomb # MeV / MeV/pair
+
                 if device == 'cuda':
                     torch.cuda.synchronize()
                 t02 = time.time()
@@ -406,7 +422,7 @@ def runit(device='cpu'):
                     continue
 
                 currents = chunksum_readout(currents)
-                currents = concatenate_waveforms(currents, twindow_max)
+                currents = concatenate_waveforms(currents, twindow_max, event_t=global_tref[1]//tspace)
                 currents.data = currents.data * tspace / 1E3 # to ke-
                 current_mask = (currents.location[:,[0,1]] <= inds_range) & (currents.location[:,[0,1]] >= 0)
                 current_mask = current_mask.all(dim=1)
@@ -421,6 +437,7 @@ def runit(device='cpu'):
                 if thres.ndim > 0:
                     thres[thres<2] = 1E16 # FIXME: Temporarily disable low threshold channels
                 hits = nd_readout(currents, thres, adc_hold_delay, adc_down_time, csa_reset_time, one_tick=one_tick,
+                                  offset_to_align=0, # FIXME: how to calculate properly?
                                   pixel_axes=(1,2), uncorr_noise=uncorr_noise, thres_noise=thres_noise, reset_noise=reset_noise)
 
                 runtime['to_device'].append(t01-t00)
@@ -553,6 +570,8 @@ def fullsim(config, finpath, foutpath):
     global fluctuate
     global effq_out_nt
 
+    global const_recomb
+
     global old_geo_config
 
     global input_path
@@ -576,6 +595,7 @@ def fullsim(config, finpath, foutpath):
     thres_noise = config.get("thres_noise", None)
     reset_noise = config.get("reset_noise", None)
     fluctuate = config.get("fluctuate", False)
+    const_recomb = config.get("const_recomb", False)
     effq_out_nt = config.get("effq_out_nt", 1)
     old_geo_config = config.get("old_geo_config", True)
 
