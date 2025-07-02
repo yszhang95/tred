@@ -6,9 +6,11 @@ __pycache__
 ltximg
 .ipynb_checkpoints
 cut
-*.ipynb
 data/
 *.npy
 *.png
 *pickle
 *npz
+**/*.hdf5
+**/*.h5
+**/*.log
