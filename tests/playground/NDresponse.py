@@ -118,8 +118,7 @@ f.files
 
 
 start = 2500
-distance = f['drift_length'] - start*f['time_tick']*0.16 # cm/us * us
-print(f['bin_size'])
+distance = f['drift_length'] - start*f['time_tick']*0.159645  # cm/us * us
 
 
 # In[26]:
