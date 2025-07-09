@@ -46,6 +46,16 @@ thres_noise = None
 fluctuate = False
 effq_out_nt = 1
 
+pitch = 4.434*units.mm / units.cm # values are in units of cm
+nimperpix=10
+pspace = pitch/nimperpix
+velocity = 1.59645 * units.mm/units.us / (units.cm/units.us) # values are in units of cm/us
+
+adc_hold_delay = None
+adc_down_time = None
+csa_reset_time = None
+one_tick = None
+
 response = None
 
 old_geo_config = True
@@ -181,11 +191,6 @@ def runit(device='cpu'):
     DL = 4.0 * units.cm2/units.s / (units.cm2/units.us) # value are in cm2/us
     DT = 8.8 * units.cm2/units.s / (units.cm2/units.us) # value are in cm2/us
     diffusion = torch.tensor([DL, DT, DT])
-    velocity = 1.59645 * units.mm/units.us / (units.cm/units.us) # values are in units of cm/us
-    pitch = 4.434*units.mm / units.cm # values are in units of cm
-    nimperpix=10
-    pspace = pitch/nimperpix
-    one_tick = 2 # 2 points in grid along time is one time tick 100 ns in experiment
     grid_spacing = (pspace, pspace, tspace)
     # npixpersuper = 16+1-9
     npixpersuper = 12+1-9
@@ -198,12 +203,6 @@ def runit(device='cpu'):
     A3t = 0.8 # birks
     k3t = 0.0486 # (g/MeV cm^2) (kV/cm); birks
     Wi = 23.6E-6 # MeV/pair
-
-    # adc_hold_delay = 30 # 30 * 50ns = 1.5us
-    adc_hold_delay = 30 + 6 # 30 * 50ns = 1.5us + 6 * 0.05 = 0.3us
-    # adc_down_time = 24 # 24 * 50ns = 1.2us
-    adc_down_time = 18 # 18 * 50ns = 0.9us
-    csa_reset_time = 2 # 2 * 50ns = 100ns
 
     lacing = torch.tensor([nimperpix, nimperpix, 1])
 
@@ -569,6 +568,10 @@ def fullsim(config, finpath, foutpath):
     global reset_noise
     global fluctuate
     global effq_out_nt
+    global adc_hold_delay
+    global adc_down_time
+    global csa_reset_time
+    global one_tick
 
     global const_recomb
 
@@ -605,9 +608,21 @@ def fullsim(config, finpath, foutpath):
         response = ndlarsim(fres['response'])
         tspace = fres['time_tick']  * units.us / units.us # us
         drtoa = fres['drift_length'] * units.cm / units.cm # cm
-        warning(f'drtoa, tspace, will be overridden to {drtoa} cm, {tspace} us. Please manually check pspace. pspace in response file is {fres["bin_size"]} cm. pspace in config.')
+        bin_size = fres["bin_size"] * units.cm / units.cm # cm
+        warning(f'drtoa, tspace, will be overridden to {drtoa} cm, {tspace} us.')
+        if abs(bin_size - pspace) > 1E-4:
+            warning(f'Please manually check pspace. pspace in response file is {fres["bin_size"]} cm. pspace in config.')
     else:
         response = ndlarsim(response_path)
+
+    adc_hold_delay = config.get("adc_hold_delay", 1.5) * units.us / units.us / (tspace * units.us / units.us)
+    adc_hold_delay = int(round(adc_hold_delay))
+    adc_down_time = config.get("adc_down_time", 1.2) * units.us / units.us / (tspace * units.us / units.us)
+    adc_down_time = int(round(adc_down_time))
+    csa_reset_time = config.get("csa_reset_time", 0.1) * units.us / units.us / (tspace * units.us / units.us)
+    csa_reset_time = int(round(csa_reset_time))
+    one_tick = config.get("one_tick", 0.1) * units.us / units.us / (tspace * units.us / units.us)
+    one_tick = int(round(one_tick))
 
     if finpath is None:
         input_path = "/home/yousen/Public/ndlar_shared/data/tred_2x2_2025010/filtered_MiniRun5_1E19_RHC.convert2h5.0000000.EDEPSIM.hdf5"
