@@ -39,6 +39,8 @@ threshold = None
 event_list = None
 save_waveform = None
 const_recomb = None
+scale_q = None
+event_dqdx = None
 
 uncorr_noise = None
 reset_noise = None
@@ -313,6 +315,8 @@ def runit(device='cpu'):
 
                 charge = birks(dE=features[0][:,0], dEdx=features[0][:,1],
                           efield=efield, rho=rho, A3t=A3t, k3t=k3t, Wi=Wi)
+
+
                 if const_recomb:
                     charge = features[0][:,0] / Wi * const_recomb # MeV / MeV/pair
 
@@ -329,6 +333,17 @@ def runit(device='cpu'):
                 # dsigma, dtime, dcharge, dtail, dhead
                 # drifted = drifter(local_time, charge, tail, head)
                 dsigma, dtime, dcharge, dtail, dhead = drifter(local_time, charge, tail, head)
+
+                if scale_q:
+                    dx = features[0][:,0] / features[0][:,1]
+                    dqdx = torch.where((dx > 0) & (dx < 1E3), dcharge/dx, -1)
+                    dqdx = dqdx[torch.where(dqdx>0)]
+                    eid = int(waveforms[f'event_id_tpc{tpcdataset.tpc_id}_batch{ibatch}'])
+                    if event_dqdx is None:
+                        dcharge = 50E3/torch.mean(dqdx) * dcharge
+                    else:
+                        dcharge = event_dqdx[eid]*1E3/torch.mean(dqdx) * dcharge
+                    print('------------------->', scale_q, event_dqdx[eid], torch.mean(dqdx))
 
                 if device == 'cuda':
                     torch.cuda.synchronize()
@@ -574,6 +589,8 @@ def fullsim(config, finpath, foutpath):
     global one_tick
 
     global const_recomb
+    global scale_q
+    global event_dqdx
 
     global old_geo_config
 
@@ -599,6 +616,8 @@ def fullsim(config, finpath, foutpath):
     reset_noise = config.get("reset_noise", None)
     fluctuate = config.get("fluctuate", False)
     const_recomb = config.get("const_recomb", False)
+    scale_q = config.get("scale_q", False)
+    event_dqdx = config.get("event_dqdx", None)
     effq_out_nt = config.get("effq_out_nt", 1)
     old_geo_config = config.get("old_geo_config", True)
 
