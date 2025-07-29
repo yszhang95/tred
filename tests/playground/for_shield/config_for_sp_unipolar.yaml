@@ -1,0 +1,18 @@
+drtoa: 10.431 # cm
+response_path: "/home/yousen/Public/ndlar_shared/data/unipolar_response_v2a_distance_10p431cm_binsize_0p04434cm_tick0p05us.npy"
+module_yaml: "/home/yousen/Documents/NDLAr2x2/tred/tests/playground/2x2_mod2mod_variation.yaml"
+tile_yaml: "/home/yousen/Documents/NDLAr2x2/tred/tests/playground/multi_tile_layout-2.4.16.yaml"
+lifetime: 2.2 # ms
+threshold: 5. # ke
+# threshold: "/home/yousen/Documents/NDLAr2x2/2x2_ql/filter_mc_events/threshold_summary.hdf5"
+# event_list: []
+event_list: [1025,]
+  # uncorr_noise: 0.500 #ke
+uncorr_noise: null #ke
+  # reset_noise: 0.900 #ke
+reset_noise: null #ke
+# thres_noise: 0.650 #ke
+thres_noise: null #ke
+save_waveform: true
+fluctuate: false
+eff_q_out: 1

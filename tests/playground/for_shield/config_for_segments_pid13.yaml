@@ -1,0 +1,12 @@
+response_path: "/nfs/data/1/yousen/signal_processing/shield_grid_pgun_mu_3GeV_20250711/response_5x5_shield_900V_pitch0p372cm_tick0p1us_drtoa30p431cm.npz"
+module_yaml: "/home/yousen/Documents/NDLAr2x2/tred/tests/playground/2x2_mod2mod_variation.yaml"
+tile_yaml: "/home/yousen/Documents/NDLAr2x2/tred/tests/playground/multi_tile_layout-2.4.16.yaml"
+lifetime: 0.8 # ms
+threshold: 5 #ke-
+event_list: [1025]
+uncorr_noise: null
+reset_noise: null
+thres_noise: null
+save_waveform: true
+fluctuate: false
+eff_q_out: 1
