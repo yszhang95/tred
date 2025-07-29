@@ -24,8 +24,8 @@ def nd_readout(block, threshold, adc_hold_delay, adc_down_time, csa_reset_time=1
     locations = block.location
     if threshold.ndim > 0:
         loc_inds = locations.view(-1,block.vdim)[:,:-1].T
-        threshold = threshold[list(loc_inds[i] for i in range(loc_inds.shape[0]))]
-        # threshold = threshold[loc_inds.tolist()]
+        # threshold = threshold[list(loc_inds[i] for i in range(loc_inds.shape[0]))]
+        threshold = threshold[loc_inds[0], loc_inds[1]]
     else:
         threshold = threshold.unsqueeze(0).expand(block.nbatches)
     for i in pixel_axes:

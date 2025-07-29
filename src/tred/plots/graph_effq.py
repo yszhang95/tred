@@ -37,6 +37,7 @@ drtoa = None
 tspace = None
 threshold = None
 event_list = None
+tpc_list = None
 save_waveform = None
 const_recomb = None
 scale_q = None
@@ -260,6 +261,9 @@ def runit(device='cpu'):
     thresholds = load_threshold(threshold)
 
     for itpc, tpcdataset in enumerate(tpcs):
+        if isinstance(tpc_list, list) and len(tpc_list)>0 and int(tpcdataset.tpc_id) not in tpc_list:
+            continue
+
         info(f"Drift direction: {tpcdataset.drift} in tpcid {tpcdataset.tpc_id}.")
         info(f"TPC lower corner: {tpcdataset.lower_left_corner} in itpc {tpcdataset.tpc_id}.")
         info(f"TPC upper corner: {tpcdataset.upper_corner} in itpc {tpcdataset.tpc_id}.")
@@ -286,7 +290,7 @@ def runit(device='cpu'):
         waveforms[f'pixel_pitch_tpc{tpcdataset.tpc_id}'] = pitch
 
 
-        inds_range = (tpcdataset.upper_corner - tpcdataset.lower_left_corner) // pitch
+        inds_range = torch.round((tpcdataset.upper_corner - tpcdataset.lower_left_corner) / pitch)
         inds_range = inds_range.to(torch.int32).to(device)
 
         for ibatch, (features, labels) in enumerate(loader):
@@ -438,7 +442,7 @@ def runit(device='cpu'):
                 currents = chunksum_readout(currents)
                 currents = concatenate_waveforms(currents, twindow_max, event_t=global_tref[1]//tspace)
                 currents.data = currents.data * tspace / 1E3 # to ke-
-                current_mask = (currents.location[:,[0,1]] <= inds_range) & (currents.location[:,[0,1]] >= 0)
+                current_mask = (currents.location[:,[0,1]] < inds_range) & (currents.location[:,[0,1]] >= 0)
                 current_mask = current_mask.all(dim=1)
                 currents = Block(data=currents.data[current_mask], location=currents.location[current_mask])
 
@@ -524,6 +528,7 @@ def runit(device='cpu'):
     waveforms["drtoa"] = drtoa
     waveforms["threshold"] = threshold
     waveforms["event_list"] = event_list
+    waveforms["tpc_list"] = tpc_list
     waveforms["save_waveform"] = save_waveform
     waveforms["uncorr_noise"] = uncorr_noise
     waveforms["thres_noise"] = thres_noise
@@ -575,8 +580,11 @@ def fullsim(config, finpath, foutpath):
     global lifetime
     global drtoa
     global tspace
+    global pspace
+    global pitch
     global threshold
     global event_list
+    global tpc_list
     global save_waveform
     global uncorr_noise
     global thres_noise
@@ -610,6 +618,7 @@ def fullsim(config, finpath, foutpath):
     lifetime = config.get("lifetime", 2.0) * units.ms / units.us # values are from ms units of us
     threshold = config.get("threshold", 5_000) # electrons # it can also be a path to threshold
     event_list = config.get("event_list", None) # None means select all
+    tpc_list = config.get("tpc_list", None) # None means select all
     save_waveform = config.get("save_waveform", False)
     uncorr_noise = config.get("uncorr_noise", None)
     thres_noise = config.get("thres_noise", None)
@@ -625,12 +634,15 @@ def fullsim(config, finpath, foutpath):
     if os.path.splitext(response_path)[1] == '.npz':
         fres = np.load(response_path)
         response = ndlarsim(fres['response'])
-        tspace = fres['time_tick']  * units.us / units.us # us
-        drtoa = fres['drift_length'] * units.cm / units.cm # cm
-        bin_size = fres["bin_size"] * units.cm / units.cm # cm
+        tspace = fres['time_tick'].item()  * units.us / units.us # us
+        drtoa = fres['drift_length'].item() * units.cm / units.cm # cm
+        bin_size = fres["bin_size"].item() * units.cm / units.cm # cm
         warning(f'drtoa, tspace, will be overridden to {drtoa} cm, {tspace} us.')
-        if abs(bin_size - pspace) > 1E-4:
-            warning(f'Please manually check pspace. pspace in response file is {fres["bin_size"]} cm. pspace in config.')
+        # if abs(bin_size - pspace) > 1E-4:
+        #     warning(f'Please manually check pspace. pspace in response file is {fres["bin_size"]} cm. pspace in config.')
+        pspace = bin_size # FIXME
+        pitch = nimperpix * pspace # FIXME
+        warning(f'pspace, ipitch, will be overridden to {pspace} cm, {pitch} cm.')
     else:
         response = ndlarsim(response_path)
 
