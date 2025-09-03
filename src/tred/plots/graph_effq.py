@@ -1,7 +1,7 @@
 #!/usr/bin/env python
 from tred.graph import Drifter, Raster, ChunkSum, LacedConvo, Charge, Current, Sim
 from tred.response import ndlarsim
-from tred.blocking import Block
+from tred.blocking import Block, concat_blocks, iter_chunk_block
 from tred import units
 from .response import get_ndlarsim
 from tred.util import debug, info, tenstr, warning
@@ -329,11 +329,9 @@ def runit(device='cpu'):
 
                 nbchunk = 100
 
-                current_blocks_d = []
-                current_blocks_l = []
+                current_blocks = []
+                effq_blocks = []
                 Nqblock = 0
-                effq_blocks_d = []
-                effq_blocks_l = []
                 for ichunk in range(0, tail.size(0), nbchunk):
                     # print(ichunk, ibatch, 'log')
                     charge_this = charge[ichunk:ichunk+nbchunk]
@@ -350,10 +348,9 @@ def runit(device='cpu'):
 
                     signal = chunksum(qblock)
                     effqb = chunksum_effq_out(qblock)
-                    effq_blocks_d.append(effqb.data.cpu())
-                    effq_blocks_l.append(effqb.location.cpu())
-                    effq_blocks_l[-1][:,0:2] //= nimperpix
-                    effq_blocks_l[-1][:,-1] += int(abs(drtoa/velocity)//tspace)
+                    effqb.location[:, 0:2] //= nimperpix
+                    effqb.location[:, -1] += int(abs(drtoa/velocity)//tspace)
+                    effq_blocks.append(effqb)
                     qblock = None
                     effqb = None
                     Nqblock += signal.nbatches
@@ -362,39 +359,30 @@ def runit(device='cpu'):
                     #     torch.cuda.synchronize()
                     # t05 = time.time()
 
-                    nchunks = signal.nbatches // 50 + 1
-                    ibs = []
-                    currents_l = []
-                    currents_d = []
-                    currents = None
-                    for l, s in zip(signal.location.chunk(nchunks), signal.data.chunk(nchunks)):
-                        # print(s.shape[0])
-                        if s.shape[0] > 0:
-                            iblock = convo(Block(location=l, data=s), response)
+                    currents = []
+                    for iqblock in iter_chunk_block(signal, chunk_size=50):
+                        if iqblock.nbatches == 0:
+                            continue
+                        iblock = convo(iqblock, response)
+                        current = chunksum_i(iblock)
+                        currents.append(current)
 
-                            current = chunksum_i(iblock)
-                            currents_l.append(current.location)
-                            currents_d.append(current.data)
-                    # currents = Block(data=torch.cat(currents_d, dim=0).to('cpu'), location=torch.cat(currents_l, dim=0).to('cpu'))
-                    if len(currents_l) > 0:
-                        currents_d = torch.cat(currents_d, dim=0)
-                        currents_l = torch.cat(currents_l, dim=0)
-                        currents = Block(data=currents_d, location=currents_l)
-                        currents = chunking.accumulate(currents)
-
+                    # no need to chunk again; just sum
+                    currents = concat_blocks(currents)
                     if currents is not None:
-                        # currents.data = currents.data.to('cpu')
-                        # currents.location = currents.location.to('cpu')
-                        current_blocks_d.append(currents.data)
-                        current_blocks_l.append(currents.location)
+                        currents = chunking.accumulate(currents)
+                        current_blocks.append(currents)
 
-                if len(current_blocks_d) > 0:
-                    current_blocks_d = torch.cat(current_blocks_d, dim=0)
-                    current_blocks_l = torch.cat(current_blocks_l, dim=0)
-                    currents = Block(data=current_blocks_d, location=current_blocks_l)
+                    # if device == 'cuda':
+                    #     torch.cuda.synchronize()
+                    # t05 = time.time()
+
+                effq_blocks = concat_blocks(effq_blocks, device='cpu')
+
+                # no need to chunk again; just sum
+                currents = concat_blocks(current_blocks)
+                if currents is not None:
                     currents = chunking.accumulate(currents)
-                else:
-                    currents = None
 
                 t04 = t03
                 t05 = t04
@@ -462,7 +450,7 @@ def runit(device='cpu'):
                     waveforms[f'current_tpc{tpcdataset.tpc_id}_batch{ibatch}_location'] = currents.location.cpu().numpy()
 
                 # FIXME: global time offset
-                qbl = torch.cat(effq_blocks_l).to('cpu')
+                qbl = effq_blocks.location.to('cpu')
                 qoff = cshape_effq_out / 2
                 qoff[[0,1]] = qoff[[0,1]] / nimperpix
                 qoff[2] -= global_tref[1]//tspace
@@ -470,7 +458,7 @@ def runit(device='cpu'):
                                                        tpc_lower_left.to(torch.float32), tpcdataset.anode, tpcdataset.drift,
                                                        paxes=(0,1), taxis=-1, offset=qoff)
                 qblf32 = qblf32[:, [2,0,1]]
-                qbd_fg = torch.cat(effq_blocks_d) / 1E3 # to ke-
+                qbd_fg = effq_blocks.data / 1E3 # to ke-
                 qbd = qbd_fg.sum(dim=(1,2,3))
                 qbd = torch.cat([qblf32, qbd[:,None]], dim=1)
 
@@ -536,6 +524,8 @@ def runit(device='cpu'):
     except Exception as e:
         logger.error(f"Failed to capture memory snapshot {e}")
     torch.cuda.memory._record_memory_history(enabled=None)
+
+    info(f"Peak memory usage {torch.cuda.max_memory_allocated()/1024**2:.2f} MB")
 
 def plots(out):
     with torch.no_grad():

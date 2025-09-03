@@ -6,6 +6,7 @@ tred.blocking provides functions for N-dimensional "blocks".  See `Block`.
 from tred.util import to_tensor
 import torch
 from .types import IntTensor, Tensor, Shape, Size, index_dtype
+from typing import Iterator, Iterable
 
 class Block:
     '''
@@ -140,6 +141,7 @@ def apply_slice(block: Block, space_slice) -> Block:
     return Block(location = block.location + offset,
                  data = block.data[:,*space_slice])
 
+
 def batchify(ten: Tensor, ndim: int) -> tuple:
     '''
     Return tuple of (tensor,bool).
@@ -152,3 +154,61 @@ def batchify(ten: Tensor, ndim: int) -> tuple:
         return ten.unsqueeze(0), True
     return ten, False
 
+
+def iter_chunk_block(block: Block, chunk_size: int) -> Iterator[Block]:
+    '''
+    Chunk the block over the first (batch) dimension.
+
+    Returns a list of Block objects, each corresponding to a chunk of the input block.
+    Uses slicing for splitting. Ensures data exists.
+    '''
+    if not hasattr(block, 'data') or block.data is None:
+        raise ValueError("Block is unfilled: missing data attribute")
+    nbatch = block.nbatches
+    for start in range(0, nbatch, chunk_size):
+        step = min(start + chunk_size, nbatch) - start
+        loc = block.location.narrow(0, start, step)
+        dat = block.data.narrow(0, start, step)
+        yield Block(location=loc, data=dat)
+
+
+def concat_blocks(blocks: Iterable[Block], *, device=None, dim: int = 0) -> Block:
+    '''
+    Concatenate a sequence of blocks along the batch dimension.
+
+    All blocks must have the same spatial dimension (vdim) and shape.
+    All blocks must have data defined.
+
+    Users are responsible for ensuring that the blocks have valid data.
+
+    The `dim` argument is reserved for future use.  Currently, only dim=0
+    (batch dimension) is supported.
+    '''
+    if dim != 0:
+        raise ValueError("concat_blocks: only dim=0 (batch dimension) is supported")
+
+    blocks = list(blocks)
+    if len(blocks) == 0:
+        return
+
+    # vdim = blocks[0].vdim
+    # shape = blocks[0].shape
+    if device is None:
+        device = blocks[0].device
+
+    locs = []
+    dats = []
+    for b in blocks:
+        # FIXME: check data before concatenation
+        # if not hasattr(b, 'data') or b.data is None:
+        #     raise ValueError("concat_blocks: all blocks must have data defined")
+        # if b.vdim != vdim:
+        #     raise ValueError(f"concat_blocks: block vdim mismatch: got {b.vdim} want {vdim}")
+        # if not torch.all(b.shape == shape):
+        #     raise ValueError(f"concat_blocks: block shape mismatch: got {b.shape} want {shape}")
+        locs.append(b.location.to(device=device))
+        dats.append(b.data.to(device=device))
+
+    location = torch.cat(locs, dim=dim)
+    data = torch.cat(dats, dim=dim)
+    return Block(location=location, data=data)
