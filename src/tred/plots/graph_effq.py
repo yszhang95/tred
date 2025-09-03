@@ -4,7 +4,7 @@ from tred.response import ndlarsim
 from tred.blocking import Block, concat_blocks, iter_chunk_block
 from tred import units
 from .response import get_ndlarsim
-from tred.util import debug, info, tenstr, warning
+from tred.util import debug, info, tenstr, warning, iter_tensor_chunks
 from tred.loaders import StepLoader, steps_from_ndh5
 from tred.io_nd import (
     nd_collate_fn, create_tpc_datasets_from_steps,
@@ -320,8 +320,8 @@ def runit(device='cpu'):
                 head[:,[1,2]] -= tpc_lower_left
 
                 # dsigma, dtime, dcharge, dtail, dhead
-                # drifted = drifter(local_time, charge, tail, head)
-                dsigma, dtime, dcharge, dtail, dhead = drifter(local_time, charge, tail, head)
+                drifted = drifter(local_time, charge, tail, head)
+                # dsigma, dtime, dcharge, dtail, dhead = drifter(local_time, charge, tail, head)
 
                 if device == 'cuda':
                     torch.cuda.synchronize()
@@ -332,16 +332,14 @@ def runit(device='cpu'):
                 current_blocks = []
                 effq_blocks = []
                 Nqblock = 0
-                for ichunk in range(0, tail.size(0), nbchunk):
-                    # print(ichunk, ibatch, 'log')
-                    charge_this = charge[ichunk:ichunk+nbchunk]
-                    qblock = raster(dsigma[ichunk:ichunk+nbchunk], dtime[ichunk:ichunk+nbchunk],
-                                    dcharge[ichunk:ichunk+nbchunk], dtail[ichunk:ichunk+nbchunk], dhead[ichunk:ichunk+nbchunk])
+                for ichunk, idrifted in enumerate(
+                        iter_tensor_chunks(drifted, chunk_size=nbchunk)):
+                    qblock = raster(*idrifted)
 
-                    # invalid = torch.isnan(qblock.data).any(dim=(1,2,3))
-
-                    p0 = tail[ichunk:ichunk+nbchunk]
-                    p1 = head[ichunk:ichunk+nbchunk]
+                    start = ichunk * nbchunk
+                    end = start + idrifted[0].size(0)
+                    p0 = tail[start:end]
+                    p1 = head[start:end]
                     length2 = torch.sum((p0-p1)**2, dim=1)
                     invalid2 = length2 < 1E-9
                     qblock.data[invalid2] = 0
