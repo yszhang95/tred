@@ -128,21 +128,14 @@ def concatenate_waveforms(sparse_currents, Nt, event_t=0):
     # For each pixel, if its start-time < event_t, zero samples index < event_t - start_time
     global_start = loc_out[:, -1]
     offsets = (event_t - global_start).clamp(min=0).to(torch.long)
-    for i in range(Npix):
-        off = offsets[i].item()
-        if off > 0:
-            wf_out[i, ..., :off] = 0
+    T = wf_out.size(-1)
+    # mask_i,t = True if t < offsets[i]
+    mask = (torch.arange(T, device=wf_out.device)[None, :] < offsets.to(wf_out.device)[:, None])
+    # shape (Npix, T) -> insert singleton dims to cover the "..." in wf_out
+    mask = mask.view(offsets.size(0), *([1] * (wf_out.ndim - 2)), T)
+    # zero in-place where mask is True
+    wf_out.masked_fill_(mask, 0)
 
-    # pm = torch.nonzero(loc_out[:,-1] < event_t)
-    # if pm.numel() > 0:
-    #     print('---------------------------found pm')
-    #     pm = pm[0]
-    #     tind = torch.arange(Nt, device=wf_out.device).view(1, Nt).expand(wf_out.shape).clone().detach()
-    #     tpos = torch.abs(loc_out[:,-1] - event_t)
-    #     for i in range(wf_out.ndim-1):
-    #         tpos = tpos.unsqueeze(-1)
-    #     tm = tind > tpos
-    #     wf_out[pm] *= tm[pm]
     return Block(data=wf_out, location=loc_out)
 
 
