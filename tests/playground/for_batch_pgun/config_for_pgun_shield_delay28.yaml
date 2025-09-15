@@ -1,0 +1,15 @@
+response_path: "/nfs/data/1/yousen/signal_processing/shield_grid_pgun_mu_3GeV_20250711/response_5x5_shield_900V_pitch0p372cm_tick0p1us_drtoa30p431cm.npz"
+module_yaml: "/home/yousen/Documents/NDLAr2x2/tred/tests/playground/2x2_mod2mod_variation.yaml"
+tile_yaml: "/home/yousen/Documents/NDLAr2x2/tred/tests/playground/multi_tile_layout-2.4.16.yaml"
+lifetime: 1.2 # ms
+# threshold: "/home/yousen/Documents/NDLAr2x2/2x2_ql/filter_mc_events/threshold_summary.hdf5"
+threshold: 5.
+event_list: []
+tpc_list: [0,1,2,3,6,7] # no tpc 5, 6 for module 2
+uncorr_noise: 0.500 #ke
+reset_noise: 0.900 #ke
+thres_noise: 0.650 #ke
+save_waveform: false
+fluctuate: false
+adc_hold_delay: 2.8
+eff_q_out: 40
