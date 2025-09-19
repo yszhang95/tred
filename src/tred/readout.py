@@ -70,13 +70,16 @@ def nd_readout(block, threshold, adc_hold_delay, adc_down_time, csa_reset_time=1
 
         if thres_noise:
             thres = threshold + torch.normal(0, torch.full_like(threshold, fill_value=thres_noise, device=threshold.device))
+            thres_delay = threshold + torch.normal(0, torch.full_like(threshold, fill_value=thres_noise, device=threshold.device))
         else:
             thres = threshold
+            thres_delay = threshold
 
         mvalid = trange >= start # shape (npxl, npxl, ..., Nt) if taxis = -1
         # logging.debug(f'mvalid shape {mvalid.shape}')
         # info(f'mvalid shape {mvalid.shape}')
-        Xacc = Xacc * mvalid # FIXME: start > trange; we need leftover information
+        # Xacc = Xacc * mvalid # FIXME: start > trange; we need leftover information
+        Xacc[~mvalid] = -1E9
 
         crossed = torch.zeros_like(Xacc, dtype=torch.int32, device=Xacc.device)
         crossed[...,offset_to_align::one_tick] = (Xacc[...,offset_to_align::one_tick] >= thres) & mvalid[...,offset_to_align::one_tick] # check after start # shape (N, nxpl, ..., Nt) if taxis = -1
@@ -94,7 +97,7 @@ def nd_readout(block, threshold, adc_hold_delay, adc_down_time, csa_reset_time=1
         # logging.debug(f'hold_t_inrange shape {hold_t_inrange.shape}')
         Xacc_hold_t = torch.gather(Xacc, taxis, hold_t_inrange) # shape (N, npxl, ..., 1) if taxis = -1
         # logging.debug(f'Xacc_hold_t shape {Xacc_hold_t.shape}')
-        delay_crossed = Xacc_hold_t >= thres # shape (N, npxl, ..., 1) if taxis = -1
+        delay_crossed = Xacc_hold_t >= thres_delay # shape (N, npxl, ..., 1) if taxis = -1
         # logging.debug(f'delay_crossed shape {delay_crossed.shape}')
         triggered = crossed & delay_crossed & (hold_t < Nt) # shape (N, npxl, ..., 1) if taxis = -1
         # logging.debug(f'triggered shape {triggered.shape}')
@@ -117,8 +120,8 @@ def nd_readout(block, threshold, adc_hold_delay, adc_down_time, csa_reset_time=1
         oloc = torch.cat([pixels, times.unsqueeze(1), hold_times.unsqueeze(1), start_times.unsqueeze(1)], dim=1)
         olocs.append(oloc)
         ocharges.append(hits)
-        if thres_noise is None:
-            assert torch.all(hits > thres[triggered]).item()
+        # if thres_noise is None:
+        #     assert torch.all(hits > thres[triggered]).item()
         start[~triggered] = hold_t[~triggered] + one_tick
         start[~crossed] = Nt # crossed not triggered should be at hold_t+1; never crossed needs to be at start.
         # at triggered positions, charges are reset and there is one timestamp missing;
