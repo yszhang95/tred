@@ -60,6 +60,9 @@ def nd_readout(block, threshold, adc_hold_delay, adc_down_time, csa_reset_time=1
     # info(f'Xacc shape {Xacc.shape}')
     if uncorr_noise is not None:
         Xacc += torch.normal(0, torch.full_like(Xacc, fill_value=uncorr_noise, device=Xacc.device))
+    # FIXME: reset_noise should be used only if leftover is None
+    if (reset_noise is not None) and (leftover is None):
+        Xacc += torch.normal(0, torch.full_like(Xacc, fill_value=reset_noise, device=Xacc.device))
 
     pxl_indices = slice(None, -1, None) # FIXME: hard coded
 
