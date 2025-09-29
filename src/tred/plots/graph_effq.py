@@ -379,7 +379,7 @@ def runit(device='cpu'):
                     effq_blocks_d.append(effqb.data.cpu())
                     effq_blocks_l.append(effqb.location.cpu())
                     effq_blocks_l[-1][:,0:2] //= nimperpix
-                    effq_blocks_l[-1][:,-1] += int(abs(drtoa/velocity)//tspace)
+                    # effq_blocks_l[-1][:,-1] += int(abs(drtoa/velocity)//tspace)
                     qblock = None
                     effqb = None
                     Nqblock += signal.nbatches

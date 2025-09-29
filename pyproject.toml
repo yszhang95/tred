@@ -30,6 +30,13 @@ tred = "tred.cli:cli"
 requires = ["setuptools"]
 build-backend = "setuptools.build_meta"
 
+[tool.setuptools.package-dir]
+"" = "src" # Map the root of your package to the 'src' directory
+[tool.setuptools.packages.find]
+where = ["src"] # List of folders that contain the packages
+include = ["tred*"] # Optional: package names should match these glob patterns
+exclude = ["tred.tests*"] # Optional: exclude packages matching these glob patterns
+
 [tool.uv.sources]
 torch = { index = "pytorch" }
 
