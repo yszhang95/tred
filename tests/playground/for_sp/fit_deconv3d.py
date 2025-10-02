@@ -12,12 +12,15 @@
 #     name: python3
 # ---
 
-# %% id="tA5KNieJ9nJg"
+# %%
+import io
 import matplotlib.pyplot as plt
+import matplotlib.image as mpimg
+from matplotlib.backends.backend_pdf import PdfPages
 import numpy as np
 import torch
 
-# %% id="XGdduSfOSt_i"
+# %%
 import tred
 from tred.blocking import Block
 from tred.chunking import accumulate
@@ -26,12 +29,94 @@ from tred.sparse import chunkify, SGrid
 # %%
 import plotly.graph_objects as go
 
-# %% id="LfGqRreb9p3E"
+# %%
 import torch
 from torch import nn
 
 import torch
 import torch.nn.functional as F
+
+
+# %%
+def rebin_100ns_fres_to_3x3(fres, freslen, fres_start):
+    fres_end = fres_start + freslen * 2
+    fres3x3 = np.empty((3, 3, freslen))
+    fres3x3[1, 1] = np.mean(fres[:5, :5], axis=(0, 1))[fres_start:fres_end].reshape(-1, 2).mean(axis=1)
+    fres3x3[2, 1] = np.mean(fres[:5, 5:10], axis=(0, 1))[fres_start:fres_end].reshape(-1, 2).mean(axis=1)
+    fres3x3[1, 2] = np.mean(fres[5:10, :5], axis=(0, 1))[fres_start:fres_end].reshape(-1, 2).mean(axis=1)
+    fres3x3[2, 2] = np.mean(fres[5:10, 5:10], axis=(0, 1))[fres_start:fres_end].reshape(-1, 2).mean(axis=1)
+    fres3x3[0, 0] = fres3x3[2, 2]
+    fres3x3[0, 1] = fres3x3[2, 1]
+    fres3x3[1, 0] = fres3x3[1, 2]
+    fres3x3[0, 2] = fres3x3[2, 2]
+    fres3x3[2, 0] = fres3x3[2, 2]
+    fres3x3 = fres3x3 * 0.1
+    return fres3x3
+
+fres = np.load("/home/yousen/Public/ndlar_shared/data/response_v2a_distance_10p431cm_binsize_0p04434cm_tick0p05us.npy")
+freslen = 225 + 1
+fres_start = 450 * 2 - 1 * 2
+fres3x3 = rebin_100ns_fres_to_3x3(fres, freslen, fres_start)
+# print('Sum of 3x3[1,1]', np.sum(fres3x3[1,1]))
+resplane_shift = (fres_start + 2) // 2
+tshift = np.argmax(fres3x3[1,1])
+support_trange = 25
+pre_n = 15
+post_n = 5
+thres = 5
+adc_hold_delay_ticks = 15
+csa_reset_ticks = 1
+lam_l1 = 0.01
+lam_dx = 0.01
+lam_a0 = 0.01
+gaussian_kernel_sigma = 2.0
+smooth_kernel_size= 15
+
+# %%
+def coarse_chunk(block, shp_tensor):
+    block =  accumulate(chunkify(block, shp_tensor))
+    block = Block(data=block.data, location=block.location)
+    return block
+
+def block_on_sgrid(block, shp_tensor):
+    block = coarse_chunk(block, shp_tensor)
+    location = SGrid(shp_tensor).spoint(block.location)
+    return Block(location=location, data=block.data.sum(dim=(1,2,3), keepdim=True))
+
+
+# %%
+finput = np.load("single_track_full_fr_noises_20250924.npz")
+
+def load_and_process_effq_blocks(finput, effqname, resplane_shift):
+    effql = torch.tensor(finput[f'{effqname}_location'])
+    effq = torch.tensor(finput[f'{effqname}'][:,3])
+    effqb = Block(location=effql, data=effq.unsqueeze(1).unsqueeze(1).unsqueeze(1))
+
+    effqb_sgrid = block_on_sgrid(effqb, (1,1,2))
+    coarse_effqb_sgrid = coarse_chunk(effqb_sgrid, (1,1,25))
+    coarse_effqb_sgrid.location += torch.tensor([0,0,resplane_shift])
+
+    return effqb, effqb_sgrid, coarse_effqb_sgrid
+
+effqb, effqb_sgrid, coarse_effqb_sgrid = load_and_process_effq_blocks(
+    finput,
+    'effq_tpc2_batch11',
+    resplane_shift
+)
+
+
+# %%
+def load_and_process_hit_blocks(finput, hitname):
+    hitsl = torch.tensor(finput[f'{hitname}_location'][:,[0,1,3]])
+    hitsq = torch.tensor(finput[hitname][:,3])
+    hb = Block(location=hitsl, data=hitsq.unsqueeze(1).unsqueeze(1).unsqueeze(1))
+    hb_sgrid = block_on_sgrid(hb, (1,1,2))
+    return hb, hb_sgrid
+
+hb, hb_sgrid = load_and_process_hit_blocks(finput, "hits_tpc2_batch11")
+
+
+# %%
 
 def gaussian_kernel1d(kernel_size: int, sigma: float, device=None):
     x = torch.arange(kernel_size, device=device) - (kernel_size - 1) / 2
@@ -105,18 +190,6 @@ def diff_3d(x):
     dz = x[:, :, :, 1:] - x[:, :, :, :-1]
     return dx, dy, dz
 
-# ---------- Apply a matrix along the last axis ----------
-def apply_mat_last_axis(t, M):
-    """
-    t: (..., W) volume or tensor
-    M: (Mout, W) matrix acting on the last axis
-    returns: (..., Mout)
-    """
-    *lead, W = t.shape
-    t2 = t.reshape(-1, W)                # (N, W)
-    out = t2 @ M                       # (N, Mout)
-    return out.reshape(*lead, M.shape[0])
-
 # ---------- Objective module ----------
 class Deconv3DObjective(nn.Module):
     def __init__(self, Ae, A0, K, Mask, smooth_kernel, lam_l1=0., lam_dx=0., lam_a0=0.):
@@ -144,9 +217,6 @@ class Deconv3DObjective(nn.Module):
         #       'KX after FFT', KX.shape, self.Ae.shape, self.A0.shape)
 
         # Apply Ae and A0 along the last axis independently at each (d,h) location
-        # AeKX = apply_mat_last_axis(KX, self.Ae)      # (1, D', H', M)
-        # A0KX = apply_mat_last_axis(KX, self.A0)      # (1, D', H', P)
-        # print(self.Ae.dtype, KX.dtype)
         AeKX = self.Ae.to(KX.dtype) @ KX.unsqueeze(-1)
         AeKX = AeKX.squeeze(-1)
         A0KX = self.A0.to(KX.dtype) @ KX.unsqueeze(-1)
@@ -235,115 +305,8 @@ def solve_nonnegative_3d(
     return X_hat.to('cpu'), {"KX": KX.to('cpu'), "AeKX": AeKX.to('cpu'), "history": history}
 
 
-
-# %% id="-5ZGafdi_WX2"
-fres = np.load("/home/yousen/Public/ndlar_shared/data/response_v2a_distance_10p431cm_binsize_0p04434cm_tick0p05us.npy")
-
-# %% colab={"base_uri": "https://localhost:8080/"} id="A-qtwOyfF9G_" outputId="4b922345-3b79-465a-a646-e78a949dcfa2"
-# rebin to 100 ns
-freslen = 225 + 1
-fres_start = 450 * 2 - 1 * 2
-fres_end = fres_start + freslen * 2
-
-fres3x3 = np.empty((3,3, freslen)) # rebin to 100ns
-# center at [1,1]
-# [[0,0],[0,1], [0,2],
-#  [1,0], [1,1], [1,2],
-#  [2,0], [2,1], [2,2]]
-
-resplane_shift = (fres_start + 2) // 2
-fres3x3[1,1] = np.mean(fres[:5,:5], axis=(0,1))[fres_start:fres_end:2]
-fres3x3[2,1] = np.mean(fres[:5,5:10], axis=(0,1))[fres_start:fres_end:2]
-fres3x3[1,2] = np.mean(fres[5:10,:5], axis=(0,1))[fres_start:fres_end:2]
-fres3x3[2,2] = np.mean(fres[5:10,5:10], axis=(0,1))[fres_start:fres_end:2]
-fres3x3[0,0] = fres3x3[2,2]
-fres3x3[0,1] = fres3x3[2,1]
-fres3x3[1,0] = fres3x3[1,2]
-fres3x3[0,2] = fres3x3[2,2]
-fres3x3[2,0] = fres3x3[2,2]
-fres3x3 = fres3x3/np.sum(fres3x3[1,1])
-print(fres3x3.shape)
-
-# %% colab={"base_uri": "https://localhost:8080/", "height": 448} id="1S3NCpyNGL8_" outputId="cddc608c-05a1-48b3-8a77-162942dbed56"
-for i in range(3):
-    for j in range(3):
-        plt.plot(fres3x3[i,j], label=f"[{i},{j}]")
-plt.legend()
-
-# %% id="hY_KQY9aJZrO"
-finput = np.load("tests/playground/for_sp/single_track_full_fr_noises_20250924.npz")
-
-# %% colab={"base_uri": "https://localhost:8080/"} id="_rBNyfPQK1aq" outputId="9826e99d-2fb6-4b48-9183-42c27f9b3ebe"
-# finput.files
-
-# %% colab={"base_uri": "https://localhost:8080/"} id="1Lf3HY-HLAOG" outputId="ccc46a99-c675-42a8-9ae8-e4c4eeadfead"
-finput['hits_tpc2_batch11'], finput['one_tick'], finput['time_spacing']
-
-# %% id="x8--KT_zLDix"
-effql = torch.tensor(finput['effq_tpc2_batch11_location'])
-effq = torch.tensor(finput['effq_tpc2_batch11'][:,3])
-effqb = Block(location=effql, data=effq.unsqueeze(1).unsqueeze(1).unsqueeze(1))
-
-
-# %% id="7PEeKe70LdCD"
-def coarse_chunk(block, shp_tensor):
-    block =  accumulate(chunkify(block, shp_tensor))
-    block = Block(data=block.data, location=block.location)
-    return block
-
-def block_on_sgrid(block, shp_tensor):
-    block = coarse_chunk(block, shp_tensor)
-    location = SGrid(shp_tensor).spoint(block.location)
-    return Block(location=location, data=block.data.sum(dim=(1,2,3), keepdim=True))
-
-
-# %% colab={"base_uri": "https://localhost:8080/"} id="nTYIS25nVnBd" outputId="51a5801c-b284-4883-ee98-2312045b8956"
-# everything on 100ns basis
-
-effqb_sgrid = block_on_sgrid(effqb, (1,1,2))
-coarse_effqb_sgrid = coarse_chunk(effqb_sgrid, (1,1,25))
-coarse_effqb_sgrid.location += torch.tensor([0,0,resplane_shift])
-torch.min(effqb.location[:,-1]), torch.max(effqb.location[:,-1]), torch.min(coarse_effqb_sgrid.location[:,-1]), torch.max(coarse_effqb_sgrid.location[:,-1])
-
-# %% id="FSNvadYxWVK4"
-
-# %% colab={"base_uri": "https://localhost:8080/", "height": 542} id="eaRQMHJ4YjoS" outputId="d08f7e69-e3bb-4762-cc7c-d11f9c8a02fe"
-# fig = go.Figure(data=go.Scatter3d(x=effqb_sgrid.location[:,0],
-#                                   y=effqb_sgrid.location[:,1],
-#                                   z=effqb_sgrid.location[:,2],
-#                                   mode="markers", marker=dict(size=1, color=effqb_sgrid.data.squeeze())))
-# fig.show()
-
-# %% id="HQ9Gs0tQZaoT"
-# convert hit from 50ns basis to 100ns basis
-hits_loc = finput['hits_tpc2_batch11_location'][:,[0,1,3]]
-hits_q = finput['hits_tpc2_batch11'][:,3]
-
-# %% colab={"base_uri": "https://localhost:8080/"} id="VcvGumNjabeY" outputId="d761931b-053c-4772-f14e-fa7193cb2511"
-finput['hits_tpc2_batch11_location'].shape
-
-# %% id="v6K22-qEadny"
-hb = Block(location=torch.tensor(hits_loc), data=torch.tensor(hits_q).unsqueeze(1).unsqueeze(1).unsqueeze(1))
-hb_sgrid = block_on_sgrid(hb, (1,1,2))
-
-# %% colab={"base_uri": "https://localhost:8080/", "height": 542} id="5AufppYSavH9" outputId="2914d843-f855-437f-e735-baaa9ec9f17e"
-# fig = go.Figure(data=go.Scatter3d(x=hb_sgrid.location[:,0],
-#                                   y=hb_sgrid.location[:,1],
-#                                   z=hb_sgrid.location[:,2],
-#                                   mode="markers", marker=dict(size=1, color=hb_sgrid.data.squeeze())))
-# fig.show()
-
-# %% colab={"base_uri": "https://localhost:8080/"} id="ORc_CR8vcBay" outputId="e6fa2245-7e30-451f-cb4e-181029a4e381"
+# %%
 # generate masks
-
-tshift = np.argmax(fres3x3[1,1])
-support_trange = 25
-pre_n = 15
-post_n = 5
-thres = 5
-adc_hold_delay_ticks = 15
-csa_reset_ticks = 1
-
 def support_matrices(support_trange=support_trange, pre_n=pre_n, post_n=post_n, tshift=tshift,
                      hitblock = hb_sgrid, thres = thres, adc_hold_delay_ticks = adc_hold_delay_ticks, csa_reset_ticks = csa_reset_ticks,
                      freslen=401):
@@ -433,16 +396,19 @@ def support_matrices(support_trange=support_trange, pre_n=pre_n, post_n=post_n, 
 
 xyzmin, xyzmax, tshift, hqblock, mqblock, qinitial, mqexpandblock, mhblock, hq, Ae, A0 = support_matrices(freslen=freslen)
 
-# %% id="5OcpkYDv4ydy"
-X_hat, iterations =  solve_nonnegative_3d(Ae, A0, torch.tensor(fres3x3), hq, mqexpandblock.data, lam_l1=0.01, lam_dx=0.01, lam_a0=0.01,
-                                          Z0=qinitial, smooth_kernel=gaussian_kernel1d(sigma=2.0, kernel_size=15, device='cuda'), device='cuda')
+# %%
+X_hat, iterations =  solve_nonnegative_3d(Ae, A0, torch.tensor(fres3x3), hq, mqexpandblock.data,
+                                          lam_l1=lam_l1, lam_dx=lam_dx, lam_a0=lam_a0, Z0=qinitial,
+                                          smooth_kernel=gaussian_kernel1d(sigma=gaussian_kernel_sigma,
+                                                                          kernel_size=smooth_kernel_size, device='cuda'),
+                                          device='cuda')
 
-# %% id="MadXbnIY82db"
+# %%
 Xhatblock = Block(data=X_hat.to('cpu'), location=mqblock.location)
 Xhatcoarseblock = coarse_chunk(Xhatblock, (1,1,25))
 Xhatcoarseblock.location += xyzmin
 
-# %% id="HRONd_cL9IpR"
+# %%
 # fig = go.Figure(data=go.Scatter3d(x=Xhatcoarseblock.location[:,0],
 #                                   y=Xhatcoarseblock.location[:,1],
 #                                   z=Xhatcoarseblock.location[:,2],
@@ -454,24 +420,8 @@ Xhatcoarseblock.location += xyzmin
 #                                   mode="markers", marker=dict(size=1, color=coarse_effqb_sgrid.data.sum(dim=(1,2,3)))))
 # fig.show()
 
-# %% colab={"base_uri": "https://localhost:8080/", "height": 542} id="tHPJEOxA9Z28" outputId="635c9814-526a-44e9-c41f-70e3ceb7a37a"
-fig = go.Figure(data=go.Scatter3d(x=Xhatcoarseblock.location[:,0],
-                                  y=Xhatcoarseblock.location[:,1],
-                                  z=Xhatcoarseblock.location[:,2],
-                                  mode="markers", marker=dict(size=1)))
 
-fig.add_trace(go.Scatter3d(x=coarse_effqb_sgrid.location[:,0],
-                                  y=coarse_effqb_sgrid.location[:,1],
-                                  z=coarse_effqb_sgrid.location[:,2],
-                                  mode="markers", marker=dict(size=1)))
-
-# # fig.add_trace(go.Scatter3d(x=hb_sgrid_loc_on_min_tshift.location[:,0],
-# #                                   y=hb_sgrid_loc_on_min_tshift.location[:,1],
-# #                                   z=hb_sgrid_loc_on_min_tshift.location[:,2],
-# #                                   mode="markers", marker=dict(size=1)))
-# fig.show()
-
-# %% colab={"base_uri": "https://localhost:8080/", "height": 527} id="VssnicEefg8O" outputId="d4cd04f4-eb83-42cd-887c-74c0f3654002"
+# %%
 # Get all unique locations from both blocks
 all_locations = torch.cat((Xhatcoarseblock.location, coarse_effqb_sgrid.location), dim=0)
 unique_locations, _ = torch.unique(all_locations, dim=0, return_inverse=True)
@@ -498,13 +448,54 @@ print("Shape of padded effq data:", effq_data_padded.shape)
 # Calculate the difference in summed data at each location
 difference = Xhat_data_padded.sum(dim=(1,2,3)) - effq_data_padded.sum(dim=(1,2,3))
 
+# %%
 # Plot a histogram of the differences
-plt.figure()
+pages = []
+
+param_string = f"""Parameters:
+lam_l1 = {lam_l1}
+lam_dx = {lam_dx}
+lam_a0 = {lam_a0}
+gaussian_kernel_sigma = {gaussian_kernel_sigma}
+kernel_size = {smooth_kernel_size}
+pre_n = {pre_n}
+post_n = {post_n}
+support_trange = {support_trange}
+"""
+
+# def add_param_note_matplotlib(fig, param_string):
+#     fig.text(0.01, 0.99, param_string, verticalalignment='top', fontsize=8, bbox=dict(facecolor='white', alpha=0.6, edgecolor='none'))
+
+# def add_param_note_plotly(fig, param_string):
+#     fig.add_annotation(
+#         text=param_string,
+#         xref="paper", yref="paper",
+#         x=0, y=1.05,
+#         showarrow=False,
+#         font=dict(size=10, family="monospace"),
+#         align="left",
+#         bgcolor="white",
+#         opacity=0.7
+#     )
+
+# %%
+# Page 0: parameters
+fig0 = plt.figure()
+fig0.text(0.2, 0.8, param_string, verticalalignment='top', fontsize=10, bbox=dict(facecolor='white', alpha=0.6, edgecolor='none'))
+pages.append(("Parameters", fig0))
+
+
+# %%
+# Page 1: Histogram of Differences between Xhatcoarseblock and coarse_effqb_sgrid (Aligned)
+fig1 = plt.figure()
 plt.hist(difference.numpy(), bins=50)
 plt.xlabel("Difference in Summed Data")
 plt.ylabel("Frequency")
 plt.title("Histogram of Differences between Xhatcoarseblock and coarse_effqb_sgrid (Aligned)")
-plt.show()
+# Plot the histogram of differences
+# add_param_note_matplotlib(fig1, param_string)
+pages.append(("Matplotlib Fig 1", fig1))
+
 
 # %% colab={"base_uri": "https://localhost:8080/", "height": 1000} id="5258b2f2" outputId="7a7863b1-9a5e-4d1e-ce27-a57ba1136669"
 # Get all unique 2D locations from all three blocks
@@ -515,7 +506,6 @@ unique_locations_2d, _ = torch.unique(all_locations_2d, dim=0, return_inverse=Tr
 xhat_grouped_sum_2d = {tuple(loc.tolist()): 0.0 for loc in unique_locations_2d}
 effq_grouped_sum_2d = {tuple(loc.tolist()): 0.0 for loc in unique_locations_2d}
 hb_grouped_sum_2d = {tuple(loc.tolist()): 0.0 for loc in unique_locations_2d}
-
 
 # Populate dictionaries with summed data from Xhatcoarseblock
 for i in range(Xhatcoarseblock.location.shape[0]):
@@ -548,26 +538,35 @@ difference_2d_sum_over_threshold = difference_2d_sum[over_threshold]
 difference_2d_hits_sum_over_threshold = difference_2d_hits_sum[over_threshold]
 
 
-# Plot the histogram of differences
-plt.figure()
+# %%
+# Page 2: Histogram of Differences (Grouped by Pixel ID)
+fig2 = plt.figure()
 plt.hist(difference_2d_sum.numpy(), bins=50, alpha=0.5, label='sp')
 plt.hist(difference_2d_hits_sum.numpy(), bins=50, alpha=0.5, label='raw')
 plt.legend()
 plt.xlabel("Difference in Summed Data (Grouped by Pixel ID)")
 plt.ylabel("Frequency")
 plt.title("Histogram of Differences (Grouped by Pixel ID)")
-plt.show()
+# add_param_note_matplotlib(fig2, param_string)
+pages.append(("Matplotlib Fig 2", fig2))
 
-plt.figure()
+
+# %%
+# Page 3: Histogram of Differences, Effq>thres (Grouped by Pixel)
+fig3 = plt.figure()
 plt.hist(difference_2d_sum_over_threshold.numpy(), bins=50, alpha=0.5, label='sp')
 plt.hist(difference_2d_hits_sum_over_threshold.numpy(), bins=50, alpha=0.5, label='raw')
 plt.xlabel("Difference in Summed Data, Effq>thres (Grouped by Pixel)")
 plt.ylabel("Frequency")
 plt.title("Histogram of Differences, Effq>thres (Grouped by Pixel)")
 plt.legend()
-plt.show()
+# add_param_note_matplotlib(fig3, param_string)
+pages.append(("Matplotlib Fig 3", fig3))
 
-plt.figure()
+
+# %%
+# Page 4: Scatter Plot of Summed Data from Xhatcoarseblock, Hb and coarse_effqb_sgrid
+fig4 = plt.figure()
 plt.plot(effq_summed_data_aligned, xhat_summed_data_aligned, 'o', label='Xhat vs Effq')
 plt.plot(effq_summed_data_aligned, hb_summed_data_aligned, 'x', label='Hb vs Effq')
 plt.plot(np.arange(0, 30, 0.1), np.arange(0, 30, 0.1), '-')
@@ -575,17 +574,27 @@ plt.xlabel("Summed Q from Effq per pixel")
 plt.ylabel("Summed Q per pixel")
 plt.title("Scatter Plot of Summed Data from Xhatcoarseblock, Hb and coarse_effqb_sgrid")
 plt.legend()
-plt.show()
+# add_param_note_matplotlib(fig4, param_string)
+pages.append(("Matplotlib Fig 4", fig4))
 
 # %%
-qfinegrain = accumulate(chunkify(Xhatblock, (1,1,Xhatblock.shape[-1])))
-
-sumq = qfinegrain.data.sum(dim=-1)
-qfinegrain = qfinegrain.data.view(-1, qfinegrain.shape[-1])
-for i in range(qfinegrain.shape[0]):
-    if i % 10 == 0:
-        plt.figure()
-    plt.plot(qfinegrain[i])
+# qfinegrain = accumulate(chunkify(Xhatblock, (1,1,Xhatblock.shape[-1])))
+#
+# sumq = qfinegrain.data.sum(dim=-1)
+# qfinegrain = qfinegrain.data.view(-1, qfinegrain.shape[-1])
+# for i in range(qfinegrain.shape[0]):
+#     if i % 10 == 0:
+#         plt.figure()
+#     plt.plot(qfinegrain[i])
+# # Stupid implementation from gptetl:copilot-gpt4.1, need to be fixed
+# # Page 5: Fine-grained q plot, several overlays
+# fig5 = plt.figure()
+# for i in range(qfinegrain.shape[0]):
+#     if i % 10 == 0 and i != 0:
+#         fig5 = plt.figure()
+#     plt.plot(qfinegrain[i])
+# add_param_note_matplotlib(fig5, param_string)
+# pages.append(("Matplotlib Fig 5", fig5))
 
 # %%
 iterations['history']
@@ -601,11 +610,147 @@ for it in iterations['history']:
     l1loss.append(it['l1'])
     dxloss.append(it['dx'])
     a0loss.append(it['a0'])
+
+
+# Page 6: Loss curves
+fig6 = plt.figure()
 plt.plot(steps, dloss, label='data')
 plt.plot(steps, l1loss, label='l1')
 plt.plot(steps, dxloss, label='dx')
 plt.plot(steps, a0loss, label='a0')
 plt.legend()
 plt.yscale('log')
+# add_param_note_matplotlib(fig6, param_string)
+pages.append(("Matplotlib Fig 6", fig6))
 
 # %%
+
+# Page 7: fres3x3 individual curves
+fig7 = plt.figure()
+for i in range(3):
+    for j in range(3):
+        plt.plot(fres3x3[i, j], label=f"[{i-1},{j-1}]")
+plt.title("fres3x3 individual curves")
+plt.legend()
+# add_param_note_matplotlib(fig7, param_string)
+pages.append(("Matplotlib Fig 7", fig7))
+
+
+# %%
+def plotly_to_plt(fig_plotly, title):
+    image_bytes = fig_plotly.to_image(format="png", scale=2)
+    # Use io.BytesIO to treat the byte string as a file-like object
+    image_stream = io.BytesIO(image_bytes)
+    # Load the image data from the stream into Matplotlib
+    img = mpimg.imread(image_stream, format='png')
+    # Create a Matplotlib figure and axes
+    fig_mpl, ax = plt.subplots(figsize=(8, 6))
+    # Display the image on the axes
+    ax.imshow(img)
+    # Hide the axes' ticks and labels
+    ax.axis('off')
+    # Add a title in Matplotlib (optional)
+    ax.set_title(title, pad=10)
+    plt.tight_layout()
+    return fig_mpl
+
+# %%
+# Page 8: Plotly 3D scatter - Xhatcoarseblock
+fig8 = go.Figure(data=go.Scatter3d(x=Xhatcoarseblock.location[:,0],
+                                   y=Xhatcoarseblock.location[:,1],
+                                   z=Xhatcoarseblock.location[:,2],
+                                   mode="markers",
+                                   marker=dict(size=1, color=Xhatcoarseblock.data.sum(dim=(1,2,3)).squeeze(),
+                                   colorbar=dict(title="Xhatcoarseblock sum charge"))))
+# add_param_note_plotly(fig8, param_string)
+fig8title = "Plotly Fig 8: Xhatcoarseblock"
+pages.append((fig8title, plotly_to_plt(fig8, fig8title)))
+
+
+# %%
+# Page 9: Plotly 3D scatter - coarse_effqb_sgrid
+fig9 = go.Figure(data=go.Scatter3d(x=coarse_effqb_sgrid.location[:,0],
+                                   y=coarse_effqb_sgrid.location[:,1],
+                                   z=coarse_effqb_sgrid.location[:,2],
+                                   mode="markers",
+                                   marker=dict(size=1,
+                                   colorbar=dict(
+                                   title="coarse_effqb_sgrid sum charge"),
+                                   color=coarse_effqb_sgrid.data.sum(dim=(1,2,3)).squeeze())))
+# add_param_note_plotly(fig9, param_string)
+fig9title = "Plotly Fig 9: coarse_effqb_sgrid"
+pages.append((fig9title, plotly_to_plt(fig9, fig9title)))
+
+
+# %%
+# Page 10: Plotly 3D scatter - effqb_sgrid
+fig10 = go.Figure(data=go.Scatter3d(x=effqb_sgrid.location[:,0],
+                                    y=effqb_sgrid.location[:,1],
+                                    z=effqb_sgrid.location[:,2],
+                                    mode="markers", marker=dict(size=1,
+                                    colorbar=dict(title="effqb_sgrid sum charge"),
+                                    color=effqb_sgrid.data.sum(dim=(1,2,3)).squeeze())))
+fig10.update_layout(scene=dict(
+    xaxis_title='X',
+    yaxis_title='Y',
+    zaxis_title='Z'),
+    coloraxis_colorbar=dict(
+        title="effqb_sgrid sum charge"
+    ))
+
+# add_param_note_plotly(fig10, param_string)
+fig10title = "Plotly Fig 10: effqb_sgrid"
+pages.append((fig10title, plotly_to_plt(fig10, fig10title)))
+
+
+# %%
+# Page 11: Plotly 3D scatter - hb_sgrid
+fig11 = go.Figure(data=go.Scatter3d(x=hb_sgrid.location[:,0],
+                                    y=hb_sgrid.location[:,1],
+                                    z=hb_sgrid.location[:,2],
+                                    mode="markers", marker=dict(size=1,
+                                    colorbar=dict(title="hb_sgrid sum charge"),
+                                    color=hb_sgrid.data.squeeze())))
+fig11.update_layout(scene=dict(
+    xaxis_title='X',
+    yaxis_title='Y',
+    zaxis_title='Z'),
+    coloraxis_colorbar=dict(
+        title="hb_sgrid sum charge"
+    ))
+# add_param_note_plotly(fig11, param_string)
+fig11title = "Plotly Fig 11: hb_sgrid"
+pages.append((fig11title, plotly_to_plt(fig11, fig11title)))
+
+# Page 12: Plotly 3D scatter - Xhatcoarseblock and coarse_effqb_sgrid
+fig12 = go.Figure()
+fig12.add_trace(go.Scatter3d(x=Xhatcoarseblock.location[:,0],
+                                    y=Xhatcoarseblock.location[:,1],
+                                    z=Xhatcoarseblock.location[:,2],
+                                    mode="markers", marker=dict(size=1, color='blue'), name='Xhat_coarse_block'))
+fig12.add_trace(go.Scatter3d(x=coarse_effqb_sgrid.location[:,0],
+                                    y=coarse_effqb_sgrid.location[:,1],
+                                    z=coarse_effqb_sgrid.location[:,2],
+                                    mode="markers", marker=dict(size=1, color='red'), name='coarse_effqb_sgrid'))
+fig12title = "Plotly Fig 12: Xhatcoarseblock and coarse_effqb_sgrid"
+pages.append((fig12title, plotly_to_plt(fig12, fig12title)))
+
+
+# %%
+# for idx, (title, page) in enumerate(pages):
+#     print(f"Page {idx+1}: {title}")
+#     if isinstance(page, plt.Figure):
+#         page.show()
+#     elif isinstance(page, go.Figure):
+#         page.show()
+
+# save all pages to pdf
+# those parameters printed on the first page should be included in the pdfname
+pdfname = f'deconv3d_results_laml1_{lam_l1}_lamdx_{lam_dx}_lama0_{lam_a0}_gksigma_{gaussian_kernel_sigma}_gksize_{smooth_kernel_size}'
+pdfname = pdfname.replace('.', 'p')
+pdfname += '.pdf'
+with PdfPages(pdfname) as pdf:
+    for title, page in pages:
+        if isinstance(page, plt.Figure):
+            pdf.savefig(page)
+            plt.close(page)
