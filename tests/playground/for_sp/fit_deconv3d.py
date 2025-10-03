@@ -38,6 +38,12 @@ import torch.nn.functional as F
 
 
 # %%
+def gaussian_kernel1d(kernel_size: int, sigma: float, device=None):
+    x = torch.arange(kernel_size, device=device) - (kernel_size - 1) / 2
+    kernel = torch.exp(-0.5 * (x / sigma) ** 2)
+    kernel /= kernel.sum()
+    return kernel
+
 import argparse
 
 parser = argparse.ArgumentParser()
@@ -63,6 +69,12 @@ lam_dx = args.lam_dx
 lam_a0 = args.lam_a0
 gaussian_kernel_sigma = args.gaussian_kernel_sigma
 smooth_kernel_size= args.smooth_kernel_size
+if smooth_kernel_size <= 1:
+    smooth_kernel = torch.tensor([1.0], dtype=torch.float32)
+elif gaussian_kernel_sigma <= 0:
+    smooth_kernel = torch.ones(smooth_kernel_size, dtype=torch.float32) / smooth_kernel_size
+else:
+    smooth_kernel = gaussian_kernel1d(sigma=gaussian_kernel_sigma, kernel_size=smooth_kernel_size)
 
 
 # %%
@@ -138,11 +150,6 @@ hb, hb_sgrid = load_and_process_hit_blocks(finput, "hits_tpc2_batch11")
 
 # %%
 
-def gaussian_kernel1d(kernel_size: int, sigma: float, device=None):
-    x = torch.arange(kernel_size, device=device) - (kernel_size - 1) / 2
-    kernel = torch.exp(-0.5 * (x / sigma) ** 2)
-    kernel /= kernel.sum()
-    return kernel
 
 def smooth_along_last_dim(x, kernel, padding="same"):
     """
@@ -272,7 +279,7 @@ def solve_nonnegative_3d(
     Returns: M @ X_hat (1, D, H, W) and a small info dict
     """
     dev = device or (Ae.device if isinstance(Ae, torch.Tensor) else "cpu")
-    Ae, A0, K, Y, Mask = Ae.to(dev), A0.to(dev), K.to(dev), Y.to(dev), Mask.to(dev)
+    Ae, A0, K, Y, Mask, smooth_kernel = Ae.to(dev), A0.to(dev), K.to(dev), Y.to(dev), Mask.to(dev), smooth_kernel.to(dev)
 
     # Infer input spatial size if using "same": W' == input W
     # We'll initialize Z to match the *pre-conv* size implied by 'same' mode.
@@ -421,8 +428,7 @@ xyzmin, xyzmax, tshift, hqblock, mqblock, qinitial, mqexpandblock, mhblock, hq, 
 # %%
 X_hat, iterations =  solve_nonnegative_3d(Ae, A0, torch.tensor(fres3x3), hq, mqexpandblock.data,
                                           lam_l1=lam_l1, lam_l2=lam_l2, lam_dx=lam_dx, lam_a0=lam_a0, Z0=qinitial,
-                                          smooth_kernel=gaussian_kernel1d(sigma=gaussian_kernel_sigma,
-                                                                          kernel_size=smooth_kernel_size, device='cuda'),
+                                          smooth_kernel=smooth_kernel,
                                           device='cuda')
 
 # %%
