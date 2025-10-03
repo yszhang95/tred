@@ -49,7 +49,7 @@ import argparse
 parser = argparse.ArgumentParser()
 
 parser.add_argument('--support_trange', type=int, default=25, help='Support time range')
-parser.add_argument('--pre_n', type=int, default=15, help='Number of pre frames')
+parser.add_argument('--pre_n', type=int, default=5, help='Number of pre frames')
 parser.add_argument('--post_n', type=int, default=5, help='Number of post frames')
 parser.add_argument('--lam_l1', type=float, default=0.01, help='L1 regularization lambda')
 parser.add_argument('--lam_l2', type=float, default=0.01, help='L2 regularization lambda')
@@ -57,6 +57,7 @@ parser.add_argument('--lam_dx', type=float, default=0.01, help='DX regularizatio
 parser.add_argument('--lam_a0', type=float, default=0.01, help='A0 regularization lambda')
 parser.add_argument('--gaussian_kernel_sigma', type=float, default=2.0, help='Sigma for gaussian kernel')
 parser.add_argument('--smooth_kernel_size', type=int, default=15, help='Kernel size for smoothing')
+parser.add_argument('--noise', type=float, default=1.0, help='Gaussian Noise Width to add to the fit')
 
 args = parser.parse_args()
 
@@ -69,6 +70,7 @@ lam_dx = args.lam_dx
 lam_a0 = args.lam_a0
 gaussian_kernel_sigma = args.gaussian_kernel_sigma
 smooth_kernel_size= args.smooth_kernel_size
+noise = args.noise
 if smooth_kernel_size <= 1:
     smooth_kernel = torch.tensor([1.0], dtype=torch.float32)
 elif gaussian_kernel_sigma <= 0:
@@ -219,7 +221,7 @@ def diff_3d(x):
 
 # ---------- Objective module ----------
 class Deconv3DObjective(nn.Module):
-    def __init__(self, Ae, A0, K, Mask, smooth_kernel, lam_l1=0., lam_l2=0., lam_dx=0., lam_a0=0.):
+    def __init__(self, Ae, A0, K, Mask, smooth_kernel, noise, lam_l1=0., lam_l2=0., lam_dx=0., lam_a0=0.):
         super().__init__()
         # store as buffers so they follow .to(device)
         self.register_buffer("Ae", Ae)    # (M, W')
@@ -232,6 +234,7 @@ class Deconv3DObjective(nn.Module):
         self.register_buffer("Mask", Mask)
         self.relu = nn.ReLU()
         self.register_buffer("smooth_kernel", smooth_kernel)
+        self.register_buffer("noise", torch.tensor(noise))
 
     def forward(self, Z, Y):
         """
@@ -251,7 +254,7 @@ class Deconv3DObjective(nn.Module):
         A0KX = A0KX.squeeze(-1)
 
         # Data fidelity
-        data_term = torch.sum((AeKX - Y) ** 2)
+        data_term = torch.sum((AeKX + torch.randn_like(Y).to(Y.device) * self.noise - Y) ** 2)
 
         # Regularizers
         l1_term = self.lam_l1 * torch.sum(X)         # X >= 0 -> |X| = X
@@ -266,7 +269,7 @@ class Deconv3DObjective(nn.Module):
 
 # ---------- Solver ----------
 def solve_nonnegative_3d(
-    Ae, A0, K, Y, Mask, smooth_kernel,
+    Ae, A0, K, Y, Mask, smooth_kernel, noise,
     lam_l1=0., lam_l2=0., lam_dx=0., lam_a0=0.,
     steps=2000, lr=1e-2, Z0=None, device=None, progress_every=100
 ):
@@ -303,7 +306,7 @@ def solve_nonnegative_3d(
     else:
         Z = Z0.clone().detach().to(dev).requires_grad_(True)
 
-    obj = Deconv3DObjective(Ae, A0, K, Mask, smooth_kernel=smooth_kernel,
+    obj = Deconv3DObjective(Ae, A0, K, Mask, smooth_kernel=smooth_kernel, noise=noise,
                             lam_l1=lam_l1, lam_l2=lam_l2, lam_dx=lam_dx, lam_a0=lam_a0).to(dev)
     opt = torch.optim.Adam([Z], lr=lr)
 
@@ -426,9 +429,10 @@ def support_matrices(support_trange=support_trange, pre_n=pre_n, post_n=post_n, 
 xyzmin, xyzmax, tshift, hqblock, mqblock, qinitial, mqexpandblock, mhblock, hq, Ae, A0 = support_matrices(freslen=freslen)
 
 # %%
-X_hat, iterations =  solve_nonnegative_3d(Ae, A0, torch.tensor(fres3x3), hq, mqexpandblock.data,
-                                          lam_l1=lam_l1, lam_l2=lam_l2, lam_dx=lam_dx, lam_a0=lam_a0, Z0=qinitial,
+X_hat, iterations =  solve_nonnegative_3d(Ae, A0, K=torch.tensor(fres3x3), Y=hq, Mask=mqexpandblock.data, noise=noise,
+                                          Z0=qinitial,
                                           smooth_kernel=smooth_kernel,
+                                          lam_l1=lam_l1, lam_l2=lam_l2, lam_dx=lam_dx, lam_a0=lam_a0,
                                           device='cuda')
 
 # %%
@@ -485,6 +489,7 @@ lam_l1 = {lam_l1}
 lam_l2 = {lam_l2}
 lam_dx = {lam_dx}
 lam_a0 = {lam_a0}
+noise = {noise}
 gaussian_kernel_sigma = {gaussian_kernel_sigma}
 kernel_size = {smooth_kernel_size}
 pre_n = {pre_n}
@@ -778,7 +783,7 @@ pages.append((fig12title, plotly_to_plt(fig12, fig12title)))
 
 # save all pages to pdf
 # those parameters printed on the first page should be included in the pdfname
-pdfname = f'deconv3d_results_laml1_{lam_l1}_laml2_{lam_l2}_lamdx_{lam_dx}_lama0_{lam_a0}_gksigma_{gaussian_kernel_sigma}_gksize_{smooth_kernel_size}'
+pdfname = f'deconv3d_results_laml1_{lam_l1}_laml2_{lam_l2}_lamdx_{lam_dx}_lama0_{lam_a0}_gksigma_{gaussian_kernel_sigma}_gksize_{smooth_kernel_size}_noise_{noise}'
 pdfname = pdfname.replace('.', 'p')
 pdfname += '.pdf'
 with PdfPages(pdfname) as pdf:
