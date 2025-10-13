@@ -145,6 +145,37 @@ def reshape_envelope(envelope: Block, chunk_shape:Shape):
     vdim = len(chunk_shape)
     return Block( location=loc.flatten(0, vdim), data=dat.flatten(0, vdim) )
 
+def fill_envelope_index_put(envelope: Block, block: Block) -> Block:
+    '''
+    Fill envelope with block.
+
+    If envelop lacks a .data attribute it will be allocated.
+    '''
+    if not isinstance(envelope, Block):
+        raise TypeError(f'sparse.fill_envelope_index_put() envelope must be Block got {type(envelope)}')
+    if not isinstance(block, Block):
+        raise TypeError(f'sparse.fill_envelope_inidex_put() block must be Block got {type(block)}')
+
+    if not hasattr(envelope, "data"):
+        envelope.set_data(torch.zeros(envelope.size(),
+                                      dtype=block.data.dtype, device=block.data.device))
+
+    if len(block.shape) != len(envelope.shape):
+        raise ValueError(f'fill_envelope_inidex_put shape mismatch with block {block.shape} and envelope {envelope.shape}')
+
+    # location of block inside the envelope.
+    offset = block.location - envelope.location
+    if not torch.all(offset >= 0):
+        raise ValueError(f'fill_envelope_inidex_put negative locations of block {block.shape} in envelope {envelope.shape}')
+
+    inds = crop_batched(offset, block.shape, envelope.shape)
+    # envelope.data.flatten()[inds] = block.data.flatten()
+    flat_block_view = block.data.view(-1)
+    flat_envelope_view = envelope.data.view(-1)
+    out = flat_envelope_view.index_put((inds,), flat_block_view, accumulate=False).view_as(envelope.data)
+    envelope.set_data(out)
+    return envelope
+
 
 # def block_chunk(sgrid: SGrid, block: Block) -> Block:
 #     '''
@@ -164,6 +195,15 @@ def chunkify(block: Block, shape: IntTensor) -> Block:
     sgrid = SGrid(shape)
     envelope = sgrid.envelope(block)
     fill_envelope(envelope, block)
+    return reshape_envelope(envelope, sgrid.spacing)
+
+def chunkify_bins(block: Block, shape: IntTensor) -> Block:
+    '''
+    Chunk the block into a new one with volume dimensions of given shape.
+    '''
+    sgrid = SGrid(shape)
+    envelope = sgrid.envelope(block)
+    fill_envelope_index_put(envelope, block)
     return reshape_envelope(envelope, sgrid.spacing)
 
 def flat_index(ten, stride):
