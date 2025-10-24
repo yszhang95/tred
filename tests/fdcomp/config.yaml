@@ -1,0 +1,4 @@
+response_path: "/home/yousen/Public/ndlar_shared/data/responses/response_44_v2a_full.npz"
+lifetime: 20. # ms
+tspace: 0.5 # us
+save_waveform: false

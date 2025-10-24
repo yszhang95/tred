@@ -88,3 +88,14 @@ def fullsim(ctx, infile, outfile):
     from .plots.graph_effq import fullsim as tred_fullsim
     tred_fullsim(ctx.obj.get("config"), infile, outfile)
 
+@cli.command('fdsim')
+@click.option('-i','--infile', default="depos.npy")
+@click.option('-o','--outfile', default="waveforms.npz")
+@click.pass_context
+def fullsim(ctx, infile, outfile):
+    '''
+    This command does not exist.
+    '''
+    from .plots.graph_fd import fdsim as tred_fdsim
+    tred_fdsim(ctx.obj.get("config"), infile, outfile)
+
