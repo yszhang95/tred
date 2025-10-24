@@ -14,10 +14,9 @@ def to_tensor(source, device, dtype=torch.float32):
     '''
     if isinstance(source, torch.Tensor):
         t = source.to(dtype)
-        t.requires_grad = False
         t = t.to(device)
     else:
-        t = torch.tensor(source, dtype=dtype, requires_grad=False,
+        t = torch.tensor(source, dtype=dtype,
                          device=device)
     return t
 

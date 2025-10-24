@@ -67,6 +67,7 @@ def diffuse(dt, diffusion, sigma=None):
 
     diffusion = diffusion[None,:] # add npts dimension
     dt = dt[:,None]               # add vdim dimension
+    dt = torch.where(dt<0, torch.zeros_like(dt), dt)
 
     if sigma is None:
         sigma = torch.sqrt(2*diffusion*dt)
@@ -74,7 +75,7 @@ def diffuse(dt, diffusion, sigma=None):
         if len(sigma.shape) == 1:
             sigma = sigma[:,None] # add vdim
         sigma = torch.sqrt(2*diffusion*dt + sigma*sigma)
-    sigma[torch.isnan(sigma)] = 0
+    # sigma[torch.isnan(sigma)] = 0
     if squeeze:
         sigma = torch.squeeze(sigma)
     return sigma
@@ -93,8 +94,9 @@ def absorb(charge, dt, lifetime, fluctuate=False):
     This is unphysical. The surviving electrons (charge) remain the same when dt is negative.
     No negative binomial fluctuations or any factor from the exponential distribution is applied.
     '''
-    charge = charge.to(dtype=torch.int32)
+    # charge = charge.to(dtype=torch.int32)
     if fluctuate:
+        # FIXME: Not differentiable
         loss = 1.0 - torch.exp(-dt / lifetime)
         loss = torch.clamp(loss, 0, 1, out=loss)
         b = Binomial(charge, loss)

@@ -29,7 +29,7 @@ from .raster.depos import binned as raster_depos
 from .raster.steps import compute_qeff
 
 from .types import index_dtype
-from .sparse import chunkify, chunkify2, accumulate_nd_blocks_v1, accumulate_nd_blocks_v2
+from .sparse import chunkify, chunkify_bins, chunkify2, accumulate_nd_blocks_v1, accumulate_nd_blocks_v2
 from .chunking import accumulate
 from .convo import interlaced, interlaced_symm, interlaced_symm_v2
 
@@ -54,7 +54,14 @@ def param(thing, dtype=torch.float32):
     if isinstance(thing, torch.Tensor):
         return thing.to(dtype=dtype)
 
-    return nn.Parameter(torch.tensor(thing, dtype=dtype), requires_grad=False)
+    # return nn.Parameter(torch.tensor(thing, dtype=dtype), requires_grad=False)
+    return nn.Parameter(torch.tensor(thing, dtype=dtype))
+
+def to_param(thing, dtype=torch.float32, requires_grad=True, device=None):
+    t = thing if isinstance(thing, torch.Tensor) else torch.tensor(thing)
+    t = t.to(dtype=dtype, device=device)
+    # Make it a leaf tensor for autograd by detaching before wrapping:
+    return nn.Parameter(t.detach(), requires_grad=requires_grad)
 
 def constant(node, name, thing, dtype=torch.float32):
     if isinstance(thing, torch.Tensor):
@@ -92,7 +99,8 @@ class Drifter(nn.Module):
 
         constant(self, 'target', target)
         constant(self, 'diffusion', diffusion)
-        constant(self, 'lifetime', lifetime)
+        # constant(self, 'lifetime', lifetime)
+        self.lifetime = to_param(lifetime, dtype=torch.float32, requires_grad=True)
         constant(self, 'velocity', velocity)
         constant(self, 'vaxis', vaxis, index_dtype)
         constant(self, 'fluctuate', fluctuate, bool)
@@ -147,6 +155,7 @@ class Drifter(nn.Module):
         if head is None:
             return (dsigma, dtime, dcharge, dtail)
         dhead = head + (dtail - tail)
+
         return (dsigma, dtime, dcharge, dtail, dhead)
 
 
@@ -333,15 +342,21 @@ class ChunkSum(nn.Module):
             self._forward = self._chunksum_inplace_v1
         elif method == 'chunksum_inplace_v2':
             self._forward = self._chunksum_inplace_v2
+        elif method == 'chunksum_differential':
+            self._forward = self._chunksum_differential
         else:
             self._forward = None
         if self._forward is None:
-            raise ValueError(f"Available method in ChunkSum, chunksum, chunksum_inplace_v1, chunksum_inplace_v2. But {method} is given.")
+            raise ValueError(f"Available method in ChunkSum, chunksum, chunksum_differential'\
+            'chunksum_inplace_v1, chunksum_inplace_v2. But {method} is given.")
 
     def _chunksum_inplace_v1(self, block: Block) -> Block:
         return accumulate_nd_blocks_v1(block, self._chunk_shape_tuple)
     def _chunksum_inplace_v2(self, block: Block) -> Block:
         return accumulate_nd_blocks_v2(block, self._chunk_shape_tuple)
+
+    def _chunksum_differential(self, block: Block) -> Block:
+        return accumulate(chunkify_bins(block, self.chunk_shape))
 
     def _chunksum(self, block: Block) -> Block:
         '''
