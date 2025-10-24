@@ -21,8 +21,8 @@ epochs_dec = np.arange(loss_dec.size)
 
 fig, axs = plt.subplots(1, 2, figsize=(10, 4))
 
-axs[0].plot(epochs_inc, loss_inc, label=f"loss (×{lifetime_inc:.3f})", color="tab:blue")
-axs[0].plot(epochs_dec, loss_dec, label=f"loss (×{lifetime_dec:.3f})", color="tab:green")
+axs[0].plot(epochs_inc, loss_inc, label=f"lifetime (×{lifetime_inc:.3f})", color="tab:blue")
+axs[0].plot(epochs_dec, loss_dec, label=f"lifetime (×{lifetime_dec:.3f})", color="tab:green")
 axs[0].set_xlabel("Epoch")
 axs[0].set_ylabel("Loss")
 axs[0].set_title("Loss vs Epoch")
