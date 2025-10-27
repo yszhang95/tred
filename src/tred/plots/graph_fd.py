@@ -49,6 +49,7 @@ pitch = 4.8 * units.mm / units.cm # values are in units of cm
 nimperpix=10
 pspace = pitch/nimperpix
 velocity = 1.59645 * units.mm/units.us / (units.cm/units.us) # values are in units of cm/us
+pspace_rot = 0.47 * units.mm / units.cm
 
 response = None
 
@@ -156,6 +157,7 @@ def transform_indices_to_coord_3d(location, pitch, tick, velocity,
 def runit(device='cpu'):
     '''
     '''
+    torch.set_num_threads(1)
     info(f'Starting runit on device {device}.')
     # everything is 2D
     export_pickle = False
@@ -181,11 +183,7 @@ def runit(device='cpu'):
     batch_size = 4096 * 8
 
     # create intermediate nodes
-    # dummy drifter for running time tests
-    drifter = Drifter(diffusion, lifetime, velocity, drtoa=drtoa)
-    raster = Raster(velocity, grid_spacing)
     chunksum = ChunkSum(chunk_shape)
-
     chunksum_readout = ChunkSum((1, 120))
 
     convo = LacedConvo(lacing, o_shape=(32, 512))
@@ -195,6 +193,11 @@ def runit(device='cpu'):
     chunksum_i = chunksum_i.to(device)
     chunksum_readout = chunksum_readout.to(device)
 
+    angle = np.deg2rad(35.7)
+    vec_counterclock = np.array([np.cos(angle), np.sin(angle)])
+    vec_counterclock = torch.tensor(vec_counterclock).to(torch.float32).to(device)
+    vec_clock = np.array([np.cos(angle), -np.sin(angle)])
+    vec_clock = torch.tensor(vec_clock).to(torch.float32).to(device)
 
     global response
     response = response.to(device=device)
@@ -227,6 +230,7 @@ def runit(device='cpu'):
     drifter = drifter.to(device=device)
 
     raster = Raster(drift_direction*velocity, grid_spacing, pdims=(1,)).to(device=device)
+    raster_rot = Raster(drift_direction*velocity, grid_spacing=(pspace_rot, tspace), pdims=(1,)).to(device=device)
     chunksum = chunksum.to(device=device)
     convo = convo.to(device=device)
 
@@ -234,17 +238,55 @@ def runit(device='cpu'):
     if device == 'cuda':
         torch.cuda.synchronize()
     tstart = time.time()
+
+    # rot_counterclock_tail = rot_counterclock @ features[:,None,3:5]
+    # [N, 2] @ [2] --> [N}
+    rot_counterclock_tail = torch.matmul(features[:,3:5],  vec_counterclock)
+    tail_counterclock = torch.stack([features[:,2], rot_counterclock_tail], dim=1)
+    rot_clock_tail = torch.matmul(features[:,3:5],  vec_clock)
+    tail_clock = torch.stack([features[:,2], rot_clock_tail], dim=1)
+
     info(f"Start test run on {features.size(0)} segments.")
     for i in range(0, features.size(0), batch_size):
         batch_features = features[i:i+batch_size]
         tail = batch_features[:,2:5]
+        tail_p = tail_counterclock[i:i+batch_size]
+        tail_n = tail_clock[i:i+batch_size]
         Q = batch_features[:,1] * (-1) # Nelectrons
         t0 = batch_features[:,0] * units.us / units.us # us
         # global tref from min and offset for the rest
         tref = torch.min(t0)
         local_time = t0 - tref
 
+        # X plane
+        # drift and vertical
         drifted = drifter(local_time, Q, tail[:,:2])
+        for ichunk, idrifted in enumerate(
+                iter_tensor_chunks(drifted, chunk_size=batch_size)):
+            qblock = raster(*idrifted)
+
+            signal = chunksum(qblock)
+
+            # Nqblock = signal.nbatches
+            iblock = convo(signal, response)
+            current = chunksum_i(iblock)
+            readout_segmetns = chunksum_readout(current)
+
+        # + 35.7 deg plane; rotate on vertical and beam
+        drifted = drifter(local_time, Q, tail_p[:,:2])
+        for ichunk, idrifted in enumerate(
+                iter_tensor_chunks(drifted, chunk_size=batch_size)):
+            qblock = raster(*idrifted)
+
+            signal = chunksum(qblock)
+
+            # Nqblock = signal.nbatches
+            iblock = convo(signal, response)
+            current = chunksum_i(iblock)
+            readout_segmetns = chunksum_readout(current)
+
+        #  - 35.7 deg plane;
+        drifted = drifter(local_time, Q, tail_n[:,:2])
         for ichunk, idrifted in enumerate(
                 iter_tensor_chunks(drifted, chunk_size=batch_size)):
             qblock = raster(*idrifted)
@@ -274,6 +316,7 @@ def runit(device='cpu'):
     return
 
 def fdsim(config, finpath, foutpath):
+    torch.set_num_threads(1)
     global response_path
     global lifetime
     global drtoa
@@ -311,6 +354,9 @@ def fdsim(config, finpath, foutpath):
     response = torch.mean(response.view(-1, response.size(-1)//10, 10), dim=-1)
     # pad additional 80 zeros to left and right in the first dim
     response = nn.functional.pad(response, (0, 0, 80, 80))
+    # add random numbers so that convolution output are not dropped
+    response[:80] = torch.randn(80, response.size(-1)) * 0.01*torch.max(response)
+    response[-80:] = torch.randn(80, response.size(-1)) * 0.01*torch.max(response)
 
     info(f'Response shape after transforming to 0.5us: {response.shape}')
 
