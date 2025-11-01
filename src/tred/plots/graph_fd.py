@@ -34,17 +34,10 @@ input_path = None
 output_path = None
 drtoa = None
 tspace = None
-threshold = None
 event_list = None
 save_waveform = None
-const_recomb = None
 
-uncorr_noise = None
-reset_noise = None
-thres_noise = None
-fluctuate = False
-effq_out_nt = 1
-
+tspace_out = 0.5 * units.us / units.us
 pitch = 4.8 * units.mm / units.cm # values are in units of cm
 nimperpix=10
 pspace = pitch/nimperpix
@@ -52,9 +45,6 @@ velocity = 1.59645 * units.mm/units.us / (units.cm/units.us) # values are in uni
 pspace_rot = 0.47 * units.mm / units.cm
 
 response = None
-
-old_geo_config = True
-
 
 def concatenate_waveforms(sparse_currents, Nt, event_t=0):
     '''
@@ -158,6 +148,7 @@ def runit(device='cpu'):
     '''
     '''
     torch.set_num_threads(1)
+    torch.set_num_interop_threads(1)
     info(f'Starting runit on device {device}.')
     # everything is 2D
     export_pickle = False
@@ -169,7 +160,7 @@ def runit(device='cpu'):
     diffusion = torch.tensor([DL, DT])
     grid_spacing = (pspace, tspace)
     npixpersuper = 32+1-25
-    ntickperslice = 64 # 128*0.16*0.5 = 10.24cm
+    ntickperslice = 64 # tspace == 0.5us
     chunk_shape = (npixpersuper * nimperpix, ntickperslice)
 
     efield = 0.5 # kV/cm
@@ -186,8 +177,7 @@ def runit(device='cpu'):
     chunksum = ChunkSum(chunk_shape)
     chunksum_readout = ChunkSum((1, 120))
 
-    convo = LacedConvo(lacing, o_shape=(32, 512))
-    # convo = LacedConvo(lacing, o_shape=(12, 12, 2048))
+    convo = LacedConvo(lacing, o_shape=(32, 512)) # tspace =0.5us
     chunksum_i = ChunkSum((16, 128), method='chunksum_inplace_v2')
 
     chunksum_i = chunksum_i.to(device)
@@ -216,6 +206,7 @@ def runit(device='cpu'):
     # anode is at x=0, (positive drift for the given dataset)
     # lower corner = (0, )
     # let us assume (x, y, z) are mm and we want to convert things to cm
+    features = features[features[:,0]>=0]
     features[:, 2:5] = features[:, 2:5] * units.mm / units.cm # to cm
     xmin = features[:,2].min()
     ymin = features[:,3].min()
@@ -247,13 +238,15 @@ def runit(device='cpu'):
     tail_clock = torch.stack([features[:,2], rot_clock_tail], dim=1)
 
     info(f"Start test run on {features.size(0)} segments.")
+    batch_size = features.size(0)
+
     for i in range(0, features.size(0), batch_size):
         batch_features = features[i:i+batch_size]
         tail = batch_features[:,2:5]
         tail_p = tail_counterclock[i:i+batch_size]
         tail_n = tail_clock[i:i+batch_size]
         Q = batch_features[:,1] * (-1) # Nelectrons
-        t0 = batch_features[:,0] * units.us / units.us # us
+        t0 = batch_features[:,0] * units.ns / units.us # us
         # global tref from min and offset for the rest
         tref = torch.min(t0)
         local_time = t0 - tref
@@ -264,6 +257,11 @@ def runit(device='cpu'):
         for ichunk, idrifted in enumerate(
                 iter_tensor_chunks(drifted, chunk_size=batch_size)):
             qblock = raster(*idrifted)
+            if fluctuate:
+                qsum = qblock.data.sum(dim=(-1,-2), keepdim=True)
+                variations = torch.randn_like(qblock.data)
+                qblock.data += variations
+                qblock.data /= qsum
 
             signal = chunksum(qblock)
 
@@ -271,12 +269,18 @@ def runit(device='cpu'):
             iblock = convo(signal, response)
             current = chunksum_i(iblock)
             readout_segmetns = chunksum_readout(current)
+            concatenate_waveforms(readout_segmetns, Nt=19200)
 
         # + 35.7 deg plane; rotate on vertical and beam
         drifted = drifter(local_time, Q, tail_p[:,:2])
         for ichunk, idrifted in enumerate(
                 iter_tensor_chunks(drifted, chunk_size=batch_size)):
             qblock = raster(*idrifted)
+            if fluctuate:
+                qsum = qblock.data.sum(dim=(-1,-2), keepdim=True)
+                variations = torch.randn_like(qblock.data)
+                qblock.data += variations
+                qblock.data /= qsum
 
             signal = chunksum(qblock)
 
@@ -284,12 +288,18 @@ def runit(device='cpu'):
             iblock = convo(signal, response)
             current = chunksum_i(iblock)
             readout_segmetns = chunksum_readout(current)
+            concatenate_waveforms(readout_segmetns, Nt=19200)
 
         #  - 35.7 deg plane;
         drifted = drifter(local_time, Q, tail_n[:,:2])
         for ichunk, idrifted in enumerate(
                 iter_tensor_chunks(drifted, chunk_size=batch_size)):
             qblock = raster(*idrifted)
+            if fluctuate:
+                qsum = qblock.data.sum(dim=(-1,-2), keepdim=True)
+                variations = torch.randn_like(qblock.data)
+                qblock.data += variations
+                qblock.data /= qsum
 
             signal = chunksum(qblock)
 
@@ -297,6 +307,7 @@ def runit(device='cpu'):
             iblock = convo(signal, response)
             current = chunksum_i(iblock)
             readout_segmetns = chunksum_readout(current)
+            concatenate_waveforms(readout_segmetns, Nt=19200)
 
     if device == 'cuda':
         torch.cuda.synchronize()
@@ -337,6 +348,8 @@ def fdsim(config, finpath, foutpath):
     lifetime = config.get("lifetime", 2.0) * units.ms / units.us # values are from ms units of us
     save_waveform = config.get("save_waveform", False)
     fluctuate = config.get("fluctuate", False)
+    if fluctuate:
+        torch.manual_seed(10)
 
     # loading response
     if os.path.splitext(response_path)[1] == '.npz':
@@ -370,7 +383,7 @@ def fdsim(config, finpath, foutpath):
     else:
         output_path = foutpath
 
-    with torch.no_grad():
-        runit('cuda')
+    # with torch.no_grad():
+    #     runit('cuda')
     with torch.no_grad():
         runit('cpu')
