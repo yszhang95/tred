@@ -557,6 +557,16 @@ def eval_qmodel(Q, X0, X1, Sigma, x, y, z, qmodel=qline_diff3D, **kwargs):
     return charge
 
 
+def eval_qeff_singlerun(Q, X0, X1, Sigma, x, y, z, kernel, lmn, lmn_prod, rst):
+    charge = eval_qmodel(Q, X0, X1, Sigma, x, y, z)
+    charge = charge.view(Q.size(0), lmn_prod, x.shape[-1], y.shape[-1], z.shape[-1]) # batch, channel, D1, D2, D3
+    charge = torch.nn.functional.pad(charge, pad=(rst[2]-1, rst[2]-1, rst[1]-1, rst[1]-1,
+                                                  rst[0]-1, rst[0]-1), mode="constant", value=0)
+    charge = torch.nn.functional.conv3d(charge, kernel.to(charge.dtype), padding='valid',
+                                        groups=lmn_prod)
+    return torch.sum(charge, dim=[1,]) # 1 for merged l,m,n
+
+
 def eval_qeff(Q, X0, X1, Sigma, offset, shape, origin, grid_spacing, method, npoints, **kwargs):
     '''
     Args:
@@ -621,12 +631,14 @@ def eval_qeff(Q, X0, X1, Sigma, offset, shape, origin, grid_spacing, method, npo
     # FIXME: not friendly to JIT
     # FIXME: only support 3D
     # at most 100 elements per axis by default
-    xyz_limit = kwargs.get('xyz_limit', torch.tensor([100, 100, 100], requires_grad=False,
+    xyz_limit = kwargs.get('xyz_limit', torch.tensor([1000, 1000, 1000], requires_grad=False,
                                                      dtype=index_dtype, device=device))
     shape_limit = kwargs.get('shape_limit', 1000_000) # 1000_000 elements by default
-    xyzchunk = (xyz_limit < shape) & (torch.prod(shape) > shape_limit) # check the axis
+    # xyzchunk = (xyz_limit < shape) & (torch.prod(shape) > shape_limit) # check the axis
+    xyzchunk = xyz_limit < shape
     xyzchunkidx = torch.argmax(shape) # which one to use later
-    usex, usey, usez = xyzchunk & (torch.arange(3, device=device) == xyzchunkidx)
+    # usex, usey, usez = xyzchunk & (torch.arange(3, device=device) == xyzchunkidx)
+    usex, usey, usez = xyzchunk
     xchunk, ychunk, zchunk = xyz_limit[0], xyz_limit[1], xyz_limit[2]
 
     # FIXME: dimensions are hard coded
@@ -649,42 +661,37 @@ def eval_qeff(Q, X0, X1, Sigma, offset, shape, origin, grid_spacing, method, npo
     chunks = [v.chunk(nchunk, dim=0) for v in [Q, X0, X1, Sigma, x, y, z]]
 
     for Qi, X0i, X1i, Sigmai, xi, yi, zi in zip(*chunks):
+        charge = torch.zeros((Qi.size(0), xi.shape[-1]+1,
+                              yi.shape[-1]+1, zi.shape[-1]+1), device=device)
         if usex:
-            qjs = []
             for j in range(0, xi.size(-1), xchunk):
-                qj = eval_qmodel(Qi, X0i, X1i, Sigmai, xi[..., j:j+xchunk], yi, zi)
-                qjs.append(qj)
-            charge = torch.cat(qjs, dim=-3)
+                jend = min(j + xchunk, xi.size(-1))
+                qj = eval_qeff_singlerun(Qi, X0i, X1i, Sigmai,
+                                         xi[..., j:jend], yi, zi,
+                                         kernel, lmn, lmn_prod, rst)
+                indices = torch.arange(j, jend+1, device=device).view(1, -1, 1, 1)
+                charge = charge.scatter_add(dim=-3, index=indices.expand_as(qj), src=qj)
         elif usey:
-            qjs = []
             for j in range(0, yi.size(-1), ychunk):
-                qj = eval_qmodel(Qi, X0i, X1i, Sigmai, xi, yi[..., j:j+ychunk], zi)
-                qjs.append(qj)
-            charge = torch.cat(qjs, dim=-2)
+                jend = min(j + ychunk, yi.size(-1))
+                qj = eval_qeff_singlerun(Qi, X0i, X1i, Sigmai,
+                                         xi, yi[..., j:jend], zi,
+                                         kernel, lmn, lmn_prod, rst)
+                indices = torch.arange(j, jend+1, device=device).view(1, 1, -1, 1)
+                charge = charge.scatter_add(dim=-2, index=indices.expand_as(qj), src=qj)
         elif usez:
-            qjs = []
             for j in range(0, zi.size(-1), zchunk):
-                qj = eval_qmodel(Qi, X0i, X1i, Sigmai, xi, yi, zi[..., j:j+zchunk])
-                qjs.append(qj)
-            charge = torch.cat(qjs, dim=-1)
+                jend = min(j+zchunk, zi.size(-1))
+                qj = eval_qeff_singlerun(Qi, X0i, X1i, Sigmai, xi, yi, zi[..., j:jend],
+                                           kernel, lmn, lmn_prod, rst)
+                # charge[:, ..., j:jend+1] += qj
+                indices = torch.arange(j, jend+1).expand(*charge.shape[:-1], jend+1-j).to(device)
+                charge = charge.scatter_add(dim=-1, index=indices, src=qj)
         else:
-            charge = eval_qmodel(Qi, X0i, X1i, Sigmai, xi, yi, zi, **kwargs)
+            charge = eval_qeff_singlerun(Qi, X0i, X1i, Sigmai, xi, yi, zi,
+                                           kernel, lmn, lmn_prod, rst)
 
-        charge = charge.view(Qi.size(0), lmn_prod, shape[0], shape[1], shape[2]) # batch, channel, D1, D2, D3
-
-        if skippad:
-            # shape = shape - 1 # this line lead to wrong shape in the line above and may be due to wrong synchronization.
-            # need to recompute offset...
-            charge = torch.nn.functional.conv3d(charge, kernel, padding='valid',
-                                                    groups=lmn_prod)
-            offset = offset + 1
-        else:
-            charge = torch.nn.functional.pad(charge, pad=(rst[2]-1, rst[2]-1, rst[1]-1, rst[1]-1,
-                                                          rst[0]-1, rst[0]-1), mode="constant", value=0)
-            charge = torch.nn.functional.conv3d(charge, kernel, padding='valid',
-                                                groups=lmn_prod)
-
-        qeff.append(torch.sum(charge, dim=[1])) # 1 for merged l,m,n
+        qeff.append(charge)
 
     return torch.cat(qeff, dim=0), offset
 
@@ -695,6 +702,8 @@ def compute_qeff(Q, X0, X1, Sigma, n_sigma, origin, grid_spacing, method, npoint
     Return:
         qeff, offset
     '''
+    # det = torch.backends.cudnn.deterministic
+    # torch.backends.cudnn.deterministic = True
     if kwargs.get('recenter', False) or kwargs.get('skippad', False):
         if not kwargs.get('recenter', False):
             kwargs['recenter'] = True
@@ -708,4 +717,5 @@ def compute_qeff(Q, X0, X1, Sigma, n_sigma, origin, grid_spacing, method, npoint
     X1shift = X1 - 1/2.*grid_spacing
     offset, shape = compute_charge_box(X0shift, X1shift, Sigma, n_sigma, origin, grid_spacing, **kwargs)
     qeff, offset = eval_qeff(Q, X0shift, X1shift, Sigma, offset, shape, origin, grid_spacing, method, npoints, **kwargs)
+    # torch.backends.cudnn.deterministic = det
     return qeff, offset

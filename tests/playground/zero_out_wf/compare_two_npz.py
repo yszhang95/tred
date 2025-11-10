@@ -34,7 +34,7 @@ def compare_npz_files(file1, file2, assert_on_difference=True):
         value2 = data2[key]
         if isinstance(value1, np.ndarray) and isinstance(value2, np.ndarray):
             if not _arrays_equal(value1, value2):
-                msg = f"np.ndarray values for key '{key}' are different."
+                msg = f"np.ndarray values for key '{key}' are different. max abs diff = {np.max(np.abs(value1 - value2))}"
                 logging.error(msg)
                 if assert_on_difference:
                     assert _arrays_equal(value1, value2), msg
