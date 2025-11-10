@@ -45,6 +45,7 @@ reset_noise = None
 thres_noise = None
 fluctuate = False
 effq_out_nt = 1
+mem_xyzlimit = [2, 1000, 1000]
 
 pitch = 4.434*units.mm / units.cm # values are in units of cm
 nimperpix=10
@@ -218,9 +219,9 @@ def runit(device='cpu'):
     # convo = LacedConvo(lacing, o_shape=(12, 12, 2048))
     chunksum_i = ChunkSum((4, 4, 128), method='chunksum_inplace_v2')
 
-    chunksum_i = chunksum_i.to('cuda')
-    chunksum_readout = chunksum_readout.to('cuda')
-    chunksum_effq_out = chunksum_effq_out.to('cuda')
+    chunksum_i = chunksum_i.to(device)
+    chunksum_readout = chunksum_readout.to(device)
+    chunksum_effq_out = chunksum_effq_out.to(device)
 
     t1 = time.time()
 
@@ -263,7 +264,7 @@ def runit(device='cpu'):
                           target=tpcdataset.anode, drtoa=drtoa)
         drifter = drifter.to(device=device)
 
-        raster = Raster(tpcdataset.drift*velocity, grid_spacing).to(device=device)
+        raster = Raster(tpcdataset.drift*velocity, grid_spacing, xyz_limit=mem_xyzlimit).to(device=device)
         # raster = raster.to(device=device)
         chunksum = chunksum.to(device=device)
         convo = convo.to(device=device)
@@ -560,6 +561,7 @@ def fullsim(config, finpath, foutpath):
 
     global input_path
     global output_path
+    global mem_xyzlimit
 
     global response
 
@@ -581,6 +583,7 @@ def fullsim(config, finpath, foutpath):
     fluctuate = config.get("fluctuate", False)
     const_recomb = config.get("const_recomb", False)
     effq_out_nt = config.get("effq_out_nt", 1)
+    mem_xyzlimit = config.get("mem_xyzlimit", [10, 1000, 1000])
     old_geo_config = config.get("old_geo_config", True)
 
     # loading response
