@@ -45,7 +45,8 @@ reset_noise = None
 thres_noise = None
 fluctuate = False
 effq_out_nt = 1
-mem_xyzlimit = [2, 1000, 1000]
+mem_xyzlimit = [2, 10000, 10000]
+mem_softlimit = 16*1024
 
 pitch = 4.434*units.mm / units.cm # values are in units of cm
 nimperpix=10
@@ -200,7 +201,7 @@ def runit(device='cpu'):
 
     lacing = torch.tensor([nimperpix, nimperpix, 1])
 
-    batch_size = 4096
+    batch_size = 4096*20
 
     t0 = time.time()
     # create intermediate nodes
@@ -328,14 +329,30 @@ def runit(device='cpu'):
                     torch.cuda.synchronize()
                 t03 = time.time()
 
-                nbchunk = 100
+                # nbchunk = 100
+                nbchunk = 256*2
 
                 current_blocks = []
                 effq_blocks = []
                 Nqblock = 0
+                waveforms[f'Nseg_tpc{tpcdataset.tpc_id}_batch{ibatch}'] = features[0].size(0)
+                info(f'itpc{tpcdataset.tpc_id}, ibatch{ibatch}, Nseg{features[0].size(0)}')
+                print('itpc', tpcdataset.tpc_id, 'ibatch', ibatch, 'seg', features[0].size(0))
+                # continue
                 for ichunk, idrifted in enumerate(
                         iter_tensor_chunks(drifted, chunk_size=nbchunk)):
+                    torch.cuda.synchronize()
+                    torch.cuda.empty_cache()
+                    torch.cuda.reset_peak_memory_stats()
                     qblock = raster(*idrifted)
+                    desired_mem = np.prod(np.array(qblock.data.shape)+1) * 4 * np.prod((2,2,2,)) / 1024**2 * 2
+                    mem = torch.cuda.max_memory_allocated() / 1024**2
+                    # print('-------------------------->', mem, desired_mem, mem/desired_mem)
+                    waveforms[f'desired_mem_tpc{tpcdataset.tpc_id}_batch{ibatch}_ichunk{ichunk}'] = desired_mem
+                    waveforms[f'mem_tpc{tpcdataset.tpc_id}_batch{ibatch}_ichunk{ichunk}'] = mem
+                    waveforms[f'Nseg_tpc{tpcdataset.tpc_id}_batch{ibatch}_ichunk{ichunk}'] = qblock.nbatches
+                    waveforms[f'usexyz_tpc{tpcdataset.tpc_id}_batch{ibatch}_ichunk{ichunk}'] = torch.tensor(mem_xyzlimit).to(device) < qblock.shape
+                    continue
 
                     start = ichunk * nbchunk
                     end = start + idrifted[0].size(0)
@@ -583,7 +600,8 @@ def fullsim(config, finpath, foutpath):
     fluctuate = config.get("fluctuate", False)
     const_recomb = config.get("const_recomb", False)
     effq_out_nt = config.get("effq_out_nt", 1)
-    mem_xyzlimit = config.get("mem_xyzlimit", [10, 1000, 1000])
+    mem_xyzlimit = config.get("mem_xyzlimit", [10000, 10000, 10000])
+    # mem_softlimit = config.get("mem_softlimit", 2024*1024)
     old_geo_config = config.get("old_geo_config", True)
 
     # loading response

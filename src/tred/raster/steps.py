@@ -562,6 +562,7 @@ def eval_qeff_singlerun(Q, X0, X1, Sigma, x, y, z, kernel, lmn, lmn_prod, rst):
     charge = charge.view(Q.size(0), lmn_prod, x.shape[-1], y.shape[-1], z.shape[-1]) # batch, channel, D1, D2, D3
     charge = torch.nn.functional.pad(charge, pad=(rst[2]-1, rst[2]-1, rst[1]-1, rst[1]-1,
                                                   rst[0]-1, rst[0]-1), mode="constant", value=0)
+    torch.cuda.empty_cache()
     charge = torch.nn.functional.conv3d(charge, kernel.to(charge.dtype), padding='valid',
                                         groups=lmn_prod)
     return torch.sum(charge, dim=[1,]) # 1 for merged l,m,n
@@ -658,11 +659,13 @@ def eval_qeff(Q, X0, X1, Sigma, offset, shape, origin, grid_spacing, method, npo
     qeff = []
 
     # FIXME: may update batch dimension in the future
-    chunks = [v.chunk(nchunk, dim=0) for v in [Q, X0, X1, Sigma, x, y, z]]
+    # chunks = [v.chunk(nchunk, dim=0) for v in [Q, X0, X1, Sigma, x, y, z]]
+    chunks = [[Q, ], [X0, ], [X1, ], [Sigma, ], [x, ], [y,], [z,]]
 
     for Qi, X0i, X1i, Sigmai, xi, yi, zi in zip(*chunks):
-        charge = torch.zeros((Qi.size(0), xi.shape[-1]+1,
-                              yi.shape[-1]+1, zi.shape[-1]+1), device=device)
+        if usex or usey or usez:
+            charge = torch.zeros((Qi.size(0), xi.shape[-1]+1,
+                                yi.shape[-1]+1, zi.shape[-1]+1), device=device)
         if usex:
             for j in range(0, xi.size(-1), xchunk):
                 jend = min(j + xchunk, xi.size(-1))
@@ -690,6 +693,7 @@ def eval_qeff(Q, X0, X1, Sigma, offset, shape, origin, grid_spacing, method, npo
         else:
             charge = eval_qeff_singlerun(Qi, X0i, X1i, Sigmai, xi, yi, zi,
                                            kernel, lmn, lmn_prod, rst)
+            print(usex, usey, usez, len(chunks[0]), torch.cuda.max_memory_allocated()/1024**2)
 
         qeff.append(charge)
 

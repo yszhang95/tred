@@ -4,10 +4,11 @@ module_yaml: "/home/yousen/Documents/NDLAr2x2/tred/tests/nd_geometry/ndlar-modul
 tile_yaml: "/home/yousen/Documents/NDLAr2x2/tred/tests/nd_geometry/multi_tile_layout-3.0.40.yaml"
 lifetime: 2.2 # ms
 threshold: 5. # ke
-  # event_list: [1025,]
+event_list: [1025, 1026, 1027]
+# event_list : []
 uncorr_noise: null #ke
 reset_noise: null #ke
 thres_noise: null #ke
 save_waveform: true
 fluctuate: false
-eff_q_out: 20
+mem_xyzlimit: [10000, 10000, 10000]
