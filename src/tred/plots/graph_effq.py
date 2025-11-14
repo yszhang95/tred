@@ -180,9 +180,12 @@ def runit(device='cpu'):
     export_pickle = False
 
     # eventually replace this hard-wire with configuration
-    twindow_max = 12_000 # 12_000 * 50ns = 600us
-    DL = 4.0 * units.cm2/units.s / (units.cm2/units.us) # value are in cm2/us
-    DT = 8.8 * units.cm2/units.s / (units.cm2/units.us) # value are in cm2/us
+    # twindow_max = 12_000 # 12_000 * 50ns = 600us
+    twindow_max = 7_200 # 12_000 * 50ns = 600us
+    # DL = 4.0 * units.cm2/units.s / (units.cm2/units.us) # value are in cm2/us
+    # DT = 8.8 * units.cm2/units.s / (units.cm2/units.us) # value are in cm2/us
+    DL = 6.6270 * units.cm2/units.s / (units.cm2/units.us) # value are in cm2/us
+    DT = 13.2427 * units.cm2/units.s / (units.cm2/units.us) # value are in cm2/us
     diffusion = torch.tensor([DL, DT, DT])
     grid_spacing = (pspace, pspace, tspace)
     # npixpersuper = 16+1-9
@@ -214,8 +217,8 @@ def runit(device='cpu'):
 
     chunksum_readout = ChunkSum((1,1,120))
     # chunksum_readout = ChunkSum((1,1,12000))
-    convo = LacedConvo(lacing, o_shape=(12, 12, 6912))
-    # convo = LacedConvo(lacing, o_shape=(12, 12, 2048))
+    # convo = LacedConvo(lacing, o_shape=(12, 12, 6912))
+    convo = LacedConvo(lacing, o_shape=(12, 12, 512*5))
     chunksum_i = ChunkSum((4, 4, 128), method='chunksum_inplace_v2')
 
     chunksum_i = chunksum_i.to('cuda')
@@ -321,7 +324,12 @@ def runit(device='cpu'):
 
                 # dsigma, dtime, dcharge, dtail, dhead
                 drifted = drifter(local_time, charge, tail, head)
+                drifted = list(d for d in drifted)
                 # dsigma, dtime, dcharge, dtail, dhead = drifter(local_time, charge, tail, head)
+                drifted[0] = torch.clamp(drifted[0], min=torch.tensor([[pitch/6/2, pitch/6/2, tspace*abs(velocity)/2]]).to(device))
+                drifted[0] = drifted[0].to(drifted[2].dtype)
+                # twindow_max = (float(global_tref[1]) + torch.max(drifted[1] + float(drtoa)/abs(float(velocity))) + 20.) // tspace
+                # twindow_max = int(twindow_max.item() // 120) *120 + 120
 
                 if device == 'cuda':
                     torch.cuda.synchronize()
@@ -399,7 +407,19 @@ def runit(device='cpu'):
                          f'elapsed {t07 - stime} sec on {device}. Skipped empty batch.')
                     continue
 
+                if currents.nbatches == 0 :
+                    info(f'itpc{itpc}, tpc label {tpcdataset.tpc_id}, batch label {ibatch}, '
+                         f'N segments {len(features[0])}, '
+                         f'N qblock {Nqblock}, '
+                         f'no valid currents, '
+                         f'elapsed {t07 - stime} sec on {device}. Skipped empty batch.')
+                    continue
                 currents = chunksum_readout(currents)
+                currents_d = currents.data.cpu()
+                currents_l = currents.location.cpu()
+                currents_l_mask = currents_l[:,-1] > (global_tref[1].item() // tspace)
+                currents_d = currents_d[currents_l_mask]
+                currents_l = currents_l[currents_l_mask]
                 currents = concatenate_waveforms(currents, twindow_max, event_t=global_tref[1]//tspace)
                 currents.data = currents.data * tspace / 1E3 # to ke-
                 current_mask = (currents.location[:,[0,1]] <= inds_range) & (currents.location[:,[0,1]] >= 0)
@@ -444,8 +464,8 @@ def runit(device='cpu'):
                       f'elapsed {t07 - stime} sec on {device}.')
 
                 if save_waveform and currents is not None:
-                    waveforms[f'current_tpc{tpcdataset.tpc_id}_batch{ibatch}'] = currents.data.cpu().numpy()
-                    waveforms[f'current_tpc{tpcdataset.tpc_id}_batch{ibatch}_location'] = currents.location.cpu().numpy()
+                    waveforms[f'current_tpc{tpcdataset.tpc_id}_batch{ibatch}'] = currents_d
+                    waveforms[f'current_tpc{tpcdataset.tpc_id}_batch{ibatch}_location'] = currents_l
 
                 # FIXME: global time offset
                 qbl = effq_blocks.location.to('cpu')
@@ -561,6 +581,10 @@ def fullsim(config, finpath, foutpath):
     global input_path
     global output_path
 
+    global pspace
+    global nimperpix
+    global pitch
+
     global response
 
     with open(config, "r") as fconfig:
@@ -586,15 +610,16 @@ def fullsim(config, finpath, foutpath):
     # loading response
     if os.path.splitext(response_path)[1] == '.npz':
         fres = np.load(response_path)
-        response = ndlarsim(fres['response'])
         tspace = fres['time_tick']  * units.us / units.us # us
         drtoa = fres['drift_length'] * units.cm / units.cm # cm
         bin_size = fres["bin_size"] * units.cm / units.cm # cm
         warning(f'drtoa, tspace, will be overridden to {drtoa} cm, {tspace} us.')
-        if abs(bin_size - pspace) > 1E-4:
-            warning(f'Please manually check pspace. pspace in response file is {fres["bin_size"]} cm. pspace in config.')
+        pspace = bin_size
+        nimperpix = int(fres['npath'])
+        pitch = pspace * nimperpix
+        response = ndlarsim(fres['response'], nd_response_shape=fres['response'].shape[:2], nd_nimp=nimperpix)
     else:
-        response = ndlarsim(response_path)
+        raise ValueError("Response must be in .npz file")
 
     adc_hold_delay = config.get("adc_hold_delay", 1.5) * units.us / units.us / (tspace * units.us / units.us)
     adc_hold_delay = int(round(adc_hold_delay))
