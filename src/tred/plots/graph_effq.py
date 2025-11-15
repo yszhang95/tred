@@ -60,6 +60,8 @@ response = None
 
 old_geo_config = True
 
+convo_o_shape = None
+
 def load_threshold(threshold):
     '''
     A map of io group from data to MC should be done.
@@ -217,8 +219,7 @@ def runit(device='cpu'):
 
     chunksum_readout = ChunkSum((1,1,120))
     # chunksum_readout = ChunkSum((1,1,12000))
-    convo = LacedConvo(lacing, o_shape=(12, 12, 6912))
-    # convo = LacedConvo(lacing, o_shape=(12, 12, 512*5))
+    convo = LacedConvo(lacing, o_shape=convo_o_shape)
     chunksum_i = ChunkSum((4, 4, 128), method='chunksum_inplace_v2')
 
     chunksum_i = chunksum_i.to('cuda')
@@ -597,6 +598,8 @@ def fullsim(config, finpath, foutpath):
 
     global response
 
+    global convo_o_shape
+
     with open(config, "r") as fconfig:
         config = yaml.safe_load(fconfig)
 
@@ -616,6 +619,7 @@ def fullsim(config, finpath, foutpath):
     const_recomb = config.get("const_recomb", False)
     effq_out_nt = config.get("effq_out_nt", 1)
     old_geo_config = config.get("old_geo_config", True)
+    convo_o_shape = config.get("convo_o_shape", (4, 4, 512))
 
     # loading response
     if os.path.splitext(response_path)[1] == '.npz':
