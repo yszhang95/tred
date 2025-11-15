@@ -217,8 +217,8 @@ def runit(device='cpu'):
 
     chunksum_readout = ChunkSum((1,1,120))
     # chunksum_readout = ChunkSum((1,1,12000))
-    # convo = LacedConvo(lacing, o_shape=(12, 12, 6912))
-    convo = LacedConvo(lacing, o_shape=(12, 12, 512*5))
+    convo = LacedConvo(lacing, o_shape=(12, 12, 6912))
+    # convo = LacedConvo(lacing, o_shape=(12, 12, 512*5))
     chunksum_i = ChunkSum((4, 4, 128), method='chunksum_inplace_v2')
 
     chunksum_i = chunksum_i.to('cuda')
@@ -253,6 +253,7 @@ def runit(device='cpu'):
 
     thresholds = load_threshold(threshold)
 
+    info(f"Size of convo output is {convo._o_shape}")
     for itpc, tpcdataset in enumerate(tpcs):
         info(f"Drift direction: {tpcdataset.drift} in tpcid {tpcdataset.tpc_id}.")
         info(f"TPC lower corner: {tpcdataset.lower_left_corner} in itpc {tpcdataset.tpc_id}.")
@@ -414,6 +415,15 @@ def runit(device='cpu'):
                          f'no valid currents, '
                          f'elapsed {t07 - stime} sec on {device}. Skipped empty batch.')
                     continue
+
+                # temp benchmark
+                if True:
+                    info(f'itpc{itpc}, tpc label {tpcdataset.tpc_id}, batch label {ibatch}, '
+                         f'N segments {len(features[0])}, '
+                         f'N qblock {Nqblock}, '
+                         f'elapsed {t07 - stime} sec on {device}.')
+                    continue
+
                 currents = chunksum_readout(currents)
                 currents_d = currents.data.cpu()
                 currents_l = currents.location.cpu()
@@ -618,6 +628,7 @@ def fullsim(config, finpath, foutpath):
         nimperpix = int(fres['npath'])
         pitch = pspace * nimperpix
         response = ndlarsim(fres['response'], nd_response_shape=fres['response'].shape[:2], nd_nimp=nimperpix)
+        info(f"Response array is in a shape of {response.shape}")
     else:
         raise ValueError("Response must be in .npz file")
 
