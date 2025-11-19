@@ -40,6 +40,8 @@ event_list = None
 save_waveform = None
 const_recomb = None
 
+npoints = None
+
 uncorr_noise = None
 reset_noise = None
 thres_noise = None
@@ -180,8 +182,7 @@ def runit(device='cpu'):
     export_pickle = False
 
     # eventually replace this hard-wire with configuration
-    # twindow_max = 12_000 # 12_000 * 50ns = 600us
-    twindow_max = 7_200 # 12_000 * 50ns = 600us
+    twindow_max = 12_000 - 120*15 # 12_000 * 50ns = 600us
     # DL = 4.0 * units.cm2/units.s / (units.cm2/units.us) # value are in cm2/us
     # DT = 8.8 * units.cm2/units.s / (units.cm2/units.us) # value are in cm2/us
     DL = 6.6270 * units.cm2/units.s / (units.cm2/units.us) # value are in cm2/us
@@ -221,9 +222,9 @@ def runit(device='cpu'):
     convo = LacedConvo(lacing, o_shape=(12, 12, 512*5))
     chunksum_i = ChunkSum((4, 4, 128), method='chunksum_inplace_v2')
 
-    chunksum_i = chunksum_i.to('cuda')
-    chunksum_readout = chunksum_readout.to('cuda')
-    chunksum_effq_out = chunksum_effq_out.to('cuda')
+    chunksum_i = chunksum_i.to(device)
+    chunksum_readout = chunksum_readout.to(device)
+    chunksum_effq_out = chunksum_effq_out.to(device)
 
     t1 = time.time()
 
@@ -266,7 +267,7 @@ def runit(device='cpu'):
                           target=tpcdataset.anode, drtoa=drtoa)
         drifter = drifter.to(device=device)
 
-        raster = Raster(tpcdataset.drift*velocity, grid_spacing).to(device=device)
+        raster = Raster(tpcdataset.drift*velocity, grid_spacing, npoints=npoints).to(device=device)
         # raster = raster.to(device=device)
         chunksum = chunksum.to(device=device)
         convo = convo.to(device=device)
@@ -326,7 +327,8 @@ def runit(device='cpu'):
                 drifted = drifter(local_time, charge, tail, head)
                 drifted = list(d for d in drifted)
                 # dsigma, dtime, dcharge, dtail, dhead = drifter(local_time, charge, tail, head)
-                drifted[0] = torch.clamp(drifted[0], min=torch.tensor([[pitch/6/2, pitch/6/2, tspace*abs(velocity)/2]]).to(device))
+                # drifted[0] = torch.clamp(drifted[0], min=torch.tensor([[pitch/6/2, pitch/6/2, tspace*abs(velocity)/2]]).to(device))
+                drifted[0] = torch.clamp(drifted[0], min=torch.tensor([[tspace*abs(velocity)/2, pitch/6/2, pitch/6/2, ]]).to(device))
                 drifted[0] = drifted[0].to(drifted[2].dtype)
                 # twindow_max = (float(global_tref[1]) + torch.max(drifted[1] + float(drtoa)/abs(float(velocity))) + 20.) // tspace
                 # twindow_max = int(twindow_max.item() // 120) *120 + 120
@@ -576,6 +578,8 @@ def fullsim(config, finpath, foutpath):
 
     global const_recomb
 
+    global npoints
+
     global old_geo_config
 
     global input_path
@@ -606,6 +610,7 @@ def fullsim(config, finpath, foutpath):
     const_recomb = config.get("const_recomb", False)
     effq_out_nt = config.get("effq_out_nt", 1)
     old_geo_config = config.get("old_geo_config", True)
+    npoints = config.get('npoints', (2, 2, 2))
 
     # loading response
     if os.path.splitext(response_path)[1] == '.npz':

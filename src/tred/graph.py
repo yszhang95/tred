@@ -48,7 +48,8 @@ def raster_steps(*args,**kwds):
     return compute_qeff(grid_spacing=args[0], X0=args[1], X1=args[2],
                         Sigma=args[3], Q=args[4],
                         n_sigma=(kwds['nsigma'], kwds['nsigma'], kwds['nsigma']),
-                        origin=(0,0,0), method='gauss_legendre', npoints=(2,2,2))
+                        origin=(0,0,0), method='gauss_legendre',
+                        npoints=kwds.get('npoints', (2, 2, 2)))
 
 def param(thing, dtype=torch.float32):
     if isinstance(thing, torch.Tensor):
@@ -214,7 +215,7 @@ class Raster(nn.Module):
     '''
     Raster depos or steps.
     '''
-    def __init__(self, velocity, grid_spacing, pdims=(1,2), tdim=-1, nsigma=3.0):
+    def __init__(self, velocity, grid_spacing, pdims=(1,2), tdim=-1, nsigma=3.0, npoints=(2,2,2)):
         '''
         - velocity :: signed velocity for computing time difference between tail and head
         - pdims :: the N-1 dimensions for transverse pitch indexing into input points.
@@ -233,6 +234,7 @@ class Raster(nn.Module):
         constant(self, 'velocity', velocity)
         constant(self, 'grid_spacing', grid_spacing)
         constant(self, 'nsigma', nsigma)
+        self._npoints = npoints
 
         self._pdims = pdims or ()
         self._tdim = tdim if tdim>=0 else len(self._pdims) + 1 + tdim
@@ -304,7 +306,7 @@ class Raster(nn.Module):
         head = self._transform(head, dt+time)
         sigma = self._transform(sigma, None)
         sigma[:, self._tdim] = sigma[:, self._tdim] / torch.abs(self.velocity) # distance to time
-        rasters, offsets = raster_steps(self.grid_spacing, tail, head, sigma, charge, nsigma=self.nsigma)
+        rasters, offsets = raster_steps(self.grid_spacing, tail, head, sigma, charge, nsigma=self.nsigma, npoints=self._npoints)
 
         return Block(location = offsets, data=rasters)
 

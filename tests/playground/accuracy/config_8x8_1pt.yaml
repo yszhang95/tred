@@ -1,0 +1,13 @@
+response_path: "/home/yousen/Public/ndlar_shared/data/responses/TestsTredPaper/fr_4p4pitch_3.8pix_nogrid_8pathsperpixel/fr_4p4pitch_3.8pix_nogrid_8pathsperpixel.npz"
+module_yaml: "/home/yousen/Documents/NDLAr2x2/tred/tests/nd_geometry/ndlar-module.yaml"
+tile_yaml: "/home/yousen/Documents/NDLAr2x2/tred/tests/nd_geometry/multi_tile_layout-3.0.40.yaml"
+lifetime: 2.2 # ms
+threshold: 5. # ke
+event_list: [1003,]
+uncorr_noise: null #ke
+reset_noise: null #ke
+thres_noise: null #ke
+save_waveform: true
+fluctuate: false
+effq_out_nt: 10
+npoints: [1, 1, 2]
