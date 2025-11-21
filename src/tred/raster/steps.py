@@ -8,7 +8,7 @@ import logging
 
 logger = logging.getLogger('tred.raster.steps')
 
-def to_tensor(source, device, dtype=torch.float32):
+def to_tensor(source, device, dtype=torch.float64):
     '''Aliasing or create a tensor if not existing.
     Result tensor will be moved to the device
     '''
@@ -31,15 +31,15 @@ def compute_coordinate(idxs: Tensor, origin, grid_spacing, device='cpu'):
     return
         origin + spacing * idx
     '''
-    fidxs = to_tensor(idxs, device=device, dtype=torch.float32)
+    fidxs = to_tensor(idxs, device=device, dtype=torch.float64)
     assert torch.any(fidxs <= MAX_INDEX), 'Overflow of index_dtype'
     assert torch.any(fidxs >= MIN_INDEX), 'Underflow of index_dtype'
     idxs = to_tensor(idxs, device=device, dtype=index_dtype)
 
     if idxs.dim() == 1:
         idxs = idxs.unsqueeze(0)
-    origin = to_tensor(origin, device=idxs.device, dtype=torch.float32)
-    grid_spacing = to_tensor(grid_spacing, device=device, dtype=torch.float32)
+    origin = to_tensor(origin, device=idxs.device, dtype=torch.float64)
+    grid_spacing = to_tensor(grid_spacing, device=device, dtype=torch.float64)
     return origin.unsqueeze(0) + idxs * grid_spacing.unsqueeze(0)
 
 
@@ -73,7 +73,7 @@ def compute_bounds_X0X1(X0X1, Sigma, n_sigma):
     return :
         bounds: (N, vdim, 2)
         '''
-    n_sigma = to_tensor(n_sigma, dtype=torch.float32, device=Sigma.device)
+    n_sigma = to_tensor(n_sigma, dtype=torch.float64, device=Sigma.device)
     offset = (n_sigma.unsqueeze(0) * Sigma) # (N, vdim)
     min_limits = torch.min(X0X1, dim=2).values - offset # torch.min(shape(N,vdim,2)) --> shape(N, vdim)
     max_limits = torch.max(X0X1, dim=2).values + offset
@@ -101,7 +101,7 @@ def compute_bounds_X0_X1(X0, X1, Sigma, n_sigma):
     return:
         (N, vdim, 2) float
     '''
-    n_sigma = to_tensor(n_sigma, dtype=torch.float32, device=Sigma.device)
+    n_sigma = to_tensor(n_sigma, dtype=torch.float64, device=Sigma.device)
     combined = _stack_X0X1(X0, X1)
     bounds = compute_bounds_X0X1(combined, Sigma, n_sigma)
     return bounds
@@ -317,7 +317,7 @@ def _create_w1d_GL(npt, spacing, device='cpu'):
         a tensor of weights of n-point GL quadrature after correcting for length of intervals
     '''
     _, weights = roots_legendre(npt)
-    w1d = torch.tensor(weights, dtype=torch.float32, requires_grad=False, device=device) * spacing/2
+    w1d = torch.tensor(weights, dtype=torch.float64, requires_grad=False, device=device) * spacing/2
     return w1d
 
 def _create_w1ds(method, npoints, grid_spacing, device='cpu'):
@@ -374,9 +374,9 @@ def _create_u1d_GL(npt, device='cpu'):
         a tensor of coefficients for interpolations at roots of npt-order GL polynomials
     '''
     roots, _ = roots_legendre(npt)
-    roots = torch.tensor(roots, dtype=torch.float32, requires_grad=False, device=device)
+    roots = torch.tensor(roots, dtype=torch.float64, requires_grad=False, device=device)
     u = (roots+1)/2
-    u1d = torch.empty([npt, 2], dtype=torch.float32, requires_grad=False, device=device)
+    u1d = torch.empty([npt, 2], dtype=torch.float64, requires_grad=False, device=device)
     u1d[:, 0] = 1-u
     u1d[:, 1] = u
     return u1d

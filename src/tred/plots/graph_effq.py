@@ -304,6 +304,8 @@ def runit(device='cpu'):
                 t00 = time.time()
                 features = [f.to(device=device) for f in features]
 
+                features[0] = features[0].to(torch.float64)
+
                 if device == 'cuda':
                     torch.cuda.synchronize()
                 t01 = time.time()
@@ -625,6 +627,8 @@ def fullsim(config, finpath, foutpath):
         response = ndlarsim(fres['response'], nd_response_shape=fres['response'].shape[:2], nd_nimp=nimperpix)
     else:
         raise ValueError("Response must be in .npz file")
+
+    response = response.to(torch.float64)
 
     adc_hold_delay = config.get("adc_hold_delay", 1.5) * units.us / units.us / (tspace * units.us / units.us)
     adc_hold_delay = int(round(adc_hold_delay))
