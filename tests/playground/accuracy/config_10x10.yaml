@@ -9,4 +9,6 @@ reset_noise: null #ke
 thres_noise: null #ke
 save_waveform: true
 fluctuate: false
+
+min_diff_width: [0.05, 0.2, 0.2]
 effq_out_nt: 10

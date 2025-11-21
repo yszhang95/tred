@@ -32,8 +32,8 @@ def compute_coordinate(idxs: Tensor, origin, grid_spacing, device='cpu'):
         origin + spacing * idx
     '''
     fidxs = to_tensor(idxs, device=device, dtype=torch.float64)
-    assert torch.any(fidxs <= MAX_INDEX), 'Overflow of index_dtype'
-    assert torch.any(fidxs >= MIN_INDEX), 'Underflow of index_dtype'
+    assert torch.all(fidxs <= MAX_INDEX), 'Overflow of index_dtype'
+    assert torch.all(fidxs >= MIN_INDEX), 'Underflow of index_dtype'
     idxs = to_tensor(idxs, device=device, dtype=index_dtype)
 
     if idxs.dim() == 1:
@@ -60,8 +60,8 @@ def compute_index(coords, origin, grid_spacing, device='cpu'):
     grid_spacing = to_tensor(grid_spacing, device)
     idxs = (coords - origin.unsqueeze(0)) / grid_spacing.unsqueeze(0)
 
-    assert torch.any(idxs <= MAX_INDEX), 'Overflow of index_dtype'
-    assert torch.any(idxs >= MIN_INDEX), 'Underflow of index_dtype'
+    assert torch.all(idxs <= MAX_INDEX), f'Overflow of index_dtype {MAX_INDEX}'
+    assert torch.all(idxs >= MIN_INDEX), 'Underflow of index_dtype'
     return idxs.floor().to(index_dtype)
 
 
