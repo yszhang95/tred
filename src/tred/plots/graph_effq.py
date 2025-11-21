@@ -41,6 +41,7 @@ save_waveform = None
 const_recomb = None
 
 npoints = None
+min_diff_width = None
 
 uncorr_noise = None
 reset_noise = None
@@ -329,11 +330,8 @@ def runit(device='cpu'):
                 drifted = drifter(local_time, charge, tail, head)
                 drifted = list(d for d in drifted)
                 # dsigma, dtime, dcharge, dtail, dhead = drifter(local_time, charge, tail, head)
-                # drifted[0] = torch.clamp(drifted[0], min=torch.tensor([[pitch/6/2, pitch/6/2, tspace*abs(velocity)/2]]).to(device))
-                drifted[0] = torch.clamp(drifted[0], min=torch.tensor([[tspace*abs(velocity)/2, pitch/6/2, pitch/6/2, ]]).to(device))
+                drifted[0] = torch.clamp(drifted[0], min=torch.tensor(min_diff_width).view(1,3).to(torch.float64).to(device)).to(device)
                 drifted[0] = drifted[0].to(drifted[2].dtype)
-                # twindow_max = (float(global_tref[1]) + torch.max(drifted[1] + float(drtoa)/abs(float(velocity))) + 20.) // tspace
-                # twindow_max = int(twindow_max.item() // 120) *120 + 120
 
                 if device == 'cuda':
                     torch.cuda.synchronize()
@@ -581,6 +579,7 @@ def fullsim(config, finpath, foutpath):
     global const_recomb
 
     global npoints
+    global min_diff_width
 
     global old_geo_config
 
@@ -613,6 +612,7 @@ def fullsim(config, finpath, foutpath):
     effq_out_nt = config.get("effq_out_nt", 1)
     old_geo_config = config.get("old_geo_config", True)
     npoints = config.get('npoints', (2, 2, 2))
+    min_diff_width = config.get('min_diff_width')
 
     # loading response
     if os.path.splitext(response_path)[1] == '.npz':
