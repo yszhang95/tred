@@ -771,6 +771,50 @@ np.savez('charge_records.npz', **charge_records)
 [[file:./.ob-jupyter/c00a3a70bae4703fcf1df7e7f63838609ee95a1f.png]]
 [[file:./.ob-jupyter/a2dad2cb7eaa5676a104016fbab9a3ecd0ed2926.png]]
 :END:
+
+*** Charge per pixel level from quadrature rule
+#+begin_src jupyter-python
+  import matplotlib.pyplot as plt
+  import numpy as np
+
+  fv1 = np.load("charge_records.npz")
+  fv2 = np.load("charge_records_v2.npz")
+
+  qdiffs = {
+      'grid_point' : {},
+      'interval' : {},
+  }
+
+  ref_key = '4x4x2_10x10'
+  for k in fv1.keys():
+      qdiffs['interval'][k] = fv2[k] - fv2[ref_key]
+      qdiffs['grid_point'][k] = fv1[k] - fv1[ref_key]
+
+  dmin0 = min([np.min(qd) for qd in qdiffs['interval'].values()]) - 0.1
+  dmax0 = max([np.max(qd) for qd in qdiffs['interval'].values()]) + 0.1
+
+  for k in fv1.keys():
+      fig, ax = plt.subplots()
+      ax.hist(qdiffs['interval'][k], histtype='step', range=(dmin0, dmax0), bins=100, label=f'{k}_interval')
+      # ax.set_ylim(1E-12, 1)
+      ax.set_yscale('log')
+      ax.legend()
+      fig.savefig(f'qdiff_pixel_interval_{k}.png')
+#+end_src
+
+#+RESULTS:
+:RESULTS:
+[[file:./.ob-jupyter/91bbe35c90936214f1ae3e6940fa6249f1ad7bda.png]]
+[[file:./.ob-jupyter/cd99b8bb48953786c8fc6bb90eeaa4731f5bda3d.png]]
+[[file:./.ob-jupyter/8ef5133760c0c473ffc590fda5496d8e0beb4a5b.png]]
+[[file:./.ob-jupyter/013ceef0a8882819a45ecf8f2615785ef4ca4047.png]]
+[[file:./.ob-jupyter/2f05ccbd38a9ee2c5797399a47dd338ce4b7bc87.png]]
+[[file:./.ob-jupyter/f63048aeafe2e89d87a15a59fb2d8975a4c21e0a.png]]
+[[file:./.ob-jupyter/ed1579fcd2f58943778ef35496a8d79933c0db96.png]]
+[[file:./.ob-jupyter/0dd67c61462d50fc88ec5f6be003871ef02d335e.png]]
+[[file:./.ob-jupyter/4cfebec1566ff90b6286fbb52c4bc70147fbd49b.png]]
+:END:
+
 * DUMMY source block
 #+begin_src jupyter-python
 #+end_src
