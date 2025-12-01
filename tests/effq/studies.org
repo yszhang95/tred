@@ -1,0 +1,531 @@
+#+PROPERTY: header-args:jupyter-python :mkdirp yes :tangle studies.py
+#+HTML_HEAD_EXTRA: <style>
+#+HTML_HEAD_EXTRA: @media (prefers-color-scheme: dark) {
+#+HTML_HEAD_EXTRA:   body {
+#+HTML_HEAD_EXTRA:     background-color: #1E1E1E !important;
+#+HTML_HEAD_EXTRA:     color: #EEE !important;
+#+HTML_HEAD_EXTRA:   }
+#+HTML_HEAD_EXTRA:   pre, code, .org-src-container {
+#+HTML_HEAD_EXTRA:     background-color: #2D2D2D !important;
+#+HTML_HEAD_EXTRA:     color: #DDD !important;
+#+HTML_HEAD_EXTRA:     border: 1px solid #444 !important;
+#+HTML_HEAD_EXTRA:   }
+#+HTML_HEAD_EXTRA:   h1, h2, h3, h4, h5, h6 {
+#+HTML_HEAD_EXTRA:     color: #88ccff !important;
+#+HTML_HEAD_EXTRA:   }
+#+HTML_HEAD_EXTRA:   a {
+#+HTML_HEAD_EXTRA:     color: #55aaEE !important;
+#+HTML_HEAD_EXTRA:   }
+#+HTML_HEAD_EXTRA:   /* Invert images in dark mode (optional - remove if you dislike it) */
+#+HTML_HEAD_EXTRA:   img {
+#+HTML_HEAD_EXTRA:     filter: brightness(0.8);
+#+HTML_HEAD_EXTRA:   }
+#+HTML_HEAD_EXTRA: }
+#+HTML_HEAD_EXTRA: </style>
+
+* Studies of effective charge
+** Toy example for one hypothetial charge segment
+Import necessary packages,
+#+begin_src jupyter-python :result output
+  import tred
+  import tred.raster.steps as ts
+#+end_src
+
+#+RESULTS:
+
+#+begin_src jupyter-python
+  import torch
+  import matplotlib.pyplot as plt
+#+end_src
+
+#+RESULTS:
+
+Let us introduce a new version of charge calculation. We drop the
+support for trilinear interpolation from field responses.  All charges
+here are assigned to the lower corner of each interval, instead of
+using =convolution=.
+#+begin_src jupyter-python :results no
+  from tred.raster.steps import create_wu_block, create_node1ds, qline_diff3D, create_w_block
+  def eval_q(Q, X0, X1, Sigma, offset, shape, origin, grid_spacing, method, npoints):
+        '''
+        Args:
+            Q (Nsteps, )
+            X0 (Nsteps, 3)
+            X1 (Nsteps, 3)
+            Sigma (Nsteps, 3)
+            offset (Nsteps, vdim)
+            shape (vdim,)
+            origin (vdim,)
+            grid_spacing (vdim,)
+            npoints (vdim, )
+        Return:
+            effective charge
+
+        FIXME:
+           w block, u blocks supports vdim = any number,
+           offset, shape, origin, they also support vdim = any number,
+           Q, X0, X1, Sigma, their vdim is always 3.
+        FIXME:
+           vdim of npoints in principle can be different from offset, shape, origin, spacing.
+           Now it is fixed to the same as others.
+        '''
+        if not isinstance(Q, torch.Tensor):
+            raise ValueError('Q must be a torch.Tensor')
+        device = Q.device
+
+        kernel = create_w_block(method, npoints, grid_spacing, device)
+
+        x, y, z = create_node1ds(method, npoints, origin, grid_spacing, offset, shape, device)
+
+        charge = qline_diff3D(Q, X0, X1, Sigma,
+                              x[:, :, None, None, :, None, None], # (Nsteps, L, 1, 1, I-1, 1, 1)
+                              y[:, None, :, None, None, :, None], # (Nsteps, 1, M, 1, 1, J-1, 1)
+                              z[:, None, None, :, None, None, :]) # (Nsteps, 1, 1, N, 1, 1, K-1)      print(charge.shape)
+        charge = charge * kernel[None,:,:,:,None,None,None]
+
+        charge = charge.sum(dim=(1,2,3))
+
+        return charge
+
+#+end_src
+
+#+RESULTS:
+Basic setup of one example,
+#+begin_src jupyter-python
+  origin = torch.as_tensor((0, 0, 0))
+  Q = torch.tensor([[1000.,]])
+  offset = torch.as_tensor((0, 0, 0)).view(1, -1)
+  X0 = torch.as_tensor((2.5, 3, 3)).view(1, -1)
+  X1 = torch.as_tensor((3.5, 3, 3)).view(1, -1)
+  Sigma = torch.as_tensor((0.3, 0.3, 0.3)).view(1, -1)
+  pitch = 3
+  q0shape = torch.as_tensor((20, 20, 20))
+  q0spacing = torch.tensor([pitch/10, pitch/10, pitch/10])
+  q1shape = torch.as_tensor((12, 12, 12))
+  q1spacing = torch.tensor([pitch/6, pitch/6, pitch/6])
+
+  print('range', q0shape * q0spacing, q1shape * q1spacing)
+  assert torch.allclose(q0shape * q0spacing, q1shape * q1spacing, atol=1E-6, rtol=1E-6)
+
+  xyzrange = q0shape * q0spacing
+  dims = {'x': 0, 'y': 1, 'z': 2}
+  dim = dims['x']
+
+  exclude_dims = [i for i in set([0,1,2]) - set([dim])]
+
+  x0axis_noend = torch.arange(0, xyzrange[dim], q0spacing[dim]).tolist()
+  x1axis_noend = torch.arange(0, xyzrange[dim], q1spacing[dim]).tolist()
+
+  x0axis_end = x0axis_noend + [xyzrange[dim].item(),]
+  x1axis_end = x1axis_noend + [xyzrange[dim].item(),]
+
+#+end_src
+
+#+RESULTS:
+: range tensor([6., 6., 6.]) tensor([6., 6., 6.])
+
+#+begin_src jupyter-python :results output
+  q0 = eval_q(Q, X0, X1, Sigma,
+              offset=offset,
+              shape=q0shape,
+              origin=origin,
+              grid_spacing=q0spacing,
+              method='gauss_legendre',
+              npoints=(2, 2, 2))
+  q1 = eval_q(Q, X0, X1, Sigma,
+              offset=offset,
+              shape=q1shape,
+              origin=origin,
+              grid_spacing=q1spacing,
+              method='gauss_legendre',
+              npoints=(2, 2, 2))
+  print(q0.sum(), q1.sum(), 'sum q0 - sum q1', q0.sum() - q1.sum())
+  print(q0.shape, q1.shape)
+
+  plt.plot(x0axis_noend, torch.squeeze(q0.sum(dim=exclude_dims) /q0spacing[dim]).tolist(), label='q0')
+  plt.plot(x1axis_noend, torch.squeeze(q1.sum(dim=exclude_dims) /q1spacing[dim]).tolist(), label='q1')
+  plt.legend()
+#+end_src
+
+#+RESULTS:
+:RESULTS:
+: tensor(999.9999, dtype=torch.float64) tensor(1000.7893, dtype=torch.float64) sum q0 - sum q1 tensor(-0.7895, dtype=torch.float64)
+: torch.Size([1, 20, 20, 20]) torch.Size([1, 12, 12, 12])
+[[file:./.ob-jupyter/1bdded71f07b66fc4037fc3cd93bf6b6d1238c02.png]]
+:END:
+
+#+begin_src jupyter-python :results output
+  q0, _ = ts.eval_qeff(Q, X0, X1, Sigma,
+                       offset=offset,
+                       shape=q0shape,
+                       origin=origin,
+                       grid_spacing=q0spacing,
+                       method='gauss_legendre',
+                       npoints=(2, 2, 2),
+                       )
+  q1, _ = ts.eval_qeff(Q, X0, X1, Sigma,
+                       offset=offset,
+                       shape=q1shape,
+                       origin=origin,
+                       grid_spacing=q1spacing,
+                       method='gauss_legendre',
+                       npoints=(2, 2, 2),
+                       )
+  print(q0.sum(), q1.sum(), 'sum q0 - sum q1', q0.sum() - q1.sum())
+  print(q0.shape, q1.shape)
+
+  plt.plot(x0axis_end, torch.squeeze(q0.sum(dim=exclude_dims) / q0spacing[dim]).tolist(), label='q0')
+  plt.plot(x1axis_end, torch.squeeze(q1.sum(dim=exclude_dims) / q1spacing[dim]).tolist(), label='q1')
+  plt.legend()
+
+#+end_src
+
+#+RESULTS:
+:RESULTS:
+: tensor(999.9999, dtype=torch.float64) tensor(1000.7893, dtype=torch.float64) sum q0 - sum q1 tensor(-0.7895, dtype=torch.float64)
+: torch.Size([1, 21, 21, 21]) torch.Size([1, 13, 13, 13])
+[[file:./.ob-jupyter/e6252008028cd0f0bb99d709e9bb45dd94407357.png]]
+:END:
+** Another test using small segments
+#+begin_src jupyter-python
+  origin = torch.as_tensor((0, 0, 0))
+  Q = torch.tensor([[1000.,]])
+  offset = torch.as_tensor((0, 0, 0)).view(1, -1)
+  X0 = torch.as_tensor((3-1E-3, 3, 3)).view(1, -1)
+  X1 = torch.as_tensor((3+1E-3, 3, 3)).view(1, -1)
+  Sigma = torch.as_tensor((0.3, 0.3, 0.3)).view(1, -1)
+  pitch = 3
+  q0shape = torch.as_tensor((20, 20, 20))
+  q0spacing = torch.tensor([pitch/10, pitch/10, pitch/10])
+  q1shape = torch.as_tensor((12, 12, 12))
+  q1spacing = torch.tensor([pitch/6, pitch/6, pitch/6])
+
+  print('range', q0shape * q0spacing, q1shape * q1spacing)
+  assert torch.allclose(q0shape * q0spacing, q1shape * q1spacing, atol=1E-6, rtol=1E-6)
+
+  xyzrange = q0shape * q0spacing
+  dims = {'x': 0, 'y': 1, 'z': 2}
+  dim = dims['x']
+
+  exclude_dims = [i for i in set([0,1,2]) - set([dim])]
+
+  x0axis_noend = torch.arange(0, xyzrange[dim], q0spacing[dim]).tolist()
+  x1axis_noend = torch.arange(0, xyzrange[dim], q1spacing[dim]).tolist()
+
+  x0axis_end = x0axis_noend + [xyzrange[dim].item(),]
+  x1axis_end = x1axis_noend + [xyzrange[dim].item(),]
+  q0, _ = ts.eval_qeff(Q, X0, X1, Sigma,
+                       offset=offset,
+                       shape=q0shape,
+                       origin=origin,
+                       grid_spacing=q0spacing,
+                       method='gauss_legendre',
+                       npoints=(2, 2, 2),
+                       )
+  q1, _ = ts.eval_qeff(Q, X0, X1, Sigma,
+                       offset=offset,
+                       shape=q1shape,
+                       origin=origin,
+                       grid_spacing=q1spacing,
+                       method='gauss_legendre',
+                       npoints=(2, 2, 2),
+                       )
+
+  print('X0 and X1', X0, X1)
+  print(q0.sum(), q1.sum(), 'sum q0 - sum q1', q0.sum() - q1.sum())
+  print(q0.shape, q1.shape)
+
+  plt.plot(x0axis_end, torch.squeeze(q0.sum(dim=exclude_dims) / q0spacing[dim]).tolist(), label='q0')
+  plt.plot(x1axis_end, torch.squeeze(q1.sum(dim=exclude_dims) / q1spacing[dim]).tolist(), label='q1')
+  plt.legend()
+
+#+end_src
+
+#+RESULTS:
+:RESULTS:
+: range tensor([6., 6., 6.]) tensor([6., 6., 6.])
+: X0 and X1 tensor([[2.9990, 3.0000, 3.0000]]) tensor([[3.0010, 3.0000, 3.0000]])
+: tensor(999.9999, dtype=torch.float64) tensor(1001.1843, dtype=torch.float64) sum q0 - sum q1 tensor(-1.1844, dtype=torch.float64)
+: torch.Size([1, 21, 21, 21]) torch.Size([1, 13, 13, 13])
+: <matplotlib.legend.Legend at 0x7f5e447d4a90>
+[[file:./.ob-jupyter/cdff09093b129d888966d8cfda53975f769754ba.png]]
+:END:
+
+** Test on CUDA
+#+begin_src jupyter-python
+  q0 = eval_q(Q, X0, X1, Sigma,
+            offset=offset,
+            shape=q0shape,
+            origin=origin,
+            grid_spacing=q0spacing,
+            method='gauss_legendre',
+            npoints=(2, 2, 2))
+  q0cuda = eval_q(Q.to('cuda'), X0.to('cuda'), X1.to('cuda'), Sigma.to('cuda'),
+              offset=offset.to('cuda'),
+              shape=q0shape.to('cuda'),
+              origin=origin.to('cuda'),
+              grid_spacing=q0spacing.to('cuda'),
+              method='gauss_legendre',
+              npoints=(2, 2, 2))
+  assert torch.allclose(q0, q0cuda.cpu(), atol=1E-6, rtol=1E-6)
+#+end_src
+
+#+RESULTS:
+
+** Studies using ND.
+
+*** Loading ND data.
+We use the tool in this package.
+#+begin_src jupyter-python
+  import h5py
+  from tred.loaders import StepLoader, steps_from_ndh5
+  input_path = '/home/yousen/Public/ndlar_shared/data/MicroProdN1p1_NDLAr_1E18_RHC.convert2h5.nu.0000001.EDEPSIM.hdf5'
+  d0 = StepLoader(h5py.File(input_path), transform=steps_from_ndh5)
+#+end_src
+
+#+RESULTS:
+
+Let use choose the results from ~event_id == 1003~.
+#+begin_src jupyter-python
+  dslice = d0[150_000:300_000]
+  event_id = 1003
+  print('unique event_ids', torch.unique(dslice[2][:,0]))
+  assert torch.any(torch.unique(dslice[2][:,0]) > event_id)
+  assert torch.any(torch.unique(dslice[2][:,0]) < event_id)
+  f32, f64, labels = [d[dslice[2][:,0] == event_id] for d in dslice]
+#+end_src
+
+#+RESULTS:
+: unique event_ids tensor([1002, 1003, 1004], dtype=torch.int32)
+
+Partition segments according to TPC borders.
+#+begin_src jupyter-python
+  from tred.io_nd import simple_geo_parser, create_tpc_datasets_from_steps
+  module_yaml = "/home/yousen/Documents/NDLAr2x2/tred/tests/nd_geometry/ndlar-module.yaml"
+  tile_yaml = "/home/yousen/Documents/NDLAr2x2/tred/tests/nd_geometry/multi_tile_layout-3.0.40.yaml"
+  borders = simple_geo_parser(module_yaml, tile_yaml, old_version=True)
+  tpcs = create_tpc_datasets_from_steps((f32, f64, labels), labels, borders, sort_index=0)
+  print(len(tpcs), type(tpcs))
+#+end_src
+#+RESULTS:
+: 66 <class 'list'>
+
+Let us set the device to be CUDA,
+#+begin_src jupyter-python
+  device = 'cuda'
+  itpc = 9
+  print("Target device is", device)
+  print("Target TPC is", itpc)
+#+end_src
+
+#+RESULTS:
+: Target device is cuda
+: Target TPC is 9
+
+Let us try one TPC for analyses.
+#+begin_src jupyter-python
+  from tred.io_nd import nd_collate_fn
+  tpcdataset = tpcs[itpc]
+  print(type(tpcdataset))
+  batch = tpcdataset.features, tpcdataset.labels
+  features, labels = nd_collate_fn(batch)
+  features = [f.to(device) for f in features]
+  features[0] = features[0].to(torch.float64)
+  print('Loaded', len(features[0]), 'segments')
+#+end_src
+
+#+RESULTS:
+: <class 'tred.io_nd.TPCDataset'>
+: Loaded 8211 segments
+
+*** Recombination
+Now, we use birks model to calculate the charge.
+#+begin_src jupyter-python
+  from tred.recombination import birks, box
+  efield = 0.5 # kV/cm
+  rho = 1.38 # g/cm^3
+  A3t = 0.8 # birks
+  k3t = 0.0486 # (g/MeV cm^2) (kV/cm); birks
+  Wi = 23.6E-6 # MeV/pair
+  charge = birks(dE=features[0][:,0],
+                 dEdx=features[0][:,1],
+           efield=efield, rho=rho, A3t=A3t, k3t=k3t, Wi=Wi)
+  print('Charge has been calculated after recombination')
+#+end_src
+
+#+RESULTS:
+: Charge has been calculated after recombination
+
+*** Diffusion and drifting.
+Now let us use drifter
+#+begin_src jupyter-python
+  import tred.units as units
+  from tred.graph import Drifter
+  DL = 6.6270 * units.cm2/units.s / (units.cm2/units.us) # value are in cm2/us
+  DT = 13.2427 * units.cm2/units.s / (units.cm2/units.us) # value are in cm2/us
+  diffusion = torch.tensor([DL, DT, DT])
+  velocity = 1.59645 * units.mm/units.us / (units.cm/units.us) # values are in units of cm/us
+
+  lifetime = 2000. * units.us / units.us
+  drifter = Drifter(diffusion, lifetime,
+                    tpcdataset.drift*velocity, fluctuate=False,
+                    target=tpcdataset.anode, drtoa=10.*units.cm/units.cm)
+  drifter = drifter.to(device=device)
+  local_time = features[0][:,-1]
+  tail = features[0][:,2:5]
+  head = features[0][:,5:8]
+  tail[:, [1, 2]] -= tpcdataset.lower_left_corner.to(device)
+  head[:, [1, 2]] -= tpcdataset.lower_left_corner.to(device)
+  drifted = drifter(local_time, charge, tail, head)
+  drifted = list(d for d in drifted)
+  # dsigma, dtime, dcharge, dtail, dhead = drifter(local_time, charge, tail, head)
+#+end_src
+
+#+RESULTS:
+
+*** Rasterization
+Let us prepare for a simplified version of =Raster=.
+First, sigma, head and tail must be transformed to (y, z, t).
+#+begin_src jupyter-python
+
+  # transform from (x, y, z) to (y, z, t)
+  dtail = drifted[-2][:, [1, 2, 0]]
+  dhead = drifted[-1][:, [1, 2, 0]]
+  dsigma = drifted[0]
+
+
+  dsigma = torch.clamp_min(dsigma, min=torch.tensor([0.16*0.05*2,
+                                                     0.4434/4,
+                                                     0.4434/4]).to(device))
+  dsigma = dsigma[:, [1, 2, 0]]
+  dsigma[:,-1] /= abs(velocity)
+
+  dt = (tail - head)[:, 0]/abs(velocity)*tpcdataset.drift
+  dtail[:, -1] = drifted[1]
+  dhead[:, -1] = dt + drifted[1]
+
+  dcharge = drifted[2]
+#+end_src
+
+#+RESULTS:
+Second, we need to prepare offset and shape for each charge box. We
+modify the version in ~Raster~. Each box now must align with the pixel.
+#+begin_src jupyter-python
+  from tred.raster.steps import compute_charge_box
+  pitch = 0.44434 * units.cm / units.cm
+  tspace = 0.05 * units.us / units.us
+  pixel_grid_spacing = (pitch, pitch, tspace)
+  pg_offset, pg_shape = compute_charge_box(dtail, dhead, dsigma,
+                                           n_sigma=torch.tensor([4, 4, 4]).to(device),
+                                           origin=torch.tensor([0, 0, 0]).to(device),
+                                           grid_spacing = pixel_grid_spacing,
+                                           recenter=True
+  )
+#+end_src
+
+#+RESULTS:
+
+I want to define a helper function:
+#+begin_src jupyter-python
+  def helper(method, *args, **kwds):
+      return method(*args, **kwds)
+
+  def tred_function(Q, X0, X1, Sigma,
+                    pg_offset, pg_shape, pixel_grid_spacing, partitions,
+                    npoints, **kwds):
+      qeff, _ = ts.eval_qeff(Q, X0, X1, Sigma,
+                             pg_offset * partitions,
+                             pg_shape * partitions,
+                             origin=(0, 0, 0),
+                             grid_spacing=pixel_grid_spacing.to(device) / partitions,
+                             method='gauss_legendre', npoints=npoints,
+                             ,**kwds)
+      qeff = torch.nan_to_num(qeff)
+      # reshape to pixel level
+      qeff = torch.nn.functional.pad(qeff, pad=(
+          0, partitions[-1] - qeff.shape[-1] % partitions[-1],
+          0, partitions[-2] - qeff.shape[-2] % partitions[-2],
+          0, partitions[-3] - qeff.shape[-3] % partitions[-3],
+      ))
+      qeff = qeff.view(-1, qeff.shape[-3] // partitions[-3], partitions[-3],
+                qeff.shape[-2] // partitions[-2], partitions[-2],
+                qeff.shape[-1] // partitions[-1], partitions[-1])
+      qeff = qeff.sum(dim=(-5, -3, -1))
+      return qeff
+
+  def compute_diff(ten0, ten1, threshold=10):
+      ret = torch.where(ten0 > threshold, (ten0-ten1)/ten0,
+                  torch.where(ten1 > threshold, (ten0-ten1)/ten1, 0))
+      return ret
+#+end_src
+
+#+RESULTS:
+
+Now let us calculate charges:
+#+begin_src jupyter-python
+  from tred.util import iter_tensor_chunks
+
+  differences = []
+
+  nbchunk = 100
+  for ichunk, idrifted in enumerate(
+            iter_tensor_chunks([dsigma, drifted[1], dcharge, dtail, dhead,
+                                pg_offset],
+                               chunk_size=nbchunk)):
+      idsigma, idtime, idcharge, idtail, idhead, ipg_offset = idrifted
+      # first method, (2, 2, 2) x (10, 10)
+
+      partitions = torch.tensor([10, 10, 1]).to(device)
+      qeff, _ = ts.eval_qeff(idcharge, idtail, idhead, idsigma,
+                   ipg_offset * partitions,
+                   pg_shape * partitions,
+                   origin=(0, 0, 0),
+                   grid_spacing=torch.tensor(pixel_grid_spacing).to(device) / partitions,
+                   method='gauss_legendre', npoints=(2,2,2))
+      qeff = torch.nan_to_num(qeff)
+      # print(qeff.shape)
+      qeff = qeff.sum()
+
+      qeff0 = tred_function(idcharge, idtail, idhead, idsigma,
+                           ipg_offset,
+                           pg_shape,
+                           pixel_grid_spacing=torch.tensor(pixel_grid_spacing).to(device),
+                           partitions=partitions,
+                           npoints=(2,2,2), recenter=True)
+
+      assert torch.isclose(torch.sum(qeff), torch.sum(qeff0), atol=1E-5,rtol=1E-5)
+
+      partitions = torch.tensor([8, 8, 1]).to(device)
+      qeff1 = tred_function(idcharge, idtail, idhead, idsigma,
+                            ipg_offset,
+                            pg_shape,
+                            pixel_grid_spacing=torch.tensor(pixel_grid_spacing).to(device),
+                            partitions=partitions,
+                            npoints=(2,2,2), recenter=True)
+
+      # # print(qeff1-qeff, qeff2, qeff)
+      # print('abs diff', torch.max(qeff1-qeff0).item(), torch.min(qeff1-qeff0).item())
+      # diff = compute_diff(qeff1, qeff0)
+      # print('rel diff', torch.max(diff).item(), torch.min(diff).item())
+      differences.append((qeff1-qeff0).flatten().cpu().numpy())
+
+#+end_src
+
+#+RESULTS:
+: 0db00da9-0f27-4179-8fa9-3d9dc5b8b01d
+
+#+begin_src jupyter-python
+  import numpy as np
+  differences = np.hstack(differences)
+  plt.hist(differences, bins=100)
+  plt.yscale('log')
+#+end_src
+
+#+RESULTS:
+[[file:./.ob-jupyter/678a96da445cfa45f832e9e40e0cfaad4889527c.png]]
+
+* DUMMY source block
+#+begin_src jupyter-python
+#+end_src
+
+#+RESULTS:
