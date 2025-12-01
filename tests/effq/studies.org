@@ -22,9 +22,10 @@
 #+HTML_HEAD_EXTRA:   }
 #+HTML_HEAD_EXTRA: }
 #+HTML_HEAD_EXTRA: </style>
+#+OPTIONS: toc:4
 
-* Studies of effective charge
-** Toy example for one hypothetial charge segment
+#+TITLE: Studies of effective charge
+* Toy example for one hypothetial charge segment
 Import necessary packages,
 #+begin_src jupyter-python :result output
   import tred
@@ -186,7 +187,7 @@ Basic setup of one example,
 : torch.Size([1, 21, 21, 21]) torch.Size([1, 13, 13, 13])
 [[file:./.ob-jupyter/e6252008028cd0f0bb99d709e9bb45dd94407357.png]]
 :END:
-** Another test using small segments
+* Another test using small segments
 #+begin_src jupyter-python
   origin = torch.as_tensor((0, 0, 0))
   Q = torch.tensor([[1000.,]])
@@ -251,7 +252,7 @@ Basic setup of one example,
 [[file:./.ob-jupyter/cdff09093b129d888966d8cfda53975f769754ba.png]]
 :END:
 
-** Test on CUDA
+* Test on CUDA
 #+begin_src jupyter-python
   q0 = eval_q(Q, X0, X1, Sigma,
             offset=offset,
@@ -272,9 +273,9 @@ Basic setup of one example,
 
 #+RESULTS:
 
-** Studies using ND.
+* Studies using ND.
 
-*** Loading ND data.
+** Loading ND data.
 We use the tool in this package.
 #+begin_src jupyter-python
   import h5py
@@ -338,7 +339,7 @@ Let us try one TPC for analyses.
 : <class 'tred.io_nd.TPCDataset'>
 : Loaded 8211 segments
 
-*** Recombination
+** Recombination
 Now, we use birks model to calculate the charge.
 #+begin_src jupyter-python
   from tred.recombination import birks, box
@@ -356,7 +357,7 @@ Now, we use birks model to calculate the charge.
 #+RESULTS:
 : Charge has been calculated after recombination
 
-*** Diffusion and drifting.
+** Diffusion and drifting.
 Now let us use drifter
 #+begin_src jupyter-python
   import tred.units as units
@@ -383,7 +384,7 @@ Now let us use drifter
 
 #+RESULTS:
 
-*** Rasterization
+** Rasterization
 Let us prepare for a simplified version of =Raster=.
 First, sigma, head and tail must be transformed to (y, z, t).
 #+begin_src jupyter-python
@@ -624,7 +625,7 @@ Now let us calculate charges:
 #+RESULTS:
 [[file:./.ob-jupyter/678a96da445cfa45f832e9e40e0cfaad4889527c.png]]
 
-*** Save the output
+** Save the output
 #+begin_src jupyter-python
 qtotal_values['qtotal_values'] = np.hstack(qtotal_values['qtotal_values'][:-1])
 
@@ -639,8 +640,8 @@ np.savez('charge_records.npz', **charge_records)
 
 #+end_src
 
-*** Analyze the output
-**** Total effective charge from full calculations
+** Analyze the output
+*** Total effective charge from full calculations
 #+begin_src jupyter-python :tangle analysis.py
   import matplotlib.pyplot as plt
   import numpy as np
@@ -705,7 +706,7 @@ np.savez('charge_records.npz', **charge_records)
 [[file:./.ob-jupyter/c00a3a70bae4703fcf1df7e7f63838609ee95a1f.png]]
 [[file:./.ob-jupyter/a2dad2cb7eaa5676a104016fbab9a3ecd0ed2926.png]]
 :END:
-**** Total charge from quadrature rule
+*** Total charge from quadrature rule
 #+begin_src jupyter-python :tangle analysis.py
   import matplotlib.pyplot as plt
   import numpy as np
