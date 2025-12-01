@@ -430,6 +430,64 @@ I want to define a helper function:
   def helper(method, *args, **kwds):
       return method(*args, **kwds)
 
+  def too_small(X0, X1, Sigma, threshold=0.05):
+      sqrt2 = 1.4142135623730951
+      x0, y0, z0 = [X0[:, i] for i in range(3)]
+      x1, y1, z1 = [X1[:, i] for i in range(3)]
+      sx, sy, sz = [Sigma[:, i] for i in range(3)]
+
+      # Calculate differences
+      dx01 = x0 - x1
+      dy01 = y0 - y1
+      dz01 = z0 - z1
+
+      # Calculate squared terms
+      sxsy2 = (sx*sy)**2
+      sxsz2 = (sx*sz)**2
+      sysz2 = (sy*sz)**2
+      sx2 = sx**2
+      sy2 = sy**2
+      sz2 = sz**2
+
+      # Calculate delta terms
+      deltaSquare = (
+          sysz2 * dx01**2 +
+          sxsy2 * dz01**2 +
+          sxsz2 * dy01**2
+      )
+      deltaSquareSqrt = torch.sqrt(deltaSquare)
+
+      return torch.all(deltaSquareSqrt[:,None] < Sigma * threshold, dim=1)
+
+  def qpoint_diff3D(Q, X0, X1, Sigma, x, y, z):
+      """
+      Args:
+          Q (N,)
+          X0 (N, 3)
+          X1 (N, 3)
+          Sigma (N, 3)
+          x (N, other shape)
+          y (N, other shape)
+          z (N, other shape)
+      return:
+          q (N, othter shape)
+      """
+      num_dims_to_add = x.ndim - 1
+      shape_new = [-1] + num_dims_to_add * [1] # TorchScript does NOT support (-1,) + dynamic tuples
+
+      # Prepare for broadcasting
+      x0, y0, z0 = tuple(X0[:,i].view(shape_new) for i in range(3))
+      x1, y1, z1 = tuple(X1[:,i].view(shape_new) for i in range(3))
+      sx, sy, sz = tuple(Sigma[:,i].view(shape_new) for i in range(3))
+      Q = Q.view(shape_new)
+      args = (Q, x0, y0, z0, x1, y1, z1, sx, sy, sz, x, y, z)
+      xc, yc, zc = (x0+x1)/2, (y0+y1)/2, (z0+z1)/2
+      charge = Q / torch.pow(torch.tensor(2*3.1415926), 1.5) / sx / sy / sz \
+          ,* torch.exp(- (x - xc)**2 / 2 / sx**2
+                      - (y - yc)**2 / 2 / sy**2
+                      - (z - zc)**2 / 2 / sz**2)
+      return charge
+
   def tred_function(Q, X0, X1, Sigma,
                     pg_offset, pg_shape, pixel_grid_spacing, partitions,
                     npoints, **kwds):
@@ -439,8 +497,22 @@ I want to define a helper function:
                              origin=(0, 0, 0),
                              grid_spacing=pixel_grid_spacing.to(device) / partitions,
                              method='gauss_legendre', npoints=npoints,
+                             xyz_limit=torch.tensor((100000, 1000000, 100000)).to(device),
                              ,**kwds)
-      qeff = torch.nan_to_num(qeff)
+      qeff2, _ = ts.eval_qeff(Q, X0, X1, Sigma,
+                             pg_offset * partitions,
+                             pg_shape * partitions,
+                             origin=(0, 0, 0),
+                             grid_spacing=pixel_grid_spacing.to(device) / partitions,
+                             method='gauss_legendre', npoints=npoints,
+                             qmodel=qpoint_diff3D,
+                             xyz_limit=torch.tensor((100000, 1000000, 100000)).to(device),
+                             ,**kwds)
+      point_like = too_small(X0, X1, Sigma, 0.05)
+      qeff = torch.where(point_like[:, None, None, None],
+                         qeff2, qeff)
+      assert ~torch.any(torch.isnan(qeff))
+
       # reshape to pixel level
       qeff = torch.nn.functional.pad(qeff, pad=(
           0, partitions[-1] - qeff.shape[-1] % partitions[-1],
@@ -465,14 +537,24 @@ Now let us calculate charges:
 #+begin_src jupyter-python
   from tred.util import iter_tensor_chunks
 
-  differences = []
+  charge_records = {}
+  qtotal_differences = {}
+  qtotal_values = {'qtotal_values' : []}
 
-  nbchunk = 100
+
+  for i in ['4x4x2', '2x2x2', '1x1x2']:
+      for j in ['10x10', '8x8', '6x6']:
+          charge_records[f'{i}_{j}'] = []
+          qtotal_differences[f'{i}_{j}'] = []
+
+  nbchunk =50
   for ichunk, idrifted in enumerate(
             iter_tensor_chunks([dsigma, drifted[1], dcharge, dtail, dhead,
                                 pg_offset],
                                chunk_size=nbchunk)):
       idsigma, idtime, idcharge, idtail, idhead, ipg_offset = idrifted
+
+      qtotal_values['qtotal_values'].append(idcharge.cpu().numpy())
       # first method, (2, 2, 2) x (10, 10)
 
       partitions = torch.tensor([10, 10, 1]).to(device)
@@ -491,39 +573,137 @@ Now let us calculate charges:
                            pg_shape,
                            pixel_grid_spacing=torch.tensor(pixel_grid_spacing).to(device),
                            partitions=partitions,
-                           npoints=(2,2,2), recenter=True)
+                           npoints=(2,2,2))
 
       assert torch.isclose(torch.sum(qeff), torch.sum(qeff0), atol=1E-5,rtol=1E-5)
 
-      partitions = torch.tensor([8, 8, 1]).to(device)
-      qeff1 = tred_function(idcharge, idtail, idhead, idsigma,
-                            ipg_offset,
-                            pg_shape,
-                            pixel_grid_spacing=torch.tensor(pixel_grid_spacing).to(device),
-                            partitions=partitions,
-                            npoints=(2,2,2), recenter=True)
+      charge_records.get('2x2x2_10x10').append(qeff0.cpu().numpy())
+      dq = idcharge - qeff0.sum(dim=(1,2,3))
+      qtotal_differences['2x2x2_10x10'].append(dq.cpu().numpy())
+      qeff0 = None
+      dq = None
 
-      # # print(qeff1-qeff, qeff2, qeff)
-      # print('abs diff', torch.max(qeff1-qeff0).item(), torch.min(qeff1-qeff0).item())
-      # diff = compute_diff(qeff1, qeff0)
-      # print('rel diff', torch.max(diff).item(), torch.min(diff).item())
-      differences.append((qeff1-qeff0).flatten().cpu().numpy())
+      for k in charge_records.keys():
+          if k == '2x2x2_10x10': continue
+          quad, part = k.split('_')
+          quad = quad.split('x')
+          quad = [int(i) for i in quad]
+          part = torch.as_tensor(list(map(int, part.split('x'))) + [1,]).to(device)
+          qeff = tred_function(
+                  idcharge, idtail, idhead, idsigma,
+                  ipg_offset,
+                  pg_shape,
+                  pixel_grid_spacing=torch.tensor(pixel_grid_spacing).to(device),
+                  partitions=part,
+                  npoints=quad
+          )
+          assert charge_records.get('2x2x2_10x10')[-1].shape == qeff.shape
+          charge_records[k].append(qeff.cpu().numpy())
+          dq = idcharge - qeff.sum(dim=(1, 2, 3))
+          qtotal_differences[k].append(dq.cpu().numpy())
+          print(k, qtotal_differences[k][-1].max(), qtotal_differences[k][-1].min())
+          dq = None
+          qeff = None
+      for k, v in charge_records.items():
+          charge_records[k][-1] = v[-1].reshape(-1)
+
 
 #+end_src
 
 #+RESULTS:
-: 0db00da9-0f27-4179-8fa9-3d9dc5b8b01d
 
 #+begin_src jupyter-python
   import numpy as np
-  differences = np.hstack(differences)
-  plt.hist(differences, bins=100)
-  plt.yscale('log')
+  for k, v in qtotal_differences.items():
+      qtotal_diff = np.hstack(v)
+      plt.hist(qtotal_diff, bins=100, label=k)
+      plt.yscale('log')
+  plt.savefig('qtotal_diff.png')
 #+end_src
 
 #+RESULTS:
 [[file:./.ob-jupyter/678a96da445cfa45f832e9e40e0cfaad4889527c.png]]
 
+*** Save the output
+#+begin_src jupyter-python
+qtotal_values['qtotal_values'] = np.hstack(qtotal_values['qtotal_values'][:-1])
+
+for k, v in charge_records.items():
+    charge_records[k] = np.hstack(v[:-1])
+for k, v in qtotal_differences.items():
+    qtotal_differences[k] = np.hstack(v[:-1])
+
+np.savez('qtotal_values.npz', **qtotal_values)
+np.savez('qtotal_differences.npz', **qtotal_differences)
+np.savez('charge_records.npz', **charge_records)
+
+#+end_src
+
+*** Analyze the output
+#+begin_src jupyter-python :tangle analysis.py
+  import matplotlib.pyplot as plt
+  import numpy as np
+  qtotal_values = np.load("qtotal_values.npz")
+  qtotal_differences = np.load("qtotal_differences.npz")
+  qdmin = min([np.min(v) for v in qtotal_differences.values()])
+  qdmax = max([np.max(v) for v in qtotal_differences.values()])
+  for k, v in qtotal_differences.items():
+      q = qtotal_values['qtotal_values']
+      dq = v
+      # print(q[np.isnan(dq/q)])
+      dqoverq = dq/q
+      dqoverq[np.isnan(dqoverq)] = 0
+
+      print(k, np.min(dq), np.max(dq), q[np.argmax(dq)], v[np.argmax(dq)], np.max(dqoverq))
+
+      fig, ax = plt.subplots()
+      ax.hist(dq, range=(qdmin, qdmax), bins=100, label=k)
+      ax.legend()
+      ax.set_yscale('log')
+      fig.savefig(f'qtotal_diff_{k}.png')
+
+      fig, ax = plt.subplots()
+      ax.hist(dqoverq, range=(-4E-7, 2E-6), bins=100, label=k)
+      ax.legend()
+      ax.set_yscale('log')
+      fig.savefig(f'qtotal_reldiff_{k}.png')
+
+#+end_src
+
+#+RESULTS:
+:RESULTS:
+#+begin_example
+  /tmp/ipykernel_3602538/853984575.py:11: RuntimeWarning: invalid value encountered in divide
+    dqoverq = dq/q
+  4x4x2_10x10 -0.003754277488042135 0.16395159121020697 171224.6875508986 0.16395159121020697 1.4966290957385943e-06
+  4x4x2_8x8 -0.003754277466214262 0.1639607778051868 171224.6875508986 0.1639607778051868 1.4967045793590905e-06
+  4x4x2_6x6 -0.003754277488042135 0.163979090139037 171224.6875508986 0.163979090139037 1.4968550897390151e-06
+  2x2x2_10x10 -0.0037542774953180924 0.16367033999995328 171224.6875508986 0.16367033999995328 1.4942263423469899e-06
+  2x2x2_8x8 -0.003754277488042135 0.16329648726969026 171224.6875508986 0.16329648726969026 1.4910204481102723e-06
+  2x2x2_6x6 -0.0037542774734902196 0.1620240297925193 171224.6875508986 0.1620240297925193 1.480071347844518e-06
+  1x1x2_10x10 -0.003754277480766177 0.1441290075017605 171224.6875508986 0.1441290075017605 1.32075213912182e-06
+  1x1x2_8x8 -0.003754277488042135 0.1341996866685804 171224.6875508986 0.1341996866685804 1.2322833634939879e-06
+  1x1x2_6x6 -0.0037542774734902196 0.11533277531270869 171224.6875508986 0.11533277531270869 1.0634559746412707e-06
+#+end_example
+[[file:./.ob-jupyter/0bdfdd905ae1c5320ab6d1aeeaca2fd27d88b345.png]]
+[[file:./.ob-jupyter/d2e8226d6971311f6d9ba488fd4a21c5e167e501.png]]
+[[file:./.ob-jupyter/2fd6f1ce19b35205afa25bb14e1c005fa7e01fe8.png]]
+[[file:./.ob-jupyter/6a1a147b9fa8352f2e3defcc660b98dbfc6b1308.png]]
+[[file:./.ob-jupyter/36643c1b2d64fad933892ebfd587e64f52ecf57a.png]]
+[[file:./.ob-jupyter/510a96fbcbd15d5ff7c979a2eb16dcfd0e5bf452.png]]
+[[file:./.ob-jupyter/3c39e8c7b2e9e7102eb7abd2e7889051bda32988.png]]
+[[file:./.ob-jupyter/ad24c626088e74724662ca375d3d0076f65f5231.png]]
+[[file:./.ob-jupyter/fafdfa8756b6a70c86beab9f98814bd4b90a624f.png]]
+[[file:./.ob-jupyter/7430bb3f4cae8105063b7230bf7d01711fc679d0.png]]
+[[file:./.ob-jupyter/32c883a6b8c90f7ebc4151e6948697f1c52d030f.png]]
+[[file:./.ob-jupyter/7290b438e6325b96dc244b8dc167d3f4980b9dde.png]]
+[[file:./.ob-jupyter/bd309a6fbf569cc4c85806949bcb66d502c099e5.png]]
+[[file:./.ob-jupyter/356b80e87dc9bc43690913aa1314e596928cfc6d.png]]
+[[file:./.ob-jupyter/cfc0b37a6802b253a098379a4fe7a6f1d443556a.png]]
+[[file:./.ob-jupyter/da9b186e31e4b3592e36092be3db0ec852a8a276.png]]
+[[file:./.ob-jupyter/c00a3a70bae4703fcf1df7e7f63838609ee95a1f.png]]
+[[file:./.ob-jupyter/a2dad2cb7eaa5676a104016fbab9a3ecd0ed2926.png]]
+:END:
 * DUMMY source block
 #+begin_src jupyter-python
 #+end_src
