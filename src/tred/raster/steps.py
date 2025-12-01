@@ -600,6 +600,8 @@ def eval_qeff(Q, X0, X1, Sigma, offset, shape, origin, grid_spacing, method, npo
         raise ValueError('Q must be a torch.Tensor')
     device = Q.device
 
+    qmodel = kwargs.get('qmodel', qline_diff3D)
+
     # FIXME: not support
     usemask = kwargs.get('usemask', False)
     # FIXME: not support
@@ -652,19 +654,19 @@ def eval_qeff(Q, X0, X1, Sigma, offset, shape, origin, grid_spacing, method, npo
         if usex:
             qjs = []
             for j in range(0, xi.size(-1), xchunk):
-                qj = eval_qmodel(Qi, X0i, X1i, Sigmai, xi[..., j:j+xchunk], yi, zi)
+                qj = eval_qmodel(Qi, X0i, X1i, Sigmai, xi[..., j:j+xchunk], yi, zi, **kwargs)
                 qjs.append(qj)
             charge = torch.cat(qjs, dim=-3)
         elif usey:
             qjs = []
             for j in range(0, yi.size(-1), ychunk):
-                qj = eval_qmodel(Qi, X0i, X1i, Sigmai, xi, yi[..., j:j+ychunk], zi)
+                qj = eval_qmodel(Qi, X0i, X1i, Sigmai, xi, yi[..., j:j+ychunk], zi, **kwargs)
                 qjs.append(qj)
             charge = torch.cat(qjs, dim=-2)
         elif usez:
             qjs = []
             for j in range(0, zi.size(-1), zchunk):
-                qj = eval_qmodel(Qi, X0i, X1i, Sigmai, xi, yi, zi[..., j:j+zchunk])
+                qj = eval_qmodel(Qi, X0i, X1i, Sigmai, xi, yi, zi[..., j:j+zchunk], **kwargs)
                 qjs.append(qj)
             charge = torch.cat(qjs, dim=-1)
         else:
