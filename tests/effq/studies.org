@@ -815,6 +815,102 @@ np.savez('charge_records.npz', **charge_records)
 [[file:./.ob-jupyter/4cfebec1566ff90b6286fbb52c4bc70147fbd49b.png]]
 :END:
 
+*** Charge per pixel level from full effective charge or quadrature rule
+#+begin_src jupyter-python
+  import matplotlib.pyplot as plt
+  import numpy as np
+
+  fv1 = np.load("charge_records.npz")
+  fv2 = np.load("charge_records_v2.npz")
+
+  qdiffs = {
+      'grid_point' : {},
+      'interval' : {},
+  }
+
+  ref_key = '4x4x2_10x10'
+  for k in fv1.keys():
+      qdiffs['interval'][k] = fv2[k] - fv2[ref_key]
+      qdiffs['grid_point'][k] = fv1[k] - fv1[ref_key]
+
+  dmin = min(
+      min([np.min(qd) for qd in qdiffs['interval'].values()]),
+      min([np.min(qd) for qd in qdiffs['grid_point'].values()])
+  )
+
+  dmax = max(
+      max([np.max(qd) for qd in qdiffs['interval'].values()]),
+      max([np.max(qd) for qd in qdiffs['grid_point'].values()])
+  )
+
+  for k in fv1.keys():
+      fig, ax = plt.subplots()
+      ax.hist(qdiffs['interval'][k], histtype='step', range=(dmin, dmax), bins=100, label=f'{k}_interval')
+      ax.hist(qdiffs['grid_point'][k], histtype='step', range=(dmin, dmax), bins=100, label=f'{k}_grid_point')
+      # ax.set_ylim(1E-12, 1)
+      ax.set_yscale('log')
+      ax.legend()
+      fig.savefig(f'qdiff_pixel_{k}.png')
+#+end_src
+
+#+RESULTS:
+:RESULTS:
+[[file:./.ob-jupyter/5a7c3ba606ffe94e797a3d89e2d5eae4244df053.png]]
+[[file:./.ob-jupyter/50645bbe761c9a10169652552b5c55e8b5e94f9d.png]]
+[[file:./.ob-jupyter/b43182dc6dea3d2d025f707d3a5f9b989848668c.png]]
+[[file:./.ob-jupyter/8c945db60bfe89b6ee47377ee62655c019464500.png]]
+[[file:./.ob-jupyter/cacab58d6a20e39b2120ed1967f43965637631ec.png]]
+[[file:./.ob-jupyter/f7f481aa8c50ddd9f46d9b74ad8038c5ff3130ae.png]]
+[[file:./.ob-jupyter/fbe24070c634d11ebb67d5f4f0b48c94f9af2ec9.png]]
+[[file:./.ob-jupyter/a201f364959af07f395e60226657f4a7a3017709.png]]
+[[file:./.ob-jupyter/69a85faf171f89d99a452141654d079100886f71.png]]
+:END:
+
+#+begin_src jupyter-python
+  import matplotlib.pyplot as plt
+  import numpy as np
+
+  fv1 = np.load("charge_records.npz")
+  fv2 = np.load("charge_records_v2.npz")
+
+  qdiffs = {
+      'grid_point' : {},
+      'interval' : {},
+  }
+
+  ref_key = '4x4x2_10x10'
+  for k in fv1.keys():
+      qdiffs['interval'][k] = fv2[k] - fv2[ref_key]
+      qdiffs['grid_point'][k] = fv1[k] - fv1[ref_key]
+
+  dmin = min(
+      min([np.min(qd) for qd in qdiffs['interval'].values()]),
+      min([np.min(qd) for qd in qdiffs['grid_point'].values()])
+  )
+
+  dmax = max(
+      max([np.max(qd) for qd in qdiffs['interval'].values()]),
+      max([np.max(qd) for qd in qdiffs['grid_point'].values()])
+  )
+
+
+  for k1 in ['10x10', '8x8', '6x6']:
+      fig, ax = plt.subplots()
+      for k2 in ['4x4x2', '2x2x2', '1x1x2']:
+          k = f'{k2}_{k1}'
+          ax.hist(qdiffs['grid_point'][k], histtype='step', range=(dmin, dmax), bins=100, label=f'{k}_grid_point')
+      ax.set_yscale('log')
+      ax.legend()
+      fig.savefig(f'qdiff_pixel_{k1}_comp_npt.png')
+#+end_src
+
+#+RESULTS:
+:RESULTS:
+[[file:./.ob-jupyter/45e8eb43c648e7ce2f0260317595121a4eb24a46.png]]
+[[file:./.ob-jupyter/5c1c2efc3afc1270d1e6a25a3f8df886c857113c.png]]
+[[file:./.ob-jupyter/dc19f07e157bd6a4e09b26c908899dfae24b1711.png]]
+:END:
+
 * DUMMY source block
 #+begin_src jupyter-python
 #+end_src
