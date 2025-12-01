@@ -640,6 +640,7 @@ np.savez('charge_records.npz', **charge_records)
 #+end_src
 
 *** Analyze the output
+**** Total effective charge from full calculations
 #+begin_src jupyter-python :tangle analysis.py
   import matplotlib.pyplot as plt
   import numpy as np
@@ -684,6 +685,71 @@ np.savez('charge_records.npz', **charge_records)
   1x1x2_10x10 -0.003754277480766177 0.1441290075017605 171224.6875508986 0.1441290075017605 1.32075213912182e-06
   1x1x2_8x8 -0.003754277488042135 0.1341996866685804 171224.6875508986 0.1341996866685804 1.2322833634939879e-06
   1x1x2_6x6 -0.0037542774734902196 0.11533277531270869 171224.6875508986 0.11533277531270869 1.0634559746412707e-06
+#+end_example
+[[file:./.ob-jupyter/0bdfdd905ae1c5320ab6d1aeeaca2fd27d88b345.png]]
+[[file:./.ob-jupyter/d2e8226d6971311f6d9ba488fd4a21c5e167e501.png]]
+[[file:./.ob-jupyter/2fd6f1ce19b35205afa25bb14e1c005fa7e01fe8.png]]
+[[file:./.ob-jupyter/6a1a147b9fa8352f2e3defcc660b98dbfc6b1308.png]]
+[[file:./.ob-jupyter/36643c1b2d64fad933892ebfd587e64f52ecf57a.png]]
+[[file:./.ob-jupyter/510a96fbcbd15d5ff7c979a2eb16dcfd0e5bf452.png]]
+[[file:./.ob-jupyter/3c39e8c7b2e9e7102eb7abd2e7889051bda32988.png]]
+[[file:./.ob-jupyter/ad24c626088e74724662ca375d3d0076f65f5231.png]]
+[[file:./.ob-jupyter/fafdfa8756b6a70c86beab9f98814bd4b90a624f.png]]
+[[file:./.ob-jupyter/7430bb3f4cae8105063b7230bf7d01711fc679d0.png]]
+[[file:./.ob-jupyter/32c883a6b8c90f7ebc4151e6948697f1c52d030f.png]]
+[[file:./.ob-jupyter/7290b438e6325b96dc244b8dc167d3f4980b9dde.png]]
+[[file:./.ob-jupyter/bd309a6fbf569cc4c85806949bcb66d502c099e5.png]]
+[[file:./.ob-jupyter/356b80e87dc9bc43690913aa1314e596928cfc6d.png]]
+[[file:./.ob-jupyter/cfc0b37a6802b253a098379a4fe7a6f1d443556a.png]]
+[[file:./.ob-jupyter/da9b186e31e4b3592e36092be3db0ec852a8a276.png]]
+[[file:./.ob-jupyter/c00a3a70bae4703fcf1df7e7f63838609ee95a1f.png]]
+[[file:./.ob-jupyter/a2dad2cb7eaa5676a104016fbab9a3ecd0ed2926.png]]
+:END:
+**** Total charge from quadrature rule
+#+begin_src jupyter-python :tangle analysis.py
+  import matplotlib.pyplot as plt
+  import numpy as np
+  qtotal_values = np.load("qtotal_values_v2.npz")
+  qtotal_differences = np.load("qtotal_differences_v2.npz")
+  qdmin = min([np.min(v) for v in qtotal_differences.values()])
+  qdmax = max([np.max(v) for v in qtotal_differences.values()])
+  for k, v in qtotal_differences.items():
+      q = qtotal_values['qtotal_values']
+      dq = v
+      # print(q[np.isnan(dq/q)])
+      dqoverq = dq/q
+      dqoverq[np.isnan(dqoverq)] = 0
+
+      print(k, np.min(dq), np.max(dq), q[np.argmax(dq)], v[np.argmax(dq)], np.max(dqoverq))
+
+      fig, ax = plt.subplots()
+      ax.hist(dq, range=(qdmin, qdmax), bins=100, label=k)
+      ax.legend()
+      ax.set_yscale('log')
+      fig.savefig(f'qtotal_diff_{k}.png')
+
+      fig, ax = plt.subplots()
+      ax.hist(dqoverq, range=(-4E-7, 2E-6), bins=100, label=k)
+      ax.legend()
+      ax.set_yscale('log')
+      fig.savefig(f'qtotal_reldiff_{k}_v2.png')
+
+#+end_src
+
+#+RESULTS:
+:RESULTS:
+#+begin_example
+  /tmp/ipykernel_3602538/4198916329.py:11: RuntimeWarning: invalid value encountered in divide
+    dqoverq = dq/q
+  4x4x2_10x10 -0.003754277480766177 0.1639515911519993 171224.6875508986 0.1639515911519993 1.4966290955613791e-06
+  4x4x2_8x8 -0.003754277480766177 0.1639607778051868 171224.6875508986 0.1639607778051868 1.4967045795363057e-06
+  4x4x2_6x6 -0.003754277488042135 0.163979090139037 171224.6875508986 0.163979090139037 1.4968550899162305e-06
+  2x2x2_10x10 -0.003754277480766177 0.16367033999995328 171224.6875508986 0.16367033999995328 1.4942263425242053e-06
+  2x2x2_8x8 -0.0037542774734902196 0.1632964872987941 171224.6875508986 0.1632964872987941 1.4910204482874877e-06
+  2x2x2_6x6 -0.0037542774734902196 0.1620240297925193 171224.6875508986 0.1620240297925193 1.480071347844518e-06
+  1x1x2_10x10 -0.0037542774734902196 0.14412900753086433 171224.6875508986 0.14412900753086433 1.3207521392990353e-06
+  1x1x2_8x8 -0.003754277488042135 0.13419968663947657 171224.6875508986 0.13419968663947657 1.232283363671203e-06
+  1x1x2_6x6 -0.0037542774734902196 0.11533277531270869 171224.6875508986 0.11533277531270869 1.0634559744640553e-06
 #+end_example
 [[file:./.ob-jupyter/0bdfdd905ae1c5320ab6d1aeeaca2fd27d88b345.png]]
 [[file:./.ob-jupyter/d2e8226d6971311f6d9ba488fd4a21c5e167e501.png]]
