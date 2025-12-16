@@ -28,6 +28,11 @@ tred = "tred.cli:cli"
 requires = ["setuptools"]
 build-backend = "setuptools.build_meta"
 
+[tool.setuptools.packages.find]
+where = [
+    "src"
+]
+
 [tool.uv.sources]
 torch = { index = "pytorch" }
 
