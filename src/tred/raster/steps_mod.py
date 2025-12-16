@@ -3,6 +3,7 @@ from tred.raster.steps import (create_wu_block, create_node1ds, create_w_block,
                                eval_qmodel, qline_diff3D, roots_legendre)
 from tred.raster.steps import _create_u_block as steps__create_u_block
 from tred.raster.steps import _create_u1d_GL as steps__create_u1d_GL
+from tred.raster.steps import eval_qeff as steps__eval_qeff
 import torch
 
 
@@ -242,7 +243,9 @@ def eval_q(Q, X0, X1, Sigma, offset, shape, origin, grid_spacing,
 def add_patches():
     steps_mod._create_u1d_GL = _create_u1d_GL
     steps_mod._create_u_block = _create_u_block
+    steps_mod._eval_qeff = eval_qeff
 
 def remove_patches():
     steps_mod._create_u1d_GL = steps__create_u1d_GL
     steps_mod._create_u_block = steps__create_u_block
+    steps_mod._eval_qeff = steps__eval_qeff
