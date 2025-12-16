@@ -40,6 +40,8 @@ event_list = None
 save_waveform = None
 const_recomb = None
 
+npoints = None
+
 uncorr_noise = None
 reset_noise = None
 thres_noise = None
@@ -218,9 +220,9 @@ def runit(device='cpu'):
     # convo = LacedConvo(lacing, o_shape=(12, 12, 2048))
     chunksum_i = ChunkSum((4, 4, 128), method='chunksum_inplace_v2')
 
-    chunksum_i = chunksum_i.to('cuda')
-    chunksum_readout = chunksum_readout.to('cuda')
-    chunksum_effq_out = chunksum_effq_out.to('cuda')
+    chunksum_i = chunksum_i.to(device)
+    chunksum_readout = chunksum_readout.to(device)
+    chunksum_effq_out = chunksum_effq_out.to(device)
 
     t1 = time.time()
 
@@ -263,7 +265,7 @@ def runit(device='cpu'):
                           target=tpcdataset.anode, drtoa=drtoa)
         drifter = drifter.to(device=device)
 
-        raster = Raster(tpcdataset.drift*velocity, grid_spacing).to(device=device)
+        raster = Raster(tpcdataset.drift*velocity, grid_spacing, npoints=npoints).to(device=device)
         # raster = raster.to(device=device)
         chunksum = chunksum.to(device=device)
         convo = convo.to(device=device)
@@ -322,6 +324,10 @@ def runit(device='cpu'):
                 # dsigma, dtime, dcharge, dtail, dhead
                 drifted = drifter(local_time, charge, tail, head)
                 # dsigma, dtime, dcharge, dtail, dhead = drifter(local_time, charge, tail, head)
+                drifted = list(d for d in drifted)
+                min_sigma = torch.tensor([[tspace*abs(velocity)/2,
+                                           pitch/10/2, pitch/10/2]]).to(device)
+                drifted[0] = torch.clamp(drifted[0], min=min_sigma)
 
                 if device == 'cuda':
                     torch.cuda.synchronize()
@@ -335,15 +341,8 @@ def runit(device='cpu'):
                 for ichunk, idrifted in enumerate(
                         iter_tensor_chunks(drifted, chunk_size=nbchunk)):
                     qblock = raster(*idrifted)
-
-                    start = ichunk * nbchunk
-                    end = start + idrifted[0].size(0)
-                    p0 = tail[start:end]
-                    p1 = head[start:end]
-                    length2 = torch.sum((p0-p1)**2, dim=1)
-                    invalid2 = length2 < 1E-9
-                    qblock.data[invalid2] = 0
-
+                    # Check whether there is not-a-value elements.
+                    assert ~torch.any(torch.isnan(qblock.data))
                     signal = chunksum(qblock)
                     effqb = chunksum_effq_out(qblock)
                     effqb.location[:, 0:2] //= nimperpix
@@ -556,6 +555,8 @@ def fullsim(config, finpath, foutpath):
 
     global const_recomb
 
+    global npoints
+
     global old_geo_config
 
     global input_path
@@ -582,6 +583,7 @@ def fullsim(config, finpath, foutpath):
     const_recomb = config.get("const_recomb", False)
     effq_out_nt = config.get("effq_out_nt", 1)
     old_geo_config = config.get("old_geo_config", True)
+    npoints = config.get('npoints', (2, 2, 2))
 
     # loading response
     if os.path.splitext(response_path)[1] == '.npz':

@@ -97,7 +97,7 @@ def simple_geo_parser(det_yaml, tile_yaml, old_version=True):
             pass
         else:
             TPC_BORDERS = TPC_BORDERS.reshape(-1, 2, 3, 2)[:,[1,0]].reshape(-1, 3, 2)
-    print(TPC_BORDERS)
+
     return torch.tensor(TPC_BORDERS, requires_grad=False)
 
 def tpc_label(borders, X0, X1=None, **kwargs):
@@ -347,7 +347,7 @@ class EagerLabelBatchSampler(Sampler):
             assert len(indices) == 1
             for j in range(0, len(indices[0]), self.batch_size):
                 self.batches.append(indices[0][j:j+batch_size])
-    
+
     def __iter__(self):
         # Optionally, shuffle the batches if needed
         return iter(self.batches)
@@ -369,7 +369,7 @@ class SortedLabelBatchSampler(Sampler):
             indices = torch.nonzero(inverse_indices == i, as_tuple=True) # tuple of indices for advanced indexing
             assert len(indices) == 1
             self.groups.append(indices[0]) # indices along batch should be 1D
-            
+
     def __iter__(self):
         for g in self.groups:
             for i in range(0, len(g), self.batch_size):
@@ -378,16 +378,16 @@ class SortedLabelBatchSampler(Sampler):
     def __len__(self):
         return len(self.__iter__())
 
-        
+
 def nd_collate_fn(batch):
     '''
     `batch` is assumed to be (features, labels)
     NOT [(features_sample1, labels_sample1), (features_sample2, labels_sample2), ...].
-    
+
     This function does task different from general collate_fn.
     In general, collate_fn is expected to convert [(features_sample1, labels_sample1), ...]
     to ([features_sample1, ...], [labels_sample1, ...]).
-    
+
     This function will convert time of creation to global + offset.
 
     `Features` is a list/tuple, (FloatTensor, DoubleTensor, IntTensor)
@@ -395,7 +395,7 @@ def nd_collate_fn(batch):
     Tensors are in a shape of (N_batch, n_feature)
 
     The time of creation is assumed to be the first component of DoubleTensor.
-    '''        
+    '''
     features, labels = batch
     # features, labels = zip(*batch) # for generatel conversion from [(features_sample1, labels_sample1), ...] to ([features_sample1, ...], [labels_sample1, ...])
     t64bit = features[1] if features[1].dim() == 1 else features[1][:,0]
@@ -406,7 +406,7 @@ def nd_collate_fn(batch):
     dt = t64bit - t
     ts = torch.stack([t.to(torch.float32), dt.to(torch.float32)], dim=1)
     features = (torch.concatenate([features[0], ts], dim=1), features[1], features[2])
-    
+
     return features, labels
 
 
@@ -417,15 +417,15 @@ class CustomNDLoader():
     def __init__(self, dataset, sampler=None, collate_fn=None, batch_size=None):
         '''
         The loader is not supposed to have automatic batching.
-        
+
         It can only support a fixed batch size from `batch_size`, or a batch scheme provided by `sampler`.
         Arguments `sampler` and `batch_size` are mutually exclusive.
-        
+
         Dataset must be map-style, having method __getitem__().
 
         Argument `collate_fn` is not in the general sense. It does not collect and combine but do transformation on the fly.
         In the original PyTorch way, collate_fn is expected to convert [(features_sample1, labels_sample1), ...]
-        to ([features_sample1, ...], [labels_sample1, ...]). This function skip the step but assuming data that will be processed 
+        to ([features_sample1, ...], [labels_sample1, ...]). This function skip the step but assuming data that will be processed
         already in the foramt of ([features_sample1, ...], [labels_sample1, ...]) and perform further transformation.
 
         When sampler is given, `CustomNDLoader(dataset, sampler=sampler, collate_fn=collate_fn)` is expected to behave like
