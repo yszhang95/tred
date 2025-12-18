@@ -64,6 +64,7 @@ old_geo_config = True
 
 convo_o_shape = None
 benchmark_each_stage = True
+batch_scheme = [100, 50]
 
 def load_threshold(threshold):
     '''
@@ -253,6 +254,8 @@ def runit(device='cpu'):
 
     thresholds = load_threshold(threshold)
 
+    info('Batch scheme: ' + str(batch_scheme))
+
     for itpc, tpcdataset in enumerate(tpcs):
         info(f"Drift direction: {tpcdataset.drift} in tpcid {tpcdataset.tpc_id}.")
         info(f"TPC lower corner: {tpcdataset.lower_left_corner} in itpc {tpcdataset.tpc_id}.")
@@ -332,7 +335,7 @@ def runit(device='cpu'):
                     torch.cuda.synchronize()
                 t03 = time.time()
 
-                nbchunk = 100
+                nbchunk = batch_scheme[0]
 
                 current_blocks = []
                 effq_blocks = []
@@ -374,7 +377,7 @@ def runit(device='cpu'):
                     # t05 = time.time()
 
                     currents = []
-                    for iqblock in iter_chunk_block(signal, chunk_size=50):
+                    for iqblock in iter_chunk_block(signal, chunk_size=batch_scheme[1]):
                         if iqblock.nbatches == 0:
                             continue
                         if device == 'cuda' and benchmark_each_stage:
@@ -621,6 +624,7 @@ def fullsim(config, finpath, foutpath):
 
     global convo_o_shape
     global benchmark_each_stage
+    global batch_scheme
 
     with open(config, "r") as fconfig:
         config = yaml.safe_load(fconfig)
@@ -643,6 +647,7 @@ def fullsim(config, finpath, foutpath):
     old_geo_config = config.get("old_geo_config", True)
     convo_o_shape = config.get("convo_o_shape", (4, 4, 2048))
     backmark_each_stage = config.get("benchmark_each_stage", True)
+    batch_scheme = config.get("batch_scheme", [100, 50])
     npoints = config.get('npoints', (2, 2, 2))
 
     # loading response
