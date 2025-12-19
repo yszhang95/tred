@@ -65,6 +65,16 @@ old_geo_config = True
 convo_o_shape = None
 benchmark_each_stage = True
 batch_scheme = [100, 50]
+record_op_w_max_mem = True
+
+def update_peak_memory_label(op_name, peak_mem_mb, current_label):
+    """Return updated (peak_mem_mb, label) if current stage exceeds peak."""
+    if not record_op_w_max_mem or not torch.cuda.is_available():
+        return peak_mem_mb, current_label
+    current_peak = torch.cuda.memory.max_memory_allocated() / 1024**2
+    if current_peak > peak_mem_mb:
+        return current_peak, op_name
+    return peak_mem_mb, current_label
 
 def load_threshold(threshold):
     '''
@@ -289,6 +299,8 @@ def runit(device='cpu'):
         for ibatch, (features, labels) in enumerate(loader):
 
             stime = time.time()
+            peak_mem = 0
+            op_w_max_mem = 'NoOp'
             try:
                 if isinstance(event_list, list) and len(event_list)>0 and int(labels[0,0].numpy()) not in event_list:
                     continue
@@ -341,6 +353,8 @@ def runit(device='cpu'):
                 effq_blocks = []
                 Nqblock = 0
 
+                peak_mem, op_w_max_mem = update_peak_memory_label('before_drifter', peak_mem, op_w_max_mem)
+
                 dt04 = 0  # effq
                 dt05 = 0  # chunksum q
                 dt06 = 0  # convo
@@ -354,6 +368,8 @@ def runit(device='cpu'):
                     if device == 'cuda' and benchmark_each_stage:
                         torch.cuda.synchronize()
                     dt04 += time.time() - t04
+                    if record_op_w_max_mem:
+                        peak_mem, op_w_max_mem = update_peak_memory_label('rasterization', peak_mem, op_w_max_mem)
                     # Check whether there is not-a-value elements.
                     assert ~torch.any(torch.isnan(qblock.data))
                     if device == 'cuda' and benchmark_each_stage:
@@ -363,6 +379,8 @@ def runit(device='cpu'):
                     if device == 'cuda' and benchmark_each_stage:
                         torch.cuda.synchronize()
                     dt05 += time.time() - t05
+                    if record_op_w_max_mem:
+                        peak_mem, op_w_max_mem = update_peak_memory_label('chunksum_raster', peak_mem, op_w_max_mem)
 
                     # effqb = chunksum_effq_out(qblock)
                     # effqb.location[:, 0:2] //= nimperpix
@@ -387,6 +405,8 @@ def runit(device='cpu'):
                         if device == 'cuda' and benchmark_each_stage:
                             torch.cuda.synchronize()
                         dt06 += time.time() - t06
+                        if record_op_w_max_mem:
+                            peak_mem, op_w_max_mem = update_peak_memory_label('convo', peak_mem, op_w_max_mem)
                         if device == 'cuda' and benchmark_each_stage:
                             torch.cuda.synchronize()
                         t07 = time.time()
@@ -394,6 +414,8 @@ def runit(device='cpu'):
                         if device == 'cuda' and benchmark_each_stage:
                             torch.cuda.synchronize()
                         dt07 += time.time() - t07
+                        if record_op_w_max_mem:
+                            peak_mem, op_w_max_mem = update_peak_memory_label('chunksum_i', peak_mem, op_w_max_mem)
                         currents.append(current)
 
                     # no need to chunk again; just sum
@@ -407,6 +429,9 @@ def runit(device='cpu'):
                             torch.cuda.synchronize()
                         current_blocks.append(currents)
                     dt07 += time.time() - t07
+                    if record_op_w_max_mem:
+                        peak_mem, op_w_max_mem = update_peak_memory_label('chunksum_i', peak_mem, op_w_max_mem)
+
 
                     # if device == 'cuda':
                     #     torch.cuda.synchronize()
@@ -424,6 +449,9 @@ def runit(device='cpu'):
                 if device == 'cuda' and benchmark_each_stage:
                     torch.cuda.synchronize()
                 dt07 += time.time() - t07
+                if record_op_w_max_mem:
+                    peak_mem, op_w_max_mem = update_peak_memory_label('chunksum_i', peak_mem, op_w_max_mem)
+
                 if device == 'cuda':
                     torch.cuda.synchronize()
                 t07 = time.time()
@@ -447,6 +475,8 @@ def runit(device='cpu'):
                 if device == 'cuda' and benchmark_each_stage:
                     torch.cuda.synchronize()
                 t09 = time.time()
+                if record_op_w_max_mem:
+                    peak_mem, op_w_max_mem = update_peak_memory_label('chunksum_readout', peak_mem, op_w_max_mem)
 
                 if torch.isnan(currents.data).any():
                     raise ValueError
@@ -462,6 +492,8 @@ def runit(device='cpu'):
                 if device == 'cuda':
                     torch.cuda.synchronize()
                 t10 = time.time()
+                if record_op_w_max_mem:
+                    peak_mem, op_w_max_mem = update_peak_memory_label('readout', peak_mem, op_w_max_mem)
 
 
                 runtime['to_device'].append(t01-t00)
@@ -483,6 +515,8 @@ def runit(device='cpu'):
                 info(f'{runtime["chunksum_current"][-1]} chunksum_current')
                 info(f'{runtime["chunksum_readout"][-1]} chunksum_readout')
                 info(f'{runtime["readout"][-1]} readout')
+
+                info(f'Operation with max memory usage: {op_w_max_mem}')
 
 
                 if device == 'cuda':

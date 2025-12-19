@@ -1,18 +1,30 @@
 #!/usr/bin/env python3
-"""Extract metrics from output_10x10.log and generate diagnostic plots."""
+"""Extract metrics from one or more logs and generate diagnostic plots."""
 from __future__ import annotations
 
+import argparse
 import re
 from pathlib import Path
-from typing import List, Tuple
+from typing import Dict, List, Tuple, TypedDict
 
 import matplotlib.pyplot as plt
 
 
-LOG_PATH = Path(__file__).with_name("output_10x10.log")
-# LOG_PATH = Path(__file__).with_name("output_10x10_300_50.log")
-LOG_PATH = Path(__file__).with_name("output_10x10_100_10.log")
-LOG_PATH = Path(__file__).with_name("output_10x10_100_50.log")
+DEFAULT_LOG = Path(__file__).with_name("output_10x10.log")
+
+
+class LogData(TypedDict):
+    tpc: List[Tuple[int, float, float]]
+    summary: List[Tuple[str, float]]
+
+
+def format_label(path: Path) -> str:
+    """Derive a friendly legend label from the log filename."""
+    stem = path.stem
+    parts = stem.split("_")
+    if len(parts) >= 4 and parts[-1].isdigit() and parts[-2].isdigit():
+        return f"raster batch {parts[-2]}, convo batch {parts[-1]}"
+    return stem
 
 
 def parse_tpc_blocks(lines: List[str]) -> List[Tuple[int, float, float]]:
@@ -66,65 +78,103 @@ def parse_summary(lines: List[str]) -> List[Tuple[str, float]]:
     return summary
 
 
-def ensure_data():
-    if not LOG_PATH.exists():
-        raise FileNotFoundError(f"Missing log file: {LOG_PATH}")
-    lines = LOG_PATH.read_text().splitlines()
+def parse_log_file(path: Path):
+    if not path.exists():
+        raise FileNotFoundError(f"Missing log file: {path}")
+    lines = path.read_text().splitlines()
     tpc_data = parse_tpc_blocks(lines)
     summary_data = parse_summary(lines)
     if not tpc_data:
-        raise RuntimeError("No TPC blocks found in log.")
+        raise RuntimeError(f"No TPC blocks found in {path}.")
     if not summary_data:
-        raise RuntimeError("No summary block found in log.")
+        raise RuntimeError(f"No summary block found in {path}.")
     return tpc_data, summary_data
 
 
-def plot_trends(tpc_data: List[Tuple[int, float, float]]) -> None:
-    """Generate the peak-memory and runtime vs. N segments plots."""
-    nsegments = [entry[0] for entry in tpc_data]
-    elapsed = [entry[1] for entry in tpc_data]
-    peak_mem = [entry[2] for entry in tpc_data]
-    order = sorted(range(len(nsegments)), key=lambda idx: nsegments[idx])
-    nsegments_sorted = [nsegments[i] for i in order]
-    elapsed_sorted = [elapsed[i] for i in order]
-    peak_sorted = [peak_mem[i] for i in order]
+def plot_trend(log_data: Dict[str, LogData], metric: str) -> None:
+    """Plot runtime or peak memory vs. N segments for each log."""
+    ylabel = "Elapsed time (s)" if metric == "elapsed" else "Peak CUDA memory (MB)"
+    title = (
+        "Runtime vs. segmentation"
+        if metric == "elapsed"
+        else "Peak memory vs. segmentation"
+    )
+    filename = (
+        "runtime_vs_nseg.png" if metric == "elapsed" else "peak_memory_vs_nseg.png"
+    )
 
     plt.figure(figsize=(7, 4))
-    plt.plot(nsegments_sorted, peak_sorted, marker="o")
+    for label, payload in log_data.items():
+        tpc_data = payload["tpc"]
+        nsegments = [entry[0] for entry in tpc_data]
+        order = sorted(range(len(nsegments)), key=lambda idx: nsegments[idx])
+        nsegments_sorted = [nsegments[i] for i in order]
+        if metric == "elapsed":
+            values = [tpc_data[i][1] for i in order]
+        else:
+            values = [tpc_data[i][2] for i in order]
+        if metric == "elapsed":
+            plt.plot(nsegments_sorted, values, marker="o", linestyle="-", label=label)
+        else:
+            plt.scatter(
+                nsegments_sorted,
+                values,
+                label=label,
+                alpha=0.75,
+                edgecolors="none",
+            )
+
     plt.xlabel("N segments")
-    plt.ylabel("Peak CUDA memory (MB)")
-    plt.title("Peak memory vs. segmentation")
+    plt.ylabel(ylabel)
+    plt.title(title)
     plt.grid(True, linestyle="--", alpha=0.5)
+    plt.legend()
     plt.tight_layout()
-    plt.savefig("peak_memory_vs_nseg.png", dpi=150)
-
-    plt.figure(figsize=(7, 4))
-    plt.plot(nsegments_sorted, elapsed_sorted, marker="o", color="tab:orange")
-    plt.xlabel("N segments")
-    plt.ylabel("Elapsed time (s)")
-    plt.title("Runtime vs. segmentation")
-    plt.grid(True, linestyle="--", alpha=0.5)
-    plt.tight_layout()
-    plt.savefig("runtime_vs_nseg.png", dpi=150)
+    plt.savefig(filename, dpi=150)
 
 
-def plot_summary(summary_data: List[Tuple[str, float]]) -> None:
-    labels = [label for label, _ in summary_data]
-    values = [value for _, value in summary_data]
-    plt.figure(figsize=(6, 6))
-    plt.pie(values, labels=labels, autopct="%1.1f%%", startangle=140)
-    plt.title("End-to-end stage breakdown")
+def plot_stage_pies(log_data: Dict[str, LogData]) -> None:
+    """Create side-by-side pie charts for each log's terminal summary."""
+    labels = list(log_data.keys())
+    count = len(labels)
+    fig, axes = plt.subplots(1, count, figsize=(4.5 * count, 4.5))
+    if count == 1:
+        axes = [axes]
+
+    for ax, label in zip(axes, labels):
+        summary = log_data[label]["summary"]
+        stage_labels = [entry[0] for entry in summary]
+        values = [entry[1] for entry in summary]
+        ax.pie(values, labels=stage_labels, autopct="%1.1f%%", startangle=140)
+        ax.set_title(label)
+
+    fig.suptitle("End-to-end stage breakdown")
     plt.tight_layout()
-    plt.savefig("final_stage_breakdown.png", dpi=150)
+    plt.savefig("stage_breakdown.png", dpi=150)
 
 
 def main() -> None:
-    tpc_data, summary_data = ensure_data()
-    plot_trends(tpc_data)
-    plot_summary(summary_data)
-    print(f"Parsed {len(tpc_data)} TPC blocks.")
-    print(f"Summary stages: {len(summary_data)} entries.")
-    print("Generated peak_memory_vs_nseg.png, runtime_vs_nseg.png, final_stage_breakdown.png")
+    parser = argparse.ArgumentParser(description="Generate plots from benchmark logs.")
+    parser.add_argument(
+        "logs",
+        nargs="*",
+        default=[str(DEFAULT_LOG)],
+        help="Log files to parse (default: output_10x10.log)",
+    )
+    args = parser.parse_args()
+
+    log_entries: Dict[str, LogData] = {}
+    for log_path_str in args.logs:
+        log_path = Path(log_path_str)
+        tpc_data, summary_data = parse_log_file(log_path)
+        label = format_label(log_path)
+        log_entries[label] = {"tpc": tpc_data, "summary": summary_data}
+        print(f"{label}: {len(tpc_data)} TPC blocks, {len(summary_data)} summary stages.")
+
+    plot_trend(log_entries, metric="elapsed")
+    plot_trend(log_entries, metric="peak")
+    plot_stage_pies(log_entries)
+    print("Generated runtime_vs_nseg.png, peak_memory_vs_nseg.png, stage_breakdown.png")
 
 
 if __name__ == "__main__":
