@@ -4,7 +4,7 @@
 # bin_size is the granularity of the simulation, it must be pixel pitch / npath
 # time tick is in unit of us.
 # npath is the number of impact positions.
-response_path: "/home/yousen/Public/ndlar_shared/data/responses/TestsTredPaper/fr_4p4pitch_3.8pix_nogrid_10pathsperpixel/fr_4p4pitch_3.8pix_nogrid_10pathsperpixel.npz"
+response_path: "/nfs/data/1/yousen/signal_processing/fr_4p4pitch_3.8pix_nogrid_10pathsperpixel.npz"
 module_yaml: "../nd_geometry/ndlar-module.yaml"
 tile_yaml: "../nd_geometry/multi_tile_layout-3.0.40.yaml"
 lifetime: 2.2 # ms
