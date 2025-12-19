@@ -1,0 +1,18 @@
+# field response consits of ['response', 'drift_length', 'bin_size', 'time_tick', 'npath']
+# response is normalized to be np.sum(f['response'][0,0]) = 20
+# drift length is in unit of cm.
+# bin_size is the granularity of the simulation, it must be pixel pitch / npath
+# time tick is in unit of us.
+# npath is the number of impact positions.
+response_path: "/home/yousen/Public/ndlar_shared/data/responses/TestsTredPaper/fr_4p4pitch_3.8pix_nogrid_10pathsperpixel/fr_4p4pitch_3.8pix_nogrid_10pathsperpixel.npz"
+module_yaml: "../nd_geometry/ndlar-module.yaml"
+tile_yaml: "../nd_geometry/multi_tile_layout-3.0.40.yaml"
+lifetime: 2.2 # ms
+threshold: 5. # ke
+uncorr_noise: null #ke
+reset_noise: null #ke
+thres_noise: null #ke
+save_waveform: true
+fluctuate: false
+charge_setup: [30_000, 30_000] # unit is e- !!!
+charge_drift_distance: 15 # cm

@@ -67,6 +67,9 @@ benchmark_each_stage = True
 batch_scheme = [100, 50]
 record_op_w_max_mem = True
 
+charge_setup = [20_000, 20_000]
+charge_drift_distance = 20.0 * units.cm / units.cm
+
 def update_peak_memory_label(op_name, peak_mem_mb, current_label):
     """Return updated (peak_mem_mb, label) if current stage exceeds peak."""
     if not record_op_w_max_mem or not torch.cuda.is_available():
@@ -292,11 +295,16 @@ def runit(device='cpu'):
         waveforms[f'tpc_cathode_tpc{tpcdataset.tpc_id}'] = tpcdataset.cathode
         waveforms[f'pixel_pitch_tpc{tpcdataset.tpc_id}'] = pitch
 
-
         inds_range = (tpcdataset.upper_corner - tpcdataset.lower_left_corner) // pitch
         inds_range = inds_range.to(torch.int32).to(device)
 
+        if itpc != 0:
+            break
         for ibatch, (features, labels) in enumerate(loader):
+            if ibatch != 0:
+                break
+            if len(features[0]) < 2:
+                print('--------------------- Try another file ----------------')
 
             stime = time.time()
             peak_mem = 0
@@ -317,23 +325,32 @@ def runit(device='cpu'):
                     torch.cuda.synchronize()
                 t00 = time.time()
                 features = [f.to(device=device) for f in features]
+                features = [f[:2] for f in features]
+
 
                 if device == 'cuda' and benchmark_each_stage:
                     torch.cuda.synchronize()
                 t01 = time.time()
 
-                charge = birks(dE=features[0][:,0], dEdx=features[0][:,1],
-                          efield=efield, rho=rho, A3t=A3t, k3t=k3t, Wi=Wi)
+                # fake a charge
+                charge = torch.as_tensor(charge_setup, device=device, dtype=torch.float64)
 
                 if device == 'cuda' and benchmark_each_stage:
                     torch.cuda.synchronize()
                 t02 = time.time()
 
-                local_time = features[0][:,-1]
-                tail = features[0][:,2:5]
-                head = features[0][:,5:8]
-                tail[:,[1,2]] -= tpc_lower_left
-                head[:,[1,2]] -= tpc_lower_left
+                # fake a position
+                local_time = 0
+                tail = features[0][:, 2:5]
+                tail[:, [1, 2]] = ((inds_range//2 + 0.5) * pitch).unsqueeze(0)
+                tail[1, 1] = tail[0, 1] + 1 * pitch
+                drift_position = None
+                if tpcdataset.cathode < tpcdataset.anode:
+                    drift_position = tpcdataset.anode - charge_drift_distance
+                else:
+                    drift_position = tpcdataset.anode + charge_drift_distance
+                tail[:, 0] = drift_position
+                head = tail.clone().detach()
 
                 # dsigma, dtime, dcharge, dtail, dhead
                 drifted = drifter(local_time, charge, tail, head)
@@ -382,10 +399,10 @@ def runit(device='cpu'):
                     if record_op_w_max_mem:
                         peak_mem, op_w_max_mem = update_peak_memory_label('chunksum_raster', peak_mem, op_w_max_mem)
 
-                    # effqb = chunksum_effq_out(qblock)
-                    # effqb.location[:, 0:2] //= nimperpix
-                    # effqb.location[:, -1] += int(abs(drtoa/velocity)//tspace)
-                    # effq_blocks.append(effqb)
+                    effqb = chunksum_effq_out(qblock)
+                    effqb.location[:, 0:2] //= nimperpix
+                    effqb.location[:, -1] += int(abs(drtoa/velocity)//tspace)
+                    effq_blocks.append(effqb)
                     qblock = None
                     effqb = None
                     Nqblock += signal.nbatches
@@ -437,7 +454,7 @@ def runit(device='cpu'):
                     #     torch.cuda.synchronize()
                     # t05 = time.time()
 
-                # effq_blocks = concat_blocks(effq_blocks, device='cpu')
+                effq_blocks = concat_blocks(effq_blocks, device='cpu')
 
                 # no need to chunk again; just sum
                 if device == 'cuda' and benchmark_each_stage:
@@ -528,65 +545,67 @@ def runit(device='cpu'):
                       f'N qblock {Nqblock}, '
                       f'elapsed {t07 - stime} sec on {device}.')
 
-                # if save_waveform and currents is not None:
-                #     waveforms[f'current_tpc{tpcdataset.tpc_id}_batch{ibatch}'] = currents.data.cpu().numpy()
-                #     waveforms[f'current_tpc{tpcdataset.tpc_id}_batch{ibatch}_location'] = currents.location.cpu().numpy()
+                if save_waveform and currents is not None:
+                    waveforms[f'current_tpc{tpcdataset.tpc_id}_batch{ibatch}'] = currents.data.cpu().numpy()
+                    waveforms[f'current_tpc{tpcdataset.tpc_id}_batch{ibatch}_location'] = currents.location.cpu().numpy()
 
                 # # FIXME: global time offset
-                # qbl = effq_blocks.location.to('cpu')
-                # qoff = cshape_effq_out / 2
-                # qoff[[0,1]] = qoff[[0,1]] / nimperpix
-                # qoff[2] -= global_tref[1]//tspace
-                # qblf32 = transform_indices_to_coord_3d(qbl, pitch, tspace, velocity,
-                #                                        tpc_lower_left.to(torch.float32), tpcdataset.anode, tpcdataset.drift,
-                #                                        paxes=(0,1), taxis=-1, offset=qoff)
-                # qblf32 = qblf32[:, [2,0,1]]
-                # qbd_fg = effq_blocks.data / 1E3 # to ke-
-                # qbd = qbd_fg.sum(dim=(1,2,3))
-                # qbd = torch.cat([qblf32, qbd[:,None]], dim=1)
+                qbl = effq_blocks.location.to('cpu')
+                qoff = cshape_effq_out / 2
+                qoff[[0,1]] = qoff[[0,1]] / nimperpix
+                qoff[2] -= global_tref[1]//tspace
+                qblf32 = transform_indices_to_coord_3d(qbl, pitch, tspace, velocity,
+                                                       tpc_lower_left.to(torch.float32), tpcdataset.anode, tpcdataset.drift,
+                                                       paxes=(0,1), taxis=-1, offset=qoff)
+                qblf32 = qblf32[:, [2,0,1]]
+                qbd_fg = effq_blocks.data / 1E3 # to ke-
+                qbd = qbd_fg.sum(dim=(1,2,3))
+                qbd = torch.cat([qblf32, qbd[:,None]], dim=1)
 
-                # hitl = hits[0].cpu()
-                # # FIXME: :,:3 is hard-coded
-                # hoff = torch.tensor([1/2, 1/2, adc_hold_delay-global_tref[1]//tspace]).to(torch.float32)
-                # hitlf32 = transform_indices_to_coord_3d(hitl[:,:3], pitch, tspace, velocity,
-                #                                         tpc_lower_left.to(torch.float32), tpcdataset.anode, tpcdataset.drift,
-                #                                         paxes=(0,1), taxis=-1, offset=hoff)
-                # hitlf32 = hitlf32[:, [2,0,1]]
-                # hitd = torch.cat([hitlf32, hits[1][:,None].cpu()], dim=1)
+                hitl = hits[0].cpu()
+                # FIXME: :,:3 is hard-coded
+                hoff = torch.tensor([1/2, 1/2, adc_hold_delay-global_tref[1]//tspace]).to(torch.float32)
+                hitlf32 = transform_indices_to_coord_3d(hitl[:,:3], pitch, tspace, velocity,
+                                                        tpc_lower_left.to(torch.float32), tpcdataset.anode, tpcdataset.drift,
+                                                        paxes=(0,1), taxis=-1, offset=hoff)
+                hitlf32 = hitlf32[:, [2,0,1]]
+                hitd = torch.cat([hitlf32, hits[1][:,None].cpu()], dim=1)
 
-                # waveforms[f'hits_tpc{tpcdataset.tpc_id}_batch{ibatch}'] = hitd.numpy()
-                # waveforms[f'hits_tpc{tpcdataset.tpc_id}_batch{ibatch}_location'] = hitl.numpy()
-                # waveforms[f'effq_tpc{tpcdataset.tpc_id}_batch{ibatch}'] = qbd
-                # waveforms[f'effq_tpc{tpcdataset.tpc_id}_batch{ibatch}_location'] = qbl
-                # waveforms[f'effq_fine_grain_tpc{tpcdataset.tpc_id}_batch{ibatch}'] = qbd_fg
-                # waveforms[f'effq_fine_grain_tpc{tpcdataset.tpc_id}_batch{ibatch}_location'] = qbl
+                waveforms[f'hits_tpc{tpcdataset.tpc_id}_batch{ibatch}'] = hitd.numpy()
+                waveforms[f'hits_tpc{tpcdataset.tpc_id}_batch{ibatch}_location'] = hitl.numpy()
+                waveforms[f'effq_tpc{tpcdataset.tpc_id}_batch{ibatch}'] = qbd
+                waveforms[f'effq_tpc{tpcdataset.tpc_id}_batch{ibatch}_location'] = qbl
+                waveforms[f'effq_fine_grain_tpc{tpcdataset.tpc_id}_batch{ibatch}'] = qbd_fg
+                waveforms[f'effq_fine_grain_tpc{tpcdataset.tpc_id}_batch{ibatch}_location'] = qbl
 
                 torch.cuda.reset_peak_memory_stats()
             except IndexError as e:
                 raise e
 
     # Stop recording memory snapshot history.
-    # waveforms["tile_yaml"] = tile_yaml
-    # waveforms["module_yaml"] = module_yaml
-    # waveforms["response_path"] = response_path
-    # waveforms["lifetime"] = lifetime
-    # waveforms["drtoa"] = drtoa
-    # waveforms["threshold"] = threshold
-    # waveforms["event_list"] = event_list
-    # waveforms["save_waveform"] = save_waveform
-    # waveforms["uncorr_noise"] = uncorr_noise
-    # waveforms["thres_noise"] = thres_noise
-    # waveforms["reset_noise"] = reset_noise
-    # waveforms["fluctuate"] = fluctuate
-    # waveforms["effq_out_nt"] = effq_out_nt
-    # waveforms["input_path"] = input_path
-    # waveforms["adc_hold_delay"] = adc_hold_delay
-    # waveforms["adc_down_time"] = adc_down_time
-    # waveforms["csa_reset_time "] = csa_reset_time
-    # waveforms["one_tick"] = one_tick
-    # waveforms[f'time_spacing'] = tspace
+    waveforms["tile_yaml"] = tile_yaml
+    waveforms["module_yaml"] = module_yaml
+    waveforms["response_path"] = response_path
+    waveforms["lifetime"] = lifetime
+    waveforms["drtoa"] = drtoa
+    waveforms["threshold"] = threshold
+    waveforms["event_list"] = event_list
+    waveforms["save_waveform"] = save_waveform
+    waveforms["uncorr_noise"] = uncorr_noise
+    waveforms["thres_noise"] = thres_noise
+    waveforms["reset_noise"] = reset_noise
+    waveforms["fluctuate"] = fluctuate
+    waveforms["effq_out_nt"] = effq_out_nt
+    waveforms["input_path"] = input_path
+    waveforms["adc_hold_delay"] = adc_hold_delay
+    waveforms["adc_down_time"] = adc_down_time
+    waveforms["csa_reset_time "] = csa_reset_time
+    waveforms["one_tick"] = one_tick
+    waveforms[f'time_spacing'] = tspace
+    waveforms['charge_setup'] = charge_setup
+    waveforms['charge_drift_distance'] = charge_drift_distance
 
-    # write_npz(output_path, **waveforms)
+    write_npz(output_path, **waveforms)
 
     info(f'{t1-t0} construct')
     info(f'{t2-t1} get response')
@@ -660,6 +679,9 @@ def fullsim(config, finpath, foutpath):
     global benchmark_each_stage
     global batch_scheme
 
+    global charge_setup
+    global charge_drift_distance
+
     with open(config, "r") as fconfig:
         config = yaml.safe_load(fconfig)
 
@@ -683,6 +705,8 @@ def fullsim(config, finpath, foutpath):
     backmark_each_stage = config.get("benchmark_each_stage", True)
     batch_scheme = config.get("batch_scheme", [100, 50])
     npoints = config.get('npoints', (2, 2, 2))
+    charge_setup = config.get("charge_setup", [20_000, 20_000])
+    charge_drift_distance = config.get("charge_drift_distance", 20.0) * units.cm / units.cm
 
     # loading response
     if os.path.splitext(response_path)[1] == '.npz':
