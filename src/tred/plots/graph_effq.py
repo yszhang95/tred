@@ -196,8 +196,8 @@ def runit(device='cpu'):
     export_pickle = False
 
     # eventually replace this hard-wire with configuration
-    # twindow_max = 12_000 # 12_000 * 50ns = 600us
-    twindow_max = 7_200 # 12_000 * 50ns = 600us
+    twindow_max = 12_000 # 12_000 * 50ns = 600us
+    # twindow_max = 7_200 # 12_000 * 50ns = 600us
     DL = 6.6270 * units.cm2/units.s / (units.cm2/units.us) # value are in cm2/us
     DT = 13.2427 * units.cm2/units.s / (units.cm2/units.us) # value are in cm2/us
     diffusion = torch.tensor([DL, DT, DT])
@@ -528,9 +528,9 @@ def runit(device='cpu'):
                       f'N qblock {Nqblock}, '
                       f'elapsed {t07 - stime} sec on {device}.')
 
-                # if save_waveform and currents is not None:
-                #     waveforms[f'current_tpc{tpcdataset.tpc_id}_batch{ibatch}'] = currents.data.cpu().numpy()
-                #     waveforms[f'current_tpc{tpcdataset.tpc_id}_batch{ibatch}_location'] = currents.location.cpu().numpy()
+                if save_waveform and currents is not None:
+                    waveforms[f'current_tpc{tpcdataset.tpc_id}_batch{ibatch}'] = currents.data.cpu().numpy()
+                    waveforms[f'current_tpc{tpcdataset.tpc_id}_batch{ibatch}_location'] = currents.location.cpu().numpy()
 
                 # # FIXME: global time offset
                 # qbl = effq_blocks.location.to('cpu')
@@ -566,27 +566,26 @@ def runit(device='cpu'):
                 raise e
 
     # Stop recording memory snapshot history.
-    # waveforms["tile_yaml"] = tile_yaml
-    # waveforms["module_yaml"] = module_yaml
-    # waveforms["response_path"] = response_path
-    # waveforms["lifetime"] = lifetime
-    # waveforms["drtoa"] = drtoa
-    # waveforms["threshold"] = threshold
-    # waveforms["event_list"] = event_list
-    # waveforms["save_waveform"] = save_waveform
-    # waveforms["uncorr_noise"] = uncorr_noise
-    # waveforms["thres_noise"] = thres_noise
-    # waveforms["reset_noise"] = reset_noise
-    # waveforms["fluctuate"] = fluctuate
-    # waveforms["effq_out_nt"] = effq_out_nt
-    # waveforms["input_path"] = input_path
-    # waveforms["adc_hold_delay"] = adc_hold_delay
-    # waveforms["adc_down_time"] = adc_down_time
-    # waveforms["csa_reset_time "] = csa_reset_time
-    # waveforms["one_tick"] = one_tick
-    # waveforms[f'time_spacing'] = tspace
+    waveforms["tile_yaml"] = tile_yaml
+    waveforms["module_yaml"] = module_yaml
+    waveforms["response_path"] = response_path
+    waveforms["lifetime"] = lifetime
+    waveforms["drtoa"] = drtoa
+    waveforms["threshold"] = threshold
+    waveforms["event_list"] = event_list
+    waveforms["save_waveform"] = save_waveform
+    waveforms["uncorr_noise"] = uncorr_noise
+    waveforms["thres_noise"] = thres_noise
+    waveforms["reset_noise"] = reset_noise
+    waveforms["fluctuate"] = fluctuate
+    waveforms["effq_out_nt"] = effq_out_nt
+    waveforms["input_path"] = input_path
+    waveforms["adc_hold_delay"] = adc_hold_delay
+    waveforms["adc_down_time"] = adc_down_time
+    waveforms["csa_reset_time "] = csa_reset_time
+    waveforms["one_tick"] = one_tick
+    waveforms[f'time_spacing'] = tspace
 
-    # write_npz(output_path, **waveforms)
 
     info(f'{t1-t0} construct')
     info(f'{t2-t1} get response')
@@ -611,6 +610,8 @@ def runit(device='cpu'):
     torch.cuda.memory._record_memory_history(enabled=None)
 
     info(f"Peak memory usage {torch.cuda.max_memory_allocated()/1024**2:.2f} MB")
+
+    write_npz(output_path, **waveforms)
 
 def plots(out):
     with torch.no_grad():
