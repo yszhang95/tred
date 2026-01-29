@@ -14,5 +14,5 @@ reset_noise: null #ke
 thres_noise: null #ke
 save_waveform: true
 fluctuate: false
-charge_setup: [30_000, 30_000] # unit is e- !!!
+charge_setup: [30_000, 10_000] # unit is e- !!!
 charge_drift_distance: 15 # cm

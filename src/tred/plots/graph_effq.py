@@ -401,7 +401,7 @@ def runit(device='cpu'):
 
                     effqb = chunksum_effq_out(qblock)
                     effqb.location[:, 0:2] //= nimperpix
-                    effqb.location[:, -1] += int(abs(drtoa/velocity)//tspace)
+                    # effqb.location[:, -1] += int(abs(drtoa/velocity)//tspace)
                     effq_blocks.append(effqb)
                     qblock = None
                     effqb = None
