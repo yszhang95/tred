@@ -47,6 +47,7 @@ reset_noise = None
 thres_noise = None
 fluctuate = False
 effq_out_nt = 1
+nburst = 1
 
 pitch = 4.434*units.mm / units.cm # values are in units of cm
 nimperpix=10
@@ -316,9 +317,6 @@ def runit(device='cpu'):
                 global_tref = [features[0][0,-2].numpy(), torch.min(features[0][:,-1]).numpy()] # assume it is in us
                 waveforms[f'global_tref_tpc{tpcdataset.tpc_id}_batch{ibatch}'] = np.array(global_tref)
                 waveforms[f'event_id_tpc{tpcdataset.tpc_id}_batch{ibatch}'] = labels[0,0].numpy()
-                # assume there is only one particle in the event
-                waveforms[f'event_start_tpc{tpcdataset.tpc_id}_batch{ibatch}'] = features[0][0,2:5].numpy()
-                waveforms[f'event_end_tpc{tpcdataset.tpc_id}_batch{ibatch}'] = features[0][-1,5:8].numpy()
 
                 # enable when benchmark each stage
                 if device == 'cuda' and benchmark_each_stage:
@@ -401,7 +399,6 @@ def runit(device='cpu'):
 
                     effqb = chunksum_effq_out(qblock)
                     effqb.location[:, 0:2] //= nimperpix
-                    # effqb.location[:, -1] += int(abs(drtoa/velocity)//tspace)
                     effq_blocks.append(effqb)
                     qblock = None
                     effqb = None
@@ -505,7 +502,8 @@ def runit(device='cpu'):
                     thres[thres<2] = 1E16 # FIXME: Temporarily disable low threshold channels
                 hits = nd_readout(currents, thres, adc_hold_delay, adc_down_time, csa_reset_time, one_tick=one_tick,
                                   offset_to_align=0, # FIXME: how to calculate properly?
-                                  pixel_axes=(1,2), uncorr_noise=uncorr_noise, thres_noise=thres_noise, reset_noise=reset_noise)
+                                  pixel_axes=(1,2), uncorr_noise=uncorr_noise, thres_noise=thres_noise, reset_noise=reset_noise,
+                                  nburst=nburst)
                 if device == 'cuda':
                     torch.cuda.synchronize()
                 t10 = time.time()
@@ -569,14 +567,17 @@ def runit(device='cpu'):
                                                         tpc_lower_left.to(torch.float32), tpcdataset.anode, tpcdataset.drift,
                                                         paxes=(0,1), taxis=-1, offset=hoff)
                 hitlf32 = hitlf32[:, [2,0,1]]
-                hitd = torch.cat([hitlf32, hits[1][:,None].cpu()], dim=1)
+                if hits[1].ndim == 1:
+                    hitd = torch.cat([hitlf32, hits[1][:,None].cpu()], dim=1)
+                elif hits[1].ndim == 2:
+                    hitd = torch.cat([hitlf32, hits[1].cpu()], dim=1)
+                else:
+                    raise ValueError('Unexpected hits data dimension.')
 
                 waveforms[f'hits_tpc{tpcdataset.tpc_id}_batch{ibatch}'] = hitd.numpy()
                 waveforms[f'hits_tpc{tpcdataset.tpc_id}_batch{ibatch}_location'] = hitl.numpy()
                 waveforms[f'effq_tpc{tpcdataset.tpc_id}_batch{ibatch}'] = qbd
                 waveforms[f'effq_tpc{tpcdataset.tpc_id}_batch{ibatch}_location'] = qbl
-                waveforms[f'effq_fine_grain_tpc{tpcdataset.tpc_id}_batch{ibatch}'] = qbd_fg
-                waveforms[f'effq_fine_grain_tpc{tpcdataset.tpc_id}_batch{ibatch}_location'] = qbl
 
                 torch.cuda.reset_peak_memory_stats()
             except IndexError as e:
@@ -599,11 +600,13 @@ def runit(device='cpu'):
     waveforms["input_path"] = input_path
     waveforms["adc_hold_delay"] = adc_hold_delay
     waveforms["adc_down_time"] = adc_down_time
-    waveforms["csa_reset_time "] = csa_reset_time
+    waveforms["csa_reset_time"] = csa_reset_time
+
     waveforms["one_tick"] = one_tick
     waveforms[f'time_spacing'] = tspace
     waveforms['charge_setup'] = charge_setup
     waveforms['charge_drift_distance'] = charge_drift_distance
+    waveforms['nburst'] = nburst
 
     write_npz(output_path, **waveforms)
 
@@ -659,6 +662,7 @@ def fullsim(config, finpath, foutpath):
     global adc_down_time
     global csa_reset_time
     global one_tick
+    global nburst
 
     global const_recomb
 
@@ -730,6 +734,8 @@ def fullsim(config, finpath, foutpath):
     csa_reset_time = int(round(csa_reset_time))
     one_tick = config.get("one_tick", 0.1) * units.us / units.us / (tspace * units.us / units.us)
     one_tick = int(round(one_tick))
+    nburst = config.get("nburst", 1)
+    nburst = int(nburst)
 
     if finpath is None:
         input_path = "/home/yousen/Public/ndlar_shared/data/tred_2x2_2025010/filtered_MiniRun5_1E19_RHC.convert2h5.0000000.EDEPSIM.hdf5"

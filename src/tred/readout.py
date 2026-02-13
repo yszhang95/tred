@@ -5,7 +5,7 @@ from tred.blocking import Block
 
 def nd_readout(block, threshold, adc_hold_delay, adc_down_time, csa_reset_time=1, one_tick=1,
                offset_to_align=0, pixel_axes=(), taxis=-1,
-               uncorr_noise=None, thres_noise=None, reset_noise=None, leftover=None, niter=10):
+               uncorr_noise=None, thres_noise=None, reset_noise=None, leftover=None, niter=10, nburst=4):
     '''
     locs :: (N, nxpl, nxpl, ..., vdim)
     X :: (N, npxl, npxl, ..., Nt)
@@ -99,11 +99,16 @@ def nd_readout(block, threshold, adc_hold_delay, adc_down_time, csa_reset_time=1
         triggered = crossed & delay_crossed & (hold_t < Nt) # shape (N, npxl, ..., 1) if taxis = -1
         # logging.debug(f'triggered shape {triggered.shape}')
         # if iteration % niter == 0 and not mvalid.any():
+
         if not triggered.any():
             # FIXME: We need deal with leftover on the CSA.
             # FIXME: the leftover should cover at least one
             # FIXME: As the input is current, we need to return current from accumulated charge
             break
+
+        # after triggering, we do hits and busrt htis
+        # hold_t is the actual hold time, we need a label to indicate the hold time reaches the cap.
+
         glocs = locations[triggered.squeeze(taxis)]
         pixels = glocs[:,pxl_indices] # 2D array (Ntriggered, vdim-1)
         # print(pixels)
@@ -111,14 +116,28 @@ def nd_readout(block, threshold, adc_hold_delay, adc_down_time, csa_reset_time=1
         times = gtimes + cross_t[triggered] # 1D with last dim the
         hold_times = gtimes + hold_t[triggered]
         hits = torch.gather(Xacc, taxis, hold_t_inrange)[triggered] # 1D array
+        if thres_noise is None:
+            assert torch.all(hits > thres[triggered]).item()
+
+        burst_hits = [hits, ]
+        # hold_t[triggered] repeat burst times
+        burst_times = torch.zeros((hold_t[triggered].flatten().shape[0], nburst), dtype=hold_t.dtype, device=hold_t.device)
+        burst_times[:, 0] = hold_t_inrange[triggered].flatten()
+        for b in range(1, nburst):
+            hold_t = hold_t + adc_hold_delay
+            next_t = torch.clamp(hold_t, min=0, max=Nt-1)
+            burst_times[:, b] = next_t[triggered].flatten()
+            next_hit = torch.gather(Xacc, taxis, next_t)[triggered]
+            burst_hits.append(next_hit)
+        hits = torch.stack(burst_hits, dim=1)
+
         # start = hold_t + adc_down_time + 1
         start[triggered] = hold_t[triggered] + adc_down_time + one_tick # on discriminator, controlled by adc down time
         start_times = gtimes + start[triggered]
         oloc = torch.cat([pixels, times.unsqueeze(1), hold_times.unsqueeze(1), start_times.unsqueeze(1)], dim=1)
+        print(oloc)
         olocs.append(oloc)
         ocharges.append(hits)
-        if thres_noise is None:
-            assert torch.all(hits > thres[triggered]).item()
         start[~triggered] = hold_t[~triggered] + one_tick
         start[~crossed] = Nt # crossed not triggered should be at hold_t+1; never crossed needs to be at start.
         # at triggered positions, charges are reset and there is one timestamp missing;
@@ -127,12 +146,14 @@ def nd_readout(block, threshold, adc_hold_delay, adc_down_time, csa_reset_time=1
         # FIXME: what happens if the hold_t is the last element?
         Xacc_next_to_hold_t = torch.gather(Xacc, taxis, torch.clamp(hold_t+csa_reset_time, min=0, max=Nt-1))
         # only update the triggered positions
+        # FIXME: the noise is double counting
         Xacc[triggered.squeeze(taxis)] -= Xacc_next_to_hold_t[triggered.squeeze(taxis)]
         if reset_noise is not None:
             # FIXME: taxis is assumed to be -1
             Xacc_baseline = torch.normal(0, torch.full(Xacc.shape[:-1], fill_value=reset_noise, device=Xacc.device))
             # print('shape', Xacc_baseline[triggered.squeeze(taxis)].unsqueeze(-1))
             Xacc[triggered.squeeze(taxis)] += Xacc_baseline[triggered.squeeze(taxis)].unsqueeze(-1)
+            # FIXME: zeros out invalid ticks from start_times
 
         iteration += 1
     if len(olocs) == 0:
