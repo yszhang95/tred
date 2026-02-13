@@ -535,6 +535,7 @@ def runit(device='cpu'):
                 qoff = cshape_effq_out / 2
                 qoff[[0,1]] = qoff[[0,1]] / nimperpix
                 qoff[2] -= global_tref[1]//tspace
+                qoff[2] += int(drtoa/tspace/velocity) # offset to align with hits time
                 qblf32 = transform_indices_to_coord_3d(qbl, pitch, tspace, velocity,
                                                        tpc_lower_left.to(torch.float32), tpcdataset.anode, tpcdataset.drift,
                                                        paxes=(0,1), taxis=-1, offset=qoff)
@@ -588,12 +589,11 @@ def runit(device='cpu'):
     waveforms["adc_down_time"] = adc_down_time
     waveforms["csa_reset_time"] = csa_reset_time
     waveforms["one_tick"] = one_tick
-    waveforms[f'time_spacing'] = tspace
-    waveforms['charge_setup'] = charge_setup
-    waveforms['charge_drift_distance'] = charge_drift_distance
+    waveforms['time_spacing'] = tspace
     waveforms['nburst'] = nburst
+    waveforms['finpath'] = input_path
 
-    # write_npz(output_path, **waveforms)
+    write_npz(output_path, **waveforms)
 
     info(f'{t1-t0} construct')
     info(f'{t2-t1} get response')
