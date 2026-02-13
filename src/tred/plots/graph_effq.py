@@ -68,6 +68,9 @@ benchmark_each_stage = True
 batch_scheme = [100, 50]
 record_op_w_max_mem = True
 
+charge_setup = [20_000, 20_000]
+charge_drift_distance = 20.0 * units.cm / units.cm
+
 def update_peak_memory_label(op_name, peak_mem_mb, current_label):
     """Return updated (peak_mem_mb, label) if current stage exceeds peak."""
     if not record_op_w_max_mem or not torch.cuda.is_available():
@@ -293,11 +296,16 @@ def runit(device='cpu'):
         waveforms[f'tpc_cathode_tpc{tpcdataset.tpc_id}'] = tpcdataset.cathode
         waveforms[f'pixel_pitch_tpc{tpcdataset.tpc_id}'] = pitch
 
-
         inds_range = (tpcdataset.upper_corner - tpcdataset.lower_left_corner) // pitch
         inds_range = inds_range.to(torch.int32).to(device)
 
+        if itpc != 0:
+            break
         for ibatch, (features, labels) in enumerate(loader):
+            if ibatch != 0:
+                break
+            if len(features[0]) < 2:
+                print('--------------------- Try another file ----------------')
 
             stime = time.time()
             peak_mem = 0
@@ -315,23 +323,32 @@ def runit(device='cpu'):
                     torch.cuda.synchronize()
                 t00 = time.time()
                 features = [f.to(device=device) for f in features]
+                features = [f[:2] for f in features]
+
 
                 if device == 'cuda' and benchmark_each_stage:
                     torch.cuda.synchronize()
                 t01 = time.time()
 
-                charge = birks(dE=features[0][:,0], dEdx=features[0][:,1],
-                          efield=efield, rho=rho, A3t=A3t, k3t=k3t, Wi=Wi)
+                # fake a charge
+                charge = torch.as_tensor(charge_setup, device=device, dtype=torch.float64)
 
                 if device == 'cuda' and benchmark_each_stage:
                     torch.cuda.synchronize()
                 t02 = time.time()
 
-                local_time = features[0][:,-1]
-                tail = features[0][:,2:5]
-                head = features[0][:,5:8]
-                tail[:,[1,2]] -= tpc_lower_left
-                head[:,[1,2]] -= tpc_lower_left
+                # fake a position
+                local_time = 0
+                tail = features[0][:, 2:5]
+                tail[:, [1, 2]] = ((inds_range//2 + 0.5) * pitch).unsqueeze(0)
+                tail[1, 1] = tail[0, 1] + 1 * pitch
+                drift_position = None
+                if tpcdataset.cathode < tpcdataset.anode:
+                    drift_position = tpcdataset.anode - charge_drift_distance
+                else:
+                    drift_position = tpcdataset.anode + charge_drift_distance
+                tail[:, 0] = drift_position
+                head = tail.clone().detach()
 
                 # dsigma, dtime, dcharge, dtail, dhead
                 drifted = drifter(local_time, charge, tail, head)
@@ -561,15 +578,12 @@ def runit(device='cpu'):
                 waveforms[f'hits_tpc{tpcdataset.tpc_id}_batch{ibatch}_location'] = hitl.numpy()
                 waveforms[f'effq_tpc{tpcdataset.tpc_id}_batch{ibatch}'] = qbd
                 waveforms[f'effq_tpc{tpcdataset.tpc_id}_batch{ibatch}_location'] = qbl
-                # waveforms[f'effq_fine_grain_tpc{tpcdataset.tpc_id}_batch{ibatch}'] = qbd_fg
-                # waveforms[f'effq_fine_grain_tpc{tpcdataset.tpc_id}_batch{ibatch}_location'] = qbl
 
                 torch.cuda.reset_peak_memory_stats()
             except IndexError as e:
                 raise e
 
     # Stop recording memory snapshot history.
-
     waveforms["tile_yaml"] = tile_yaml
     waveforms["module_yaml"] = module_yaml
     waveforms["response_path"] = response_path
@@ -593,7 +607,7 @@ def runit(device='cpu'):
     waveforms['charge_drift_distance'] = charge_drift_distance
     waveforms['nburst'] = nburst
 
-    # write_npz(output_path, **waveforms)
+    write_npz(output_path, **waveforms)
 
     info(f'{t1-t0} construct')
     info(f'{t2-t1} get response')
@@ -668,6 +682,9 @@ def fullsim(config, finpath, foutpath):
     global benchmark_each_stage
     global batch_scheme
 
+    global charge_setup
+    global charge_drift_distance
+
     with open(config, "r") as fconfig:
         config = yaml.safe_load(fconfig)
 
@@ -691,6 +708,8 @@ def fullsim(config, finpath, foutpath):
     backmark_each_stage = config.get("benchmark_each_stage", True)
     batch_scheme = config.get("batch_scheme", [100, 50])
     npoints = config.get('npoints', (2, 2, 2))
+    charge_setup = config.get("charge_setup", [20_000, 20_000])
+    charge_drift_distance = config.get("charge_drift_distance", 20.0) * units.cm / units.cm
 
     # loading response
     if os.path.splitext(response_path)[1] == '.npz':
