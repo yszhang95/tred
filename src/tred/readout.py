@@ -161,3 +161,41 @@ def nd_readout(block, threshold, adc_hold_delay, adc_down_time, csa_reset_time=1
             torch.zeros((0,), dtype=torch.float32, device=X.device)
         raise NotImplementedError("Not sure how to handle empty hit collection")
     return torch.cat(olocs, dim=0), torch.cat(ocharges, dim=0)
+
+
+def fixed_interval_readout(block, adc_hold_delay, one_tick=1,
+                           offset_to_align=0, pixel_axes=(), taxis=-1,
+                           uncorr_noise=None):
+    '''
+    locs :: (N, nxpl, nxpl, ..., vdim)
+    X :: (N, npxl, npxl, ..., Nt)
+    Is X already the summed? No
+    Do it once or iteratively?
+    Do it Once is faster but complicated
+    Do it iteratively is easier but complicated...
+
+    Let us do it once.
+
+    one_tick :: how many points in time for one time tick. Useful for next-to action,
+                for instance, threshold-crossing check after CSA reset and ADC down time,
+                counting ADC HOLD DELAY after trigger crossing.
+    '''
+    X = block.data
+    locations = block.location
+    if taxis < 0:
+        taxis = X.ndim + taxis
+    if taxis != X.ndim-1:
+        raise NotImplementedError()
+    Xacc = X.cumsum(dim=taxis)
+    if uncorr_noise is not None:
+        Xacc += torch.normal(0, torch.full_like(Xacc, fill_value=uncorr_noise, device=Xacc.device))
+    records = Xacc[..., offset_to_align::adc_hold_delay]
+    for i in pixel_axes:
+        if records.shape[i] != 1:
+            raise ValueError(f"Pixel axis {i} has size {records.shape[i]}, expected 1.")
+    records = torch.squeeze(records, dim=pixel_axes)
+    locs = torch.zeros((locations.shape[0], locations.shape[-1]+2), dtype=locations.dtype, device=locations.device)
+    locs[:, :locations.shape[1]] = locations[:, :]
+    locs[:, -2] = locations[:, -1]
+    locs[:, -1] = locations[:, -1]
+    return locs, records

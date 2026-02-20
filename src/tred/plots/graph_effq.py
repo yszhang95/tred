@@ -13,7 +13,7 @@ from tred.io_nd import (
 from tred.recombination import birks, box
 from tred.io import write_npz
 from tred import chunking
-from tred.readout import nd_readout
+from tred.readout import nd_readout, fixed_interval_readout
 
 import sys
 import h5py
@@ -198,7 +198,8 @@ def runit(device='cpu'):
 
     # eventually replace this hard-wire with configuration
     # twindow_max = 12_000 # 12_000 * 50ns = 600us
-    twindow_max = 7_200 # 12_000 * 50ns = 600us
+    # twindow_max = 7_200 # 12_000 * 50ns = 600us
+    twindow_max = 3_600 # 12_000 * 50ns = 600us
     DL = 6.6270 * units.cm2/units.s / (units.cm2/units.us) # value are in cm2/us
     DT = 13.2427 * units.cm2/units.s / (units.cm2/units.us) # value are in cm2/us
     diffusion = torch.tensor([DL, DT, DT])
@@ -483,10 +484,17 @@ def runit(device='cpu'):
                 thres = thresholds[tpcdataset.tpc_id].to(device)
                 if thres.ndim > 0:
                     thres[thres<2] = 1E16 # FIXME: Temporarily disable low threshold channels
-                hits = nd_readout(currents, thres, adc_hold_delay, adc_down_time, csa_reset_time, one_tick=one_tick,
-                                  offset_to_align=0, # FIXME: how to calculate properly?
-                                  pixel_axes=(1,2), uncorr_noise=uncorr_noise, thres_noise=thres_noise, reset_noise=reset_noise,
-                                  nburst=nburst)
+                # hits = nd_readout(currents, thres, adc_hold_delay, adc_down_time, csa_reset_time, one_tick=one_tick,
+                #                   offset_to_align=0, # FIXME: how to calculate properly?
+                #                   pixel_axes=(1,2), uncorr_noise=uncorr_noise, thres_noise=thres_noise, reset_noise=reset_noise,
+                #                   nburst=nburst)
+                hits = fixed_interval_readout(currents, adc_hold_delay,
+                                              one_tick=one_tick,
+                                              offset_to_align=0, # FIXME: how to calculate properly?
+                                              pixel_axes=(1,2),
+                                              taxis=-1,
+                                              uncorr_noise=uncorr_noise)
+
                 if device == 'cuda':
                     torch.cuda.synchronize()
                 t10 = time.time()
@@ -556,7 +564,7 @@ def runit(device='cpu'):
                 elif hits[1].ndim == 2:
                     hitd = torch.cat([hitlf32, hits[1].cpu()], dim=1)
                 else:
-                    raise ValueError('Unexpected hits data dimension.')
+                    raise ValueError('Unexpected hits data dimension: {}, {}'.format(hits[1].ndim, hits[1].shape))
 
                 waveforms[f'hits_tpc{tpcdataset.tpc_id}_batch{ibatch}'] = hitd.numpy()
                 waveforms[f'hits_tpc{tpcdataset.tpc_id}_batch{ibatch}_location'] = hitl.numpy()
