@@ -198,4 +198,5 @@ def fixed_interval_readout(block, adc_hold_delay, one_tick=1,
     locs[:, :locations.shape[1]] = locations[:, :]
     locs[:, -2] = locations[:, -1]
     locs[:, -1] = locations[:, -1]
+    locs[:, 3:] += offset_to_align
     return locs, records

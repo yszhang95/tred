@@ -58,6 +58,7 @@ adc_hold_delay = None
 adc_down_time = None
 csa_reset_time = None
 one_tick = None
+offset_to_align = 0
 
 response = None
 
@@ -490,7 +491,7 @@ def runit(device='cpu'):
                 #                   nburst=nburst)
                 hits = fixed_interval_readout(currents, adc_hold_delay,
                                               one_tick=one_tick,
-                                              offset_to_align=0, # FIXME: how to calculate properly?
+                                              offset_to_align=offset_to_align,
                                               pixel_axes=(1,2),
                                               taxis=-1,
                                               uncorr_noise=uncorr_noise)
@@ -599,6 +600,7 @@ def runit(device='cpu'):
     waveforms["one_tick"] = one_tick
     waveforms['time_spacing'] = tspace
     waveforms['nburst'] = nburst
+    waveforms['offset_to_align'] = offset_to_align
     waveforms['finpath'] = input_path
 
     write_npz(output_path, **waveforms)
@@ -656,6 +658,7 @@ def fullsim(config, finpath, foutpath):
     global csa_reset_time
     global one_tick
     global nburst
+    global offset_to_align
 
     global const_recomb
 
@@ -724,6 +727,8 @@ def fullsim(config, finpath, foutpath):
     one_tick = int(round(one_tick))
     nburst = config.get("nburst", 1)
     nburst = int(nburst)
+    offset_to_align = config.get("offset_to_align", 0)
+    offset_to_align = int(offset_to_align)
 
     if finpath is None:
         input_path = "/home/yousen/Public/ndlar_shared/data/tred_2x2_2025010/filtered_MiniRun5_1E19_RHC.convert2h5.0000000.EDEPSIM.hdf5"

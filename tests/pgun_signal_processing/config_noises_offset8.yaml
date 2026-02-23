@@ -1,0 +1,17 @@
+# field response consits of ['response', 'drift_length', 'bin_size', 'time_tick', 'npath']
+# response is normalized to be np.sum(f['response'][0,0]) = 20
+# drift length is in unit of cm.
+# bin_size is the granularity of the simulation, it must be pixel pitch / npath
+# time tick is in unit of us.
+# npath is the number of impact positions.
+response_path: "/home/yousen/Public/ndlar_shared/data/responses/TestsTredPaper/fr_4p4pitch_3.8pix_nogrid_10pathsperpixel/fr_4p4pitch_3.8pix_nogrid_10pathsperpixel.npz"
+module_yaml: "/home/yousen/Documents/NDLAr2x2/tred/tests/playground/2x2_mod2mod_variation.yaml"
+tile_yaml: "/home/yousen/Documents/NDLAr2x2/tred/tests/playground/multi_tile_layout-2.4.16.yaml"
+lifetime: 20.0 # ms
+threshold: 5. # ke
+uncorr_noise: 0.5 #ke
+reset_noise: 0.9 #ke
+thres_noise: 0.65 #ke
+save_waveform: false
+fluctuate: false
+offset_to_align: 8
