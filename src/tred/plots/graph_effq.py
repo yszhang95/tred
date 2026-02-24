@@ -59,6 +59,7 @@ adc_down_time = None
 csa_reset_time = None
 one_tick = None
 offset_to_align = 0
+readout_model = 'fixed_interval' # 'nd_readout' or 'fixed_interval'
 
 response = None
 
@@ -485,16 +486,20 @@ def runit(device='cpu'):
                 thres = thresholds[tpcdataset.tpc_id].to(device)
                 if thres.ndim > 0:
                     thres[thres<2] = 1E16 # FIXME: Temporarily disable low threshold channels
-                # hits = nd_readout(currents, thres, adc_hold_delay, adc_down_time, csa_reset_time, one_tick=one_tick,
-                #                   offset_to_align=0, # FIXME: how to calculate properly?
-                #                   pixel_axes=(1,2), uncorr_noise=uncorr_noise, thres_noise=thres_noise, reset_noise=reset_noise,
-                #                   nburst=nburst)
-                hits = fixed_interval_readout(currents, adc_hold_delay,
-                                              one_tick=one_tick,
-                                              offset_to_align=offset_to_align,
-                                              pixel_axes=(1,2),
-                                              taxis=-1,
-                                              uncorr_noise=uncorr_noise)
+                if readout_model == 'nd_readout':
+                    hits = nd_readout(currents, thres, adc_hold_delay, adc_down_time, csa_reset_time, one_tick=one_tick,
+                                      offset_to_align=0, # FIXME: how to calculate properly?
+                                      pixel_axes=(1,2), uncorr_noise=uncorr_noise, thres_noise=thres_noise, reset_noise=reset_noise,
+                                      nburst=nburst)
+                elif readout_model == 'fixed_interval':
+                    hits = fixed_interval_readout(currents, adc_hold_delay,
+                                                  one_tick=one_tick,
+                                                  offset_to_align=offset_to_align,
+                                                  pixel_axes=(1,2),
+                                                  taxis=-1,
+                                                  uncorr_noise=uncorr_noise)
+                else:
+                    raise ValueError(f'Unsupported readout model: {readout_model}')
 
                 if device == 'cuda':
                     torch.cuda.synchronize()
@@ -601,6 +606,7 @@ def runit(device='cpu'):
     waveforms['time_spacing'] = tspace
     waveforms['nburst'] = nburst
     waveforms['offset_to_align'] = offset_to_align
+    waveforms['readout_model'] = readout_model
     waveforms['finpath'] = input_path
 
     write_npz(output_path, **waveforms)
@@ -659,6 +665,7 @@ def fullsim(config, finpath, foutpath):
     global one_tick
     global nburst
     global offset_to_align
+    global readout_model
 
     global const_recomb
 
@@ -729,6 +736,7 @@ def fullsim(config, finpath, foutpath):
     nburst = int(nburst)
     offset_to_align = config.get("offset_to_align", 0)
     offset_to_align = int(offset_to_align)
+    readout_model = config.get("readout_model", 'fixed_interval')
 
     if finpath is None:
         input_path = "/home/yousen/Public/ndlar_shared/data/tred_2x2_2025010/filtered_MiniRun5_1E19_RHC.convert2h5.0000000.EDEPSIM.hdf5"
