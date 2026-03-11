@@ -5,7 +5,8 @@ from tred.blocking import Block
 
 def nd_readout(block, threshold, adc_hold_delay, adc_down_time, csa_reset_time=1, one_tick=1,
                offset_to_align=0, pixel_axes=(), taxis=-1,
-               uncorr_noise=None, thres_noise=None, reset_noise=None, leftover=None, niter=10, nburst=4):
+               uncorr_noise=None, thres_noise=None, reset_noise=None, leftover=None, niter=10, nburst=4,
+               ):
     '''
     locs :: (N, nxpl, nxpl, ..., vdim)
     X :: (N, npxl, npxl, ..., Nt)
@@ -34,6 +35,7 @@ def nd_readout(block, threshold, adc_hold_delay, adc_down_time, csa_reset_time=1
     threshold = threshold.unsqueeze(-1)
     olocs = []
     ocharges = []
+    ocharges_true = []
     if taxis < 0:
         taxis = X.ndim + taxis
     if taxis != X.ndim-1:
@@ -56,6 +58,7 @@ def nd_readout(block, threshold, adc_hold_delay, adc_down_time, csa_reset_time=1
     # info(f'X shape {X.shape}')
     # FIXME: what is an appropriate accumulation function?
     Xacc = X.cumsum(dim=taxis)
+    Xacc_true = Xacc.clone().detach()
     # logging.debug(f'Xacc shape {Xacc.shape}')
     # info(f'Xacc shape {Xacc.shape}')
     if uncorr_noise is not None:
@@ -77,6 +80,7 @@ def nd_readout(block, threshold, adc_hold_delay, adc_down_time, csa_reset_time=1
         # logging.debug(f'mvalid shape {mvalid.shape}')
         # info(f'mvalid shape {mvalid.shape}')
         Xacc = Xacc * mvalid # FIXME: start > trange; we need leftover information
+        Xacc_true = Xacc_true * mvalid
 
         crossed = torch.zeros_like(Xacc, dtype=torch.int32, device=Xacc.device)
         crossed[...,offset_to_align::one_tick] = (Xacc[...,offset_to_align::one_tick] >= thres) & mvalid[...,offset_to_align::one_tick] # check after start # shape (N, nxpl, ..., Nt) if taxis = -1
@@ -116,10 +120,12 @@ def nd_readout(block, threshold, adc_hold_delay, adc_down_time, csa_reset_time=1
         times = gtimes + cross_t[triggered] # 1D with last dim the
         hold_times = gtimes + hold_t[triggered]
         hits = torch.gather(Xacc, taxis, hold_t_inrange)[triggered] # 1D array
+        true_hits = torch.gather(Xacc_true, taxis, hold_t_inrange)[triggered]
         if thres_noise is None:
             assert torch.all(hits > thres[triggered]).item()
 
         burst_hits = [hits, ]
+        burst_true_hits = [true_hits, ]
         # hold_t[triggered] repeat burst times
         burst_times = torch.zeros((hold_t[triggered].flatten().shape[0], nburst), dtype=hold_t.dtype, device=hold_t.device)
         burst_times[:, 0] = hold_t_inrange[triggered].flatten()
@@ -128,16 +134,19 @@ def nd_readout(block, threshold, adc_hold_delay, adc_down_time, csa_reset_time=1
             next_t = torch.clamp(hold_t, min=0, max=Nt-1)
             burst_times[:, b] = next_t[triggered].flatten()
             next_hit = torch.gather(Xacc, taxis, next_t)[triggered]
+            next_true_hit = torch.gather(Xacc_true, taxis, next_t)[triggered]
             burst_hits.append(next_hit)
+            burst_true_hits.append(next_true_hit)
         hits = torch.stack(burst_hits, dim=1)
+        true_hits = torch.stack(burst_true_hits, dim=1)
 
         # start = hold_t + adc_down_time + 1
         start[triggered] = hold_t[triggered] + adc_down_time + one_tick # on discriminator, controlled by adc down time
         start_times = gtimes + start[triggered]
         oloc = torch.cat([pixels, times.unsqueeze(1), hold_times.unsqueeze(1), start_times.unsqueeze(1)], dim=1)
-        print(oloc)
         olocs.append(oloc)
         ocharges.append(hits)
+        ocharges_true.append(true_hits)
         start[~triggered] = hold_t[~triggered] + one_tick
         start[~crossed] = Nt # crossed not triggered should be at hold_t+1; never crossed needs to be at start.
         # at triggered positions, charges are reset and there is one timestamp missing;
@@ -145,9 +154,11 @@ def nd_readout(block, threshold, adc_hold_delay, adc_down_time, csa_reset_time=1
         # hold t may be at the last t;
         # FIXME: what happens if the hold_t is the last element?
         Xacc_next_to_hold_t = torch.gather(Xacc, taxis, torch.clamp(hold_t+csa_reset_time, min=0, max=Nt-1))
+        Xacc_true_next_to_hold_t = torch.gather(Xacc_true, taxis, torch.clamp(hold_t+csa_reset_time, min=0, max=Nt-1))
         # only update the triggered positions
         # FIXME: the noise is double counting
         Xacc[triggered.squeeze(taxis)] -= Xacc_next_to_hold_t[triggered.squeeze(taxis)]
+        Xacc_true[triggered.squeeze(taxis)] -= Xacc_true_next_to_hold_t[triggered.squeeze(taxis)]
         if reset_noise is not None:
             # FIXME: taxis is assumed to be -1
             Xacc_baseline = torch.normal(0, torch.full(Xacc.shape[:-1], fill_value=reset_noise, device=Xacc.device))
@@ -158,9 +169,11 @@ def nd_readout(block, threshold, adc_hold_delay, adc_down_time, csa_reset_time=1
         iteration += 1
     if len(olocs) == 0:
         return torch.zeros((0, len(pixel_axes)+3), dtype=torch.int32, device=locations.device), \
+            torch.zeros((0,), dtype=torch.float32, device=X.device), \
             torch.zeros((0,), dtype=torch.float32, device=X.device)
         raise NotImplementedError("Not sure how to handle empty hit collection")
-    return torch.cat(olocs, dim=0), torch.cat(ocharges, dim=0)
+    return torch.cat(olocs, dim=0), torch.cat(ocharges, dim=0), \
+        torch.cat(ocharges_true, dim=0)
 
 
 def fixed_interval_readout(block, adc_hold_delay, one_tick=1,
@@ -187,16 +200,20 @@ def fixed_interval_readout(block, adc_hold_delay, one_tick=1,
     if taxis != X.ndim-1:
         raise NotImplementedError()
     Xacc = X.cumsum(dim=taxis)
+    Xacc_true = Xacc.clone().detach()
     if uncorr_noise is not None:
         Xacc += torch.normal(0, torch.full_like(Xacc, fill_value=uncorr_noise, device=Xacc.device))
     records = Xacc[..., offset_to_align::adc_hold_delay]
+    truehits = Xacc_true[..., offset_to_align::adc_hold_delay]
     for i in pixel_axes:
         if records.shape[i] != 1:
             raise ValueError(f"Pixel axis {i} has size {records.shape[i]}, expected 1.")
     records = torch.squeeze(records, dim=pixel_axes)
+    truehits = torch.squeeze(truehits, dim=pixel_axes)
     locs = torch.zeros((locations.shape[0], locations.shape[-1]+2), dtype=locations.dtype, device=locations.device)
     locs[:, :locations.shape[1]] = locations[:, :]
     locs[:, -2] = locations[:, -1]
     locs[:, -1] = locations[:, -1]
     locs[:, 3:] += offset_to_align
-    return locs, records
+
+    return locs, records, truehits

@@ -14,3 +14,4 @@ reset_noise: 0.9 #ke
 thres_noise: 0.65 #ke
 save_waveform: false
 fluctuate: false
+save_truehits: true

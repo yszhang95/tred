@@ -14,3 +14,4 @@ data/
 **/*.hdf5
 **/*.h5
 **/*.log
+.aider*

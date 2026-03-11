@@ -60,6 +60,7 @@ csa_reset_time = None
 one_tick = None
 offset_to_align = 0
 readout_model = 'fixed_interval' # 'nd_readout' or 'fixed_interval'
+save_truehits = False
 
 response = None
 
@@ -578,6 +579,13 @@ def runit(device='cpu'):
                 waveforms[f'effq_tpc{tpcdataset.tpc_id}_batch{ibatch}_location'] = qbl
                 # waveforms[f'effq_fine_grain_tpc{tpcdataset.tpc_id}_batch{ibatch}'] = qbd_fg
                 # waveforms[f'effq_fine_grain_tpc{tpcdataset.tpc_id}_batch{ibatch}_location'] = qbl
+                if save_truehits:
+                    truehits = hits[2].cpu()
+                    if truehits.ndim == 1:
+                        truehits = torch.cat([hitlf32, truehits[:,None].cpu()], dim=1)
+                    elif truehits.ndim == 2:
+                        truehits = torch.cat([hitlf32, truehits.cpu()], dim=1)
+                    waveforms[f'truehits_tpc{tpcdataset.tpc_id}_batch{ibatch}'] = truehits
 
                 torch.cuda.reset_peak_memory_stats()
             except IndexError as e:
@@ -666,6 +674,7 @@ def fullsim(config, finpath, foutpath):
     global nburst
     global offset_to_align
     global readout_model
+    global save_truehits
 
     global const_recomb
 
@@ -737,6 +746,7 @@ def fullsim(config, finpath, foutpath):
     offset_to_align = config.get("offset_to_align", 0)
     offset_to_align = int(offset_to_align)
     readout_model = config.get("readout_model", 'fixed_interval')
+    save_truehits = config.get("save_truehits", False)
 
     if finpath is None:
         input_path = "/home/yousen/Public/ndlar_shared/data/tred_2x2_2025010/filtered_MiniRun5_1E19_RHC.convert2h5.0000000.EDEPSIM.hdf5"
