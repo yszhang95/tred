@@ -1,0 +1,21 @@
+drtoa: 30.431 # cm
+tspace: 0.05 # us
+response_path: "/home/yousen/Public/ndlar_shared/data/responses/response_v2a_center_unipolar_30p431cm_0p050us_bin_size0p04434.npz"
+old_geo_config: false
+# module_yaml: "/home/yousen/Documents/NDLAr2x2/tred/tests/playground/2x2_mod2mod_variation.yaml"
+module_yaml: "/home/yousen/Documents/NDLAr2x2/tred/tests/playground/2x2.yaml"
+# tile_yaml: "/home/yousen/Documents/NDLAr2x2/tred/tests/playground/multi_tile_layout-2.4.16.yaml"
+tile_yaml: "/home/yousen/Documents/NDLAr2x2/tred/tests/playground/multi_tile_layout-2.4.16_v4.yaml"
+lifetime: 2.2 # ms
+threshold: 5. # ke
+  # threshold: "/home/yousen/Documents/NDLAr2x2/2x2_ql/filter_mc_events/threshold_summary.hdf5"
+event_list: [1,]
+  # uncorr_noise: 0.500 #ke
+uncorr_noise: null #ke
+  # reset_noise: 0.900 #ke
+reset_noise: null #ke
+  # thres_noise: 0.650 #ke
+thres_noise: null #ke
+save_waveform: true
+fluctuate: false
+eff_q_out: 1

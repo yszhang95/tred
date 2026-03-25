@@ -1,0 +1,10 @@
+* Changelog
+I am trying to follow: https://github.com/vweevers/common-changelog.
+** 2025-09-02
+Commits from 1382647 to f8a5c57.
+- Created branch =benchmark_playground=
+- Added a helper function to chunk over a list.
+- Added helper functions to chunk and concatenate blocks.
+- Added helper functions to chunk.
+- Vectorized the part to zero out unphysical waveforms.
+- Tested under =tests/playground/zero_out_wf/=.

@@ -24,12 +24,12 @@ Developer take note:
 
 from .blocking import Block
 from .drift import drift
-from .util import info, debug, tenstr
+from .util import info, debug, tenstr, to_tuple
 from .raster.depos import binned as raster_depos
 from .raster.steps import compute_qeff
 
 from .types import index_dtype
-from .sparse import chunkify, chunkify2
+from .sparse import chunkify, chunkify2, accumulate_nd_blocks_v1, accumulate_nd_blocks_v2
 from .chunking import accumulate
 from .convo import interlaced, interlaced_symm, interlaced_symm_v2
 
@@ -48,7 +48,8 @@ def raster_steps(*args,**kwds):
     return compute_qeff(grid_spacing=args[0], X0=args[1], X1=args[2],
                         Sigma=args[3], Q=args[4],
                         n_sigma=(kwds['nsigma'], kwds['nsigma'], kwds['nsigma']),
-                        origin=(0,0,0), method='gauss_legendre', npoints=(2,2,2))
+                        origin=(0,0,0), method='gauss_legendre',
+                        npoints=kwds.get('npoints', (2, 2, 2)))
 
 def param(thing, dtype=torch.float32):
     if isinstance(thing, torch.Tensor):
@@ -197,7 +198,7 @@ class Drifter(nn.Module):
             )
 
         # Identify indices where swapping is needed
-        mask = (tail_new[:, vaxis] < head_new[:, vaxis]) if velocity > 0 else (tail_new[:, vaxis] > head_new[:, vaxis])
+        mask = (tail_new[:, vaxis] > head_new[:, vaxis]) if velocity > 0 else (tail_new[:, vaxis] < head_new[:, vaxis])
         swap_idx = torch.nonzero(mask, as_tuple=True)[0]
 
         # Swap elements in-place
@@ -214,8 +215,9 @@ class Raster(nn.Module):
     '''
     Raster depos or steps.
     '''
-    def __init__(self, velocity, grid_spacing, pdims=(1,2), tdim=-1, nsigma=3.0):
+    def __init__(self, velocity, grid_spacing, pdims=(1,2), tdim=-1, nsigma=3.0, npoints=(2,2,2)):
         '''
+        - velocity :: signed velocity for computing time difference between tail and head
         - pdims :: the N-1 dimensions for transverse pitch indexing into input points.
                    They are axes in the original tensor.
         - tdim :: the 1 dimension for time/drift.
@@ -232,6 +234,7 @@ class Raster(nn.Module):
         constant(self, 'velocity', velocity)
         constant(self, 'grid_spacing', grid_spacing)
         constant(self, 'nsigma', nsigma)
+        self._npoints = npoints
 
         self._pdims = pdims or ()
         self._tdim = tdim if tdim>=0 else len(self._pdims) + 1 + tdim
@@ -302,8 +305,8 @@ class Raster(nn.Module):
 
         head = self._transform(head, dt+time)
         sigma = self._transform(sigma, None)
-        sigma[:, self._tdim] = sigma[:, self._tdim] / self.velocity # distance to time
-        rasters, offsets = raster_steps(self.grid_spacing, tail, head, sigma, charge, nsigma=self.nsigma)
+        sigma[:, self._tdim] = sigma[:, self._tdim] / torch.abs(self.velocity) # distance to time
+        rasters, offsets = raster_steps(self.grid_spacing, tail, head, sigma, charge, nsigma=self.nsigma, npoints=self._npoints)
 
         return Block(location = offsets, data=rasters)
 
@@ -316,43 +319,139 @@ class ChunkSum(nn.Module):
 
     '''
 
-    def __init__(self, chunk_shape=None):
+    def __init__(self, chunk_shape=None, nbatches=1000, method='chunksum'):
         super().__init__()
         if chunk_shape is None:
             raise ValueError('a unitless, integer N-tensor chunk shape is required')
         constant(self, 'chunk_shape', chunk_shape, index_dtype)
+        self._chunk_shape_tuple  = to_tuple(chunk_shape)
+        # constant(self, 'max_mem_byte', 5*1024**3, torch.int64)
+        self._nbatches = nbatches
+        if method == 'chunksum':
+            self._forward = self._chunksum
+        elif method == 'chunksum2':
+            self._forward = self._chunksum2
+        elif method == 'chunksum_inplace_v1':
+            self._forward = self._chunksum_inplace_v1
+        elif method == 'chunksum_inplace_v2':
+            self._forward = self._chunksum_inplace_v2
+        else:
+            self._forward = None
+        if self._forward is None:
+            raise ValueError(f"Available method in ChunkSum, chunksum, chunksum_inplace_v1, chunksum_inplace_v2. But {method} is given.")
+
+    def _chunksum_inplace_v1(self, block: Block) -> Block:
+        return accumulate_nd_blocks_v1(block, self._chunk_shape_tuple)
+    def _chunksum_inplace_v2(self, block: Block) -> Block:
+        return accumulate_nd_blocks_v2(block, self._chunk_shape_tuple)
+
+    def _chunksum(self, block: Block) -> Block:
+        '''
+        Return a new block chunked to given shape and with overlaps summed.
+        '''
+        # fixme: May wish to put each in its own module if dynamic rebatching helps.
+        # try:
+        #     return accumulate(chunkify(block, self.chunk_shape))
+        # except torch.cuda.OutOfMemoryError:
+        #     info("ChunkSum: Caught CUDA OutOfMemoryError using chunkify; falling back to chunkify")
+        #     torch.cuda.empty_cache()
+        #     return accumulate(chunkify(block, self.chunk_shape))
+
+        return accumulate(chunkify(block, self.chunk_shape))
+
+        nchunks = block.nbatches // self._nbatches + 1
+
+        locs = torch.chunk(block.location, nchunks)
+        dats = torch.chunk(block.data, nchunks)
+
+        odata = []
+        olocs = []
+        for loc, dat in zip(locs, dats):
+            # print('per chunk', loc.shape[0], dat.shape[0])
+            chunks = accumulate(chunkify(Block(location=loc, data=dat), self.chunk_shape))
+            olocs.append(chunks.location)
+            odata.append(chunks.data)
+            if len(olocs)>3:
+                block = Block(location=torch.cat(olocs, dim=0), data=torch.cat(odata, dim=0))
+                o = accumulate(block)
+                olocs = []
+                odata = []
+                olocs.append(o.location)
+                odata.append(o.data)
+
+            torch.cuda.empty_cache()
+        if nchunks > 1:
+            block = Block(location=torch.cat(olocs, dim=0), data=torch.cat(odata, dim=0))
+            return accumulate(block)
+        else:
+            # print(olocs[0].shape[0])
+            return Block(location=olocs[0], data=odata[0])
+
+    def _chunksum2(self, block: Block) -> Block:
+        '''
+        Return a new block chunked to given shape and with overlaps summed.
+        '''
+        # fixme: May wish to put each in its own module if dynamic rebatching helps.
+        # try:
+        #     return accumulate(chunkify2(block, self.chunk_shape))
+        # except torch.cuda.OutOfMemoryError:
+        #     info("ChunkSum: Caught CUDA OutOfMemoryError using chunkify2; falling back to chunkify")
+        #     torch.cuda.empty_cache()
+        #     return accumulate(chunkify(block, self.chunk_shape))
+
+        nchunks = block.nbatches // self._nbatches + 1
+
+        locs = torch.chunk(block.location, nchunks)
+        dats = torch.chunk(block.data, nchunks)
+
+        odata = []
+        olocs = []
+        for loc, dat in zip(locs, dats):
+            # print('per chunk', loc.shape[0], dat.shape[0])
+            chunks = accumulate(chunkify2(Block(location=loc, data=dat), self.chunk_shape))
+            olocs.append(chunks.location)
+            odata.append(chunks.data)
+            if len(olocs)>3:
+                block = Block(location=torch.cat(olocs, dim=0), data=torch.cat(odata, dim=0))
+                o = accumulate(block)
+                olocs = []
+                odata = []
+                olocs.append(o.location)
+                odata.append(o.data)
+
+            torch.cuda.empty_cache()
+        if nchunks > 1:
+            block = Block(location=torch.cat(olocs, dim=0), data=torch.cat(odata, dim=0))
+            return accumulate(block)
+        else:
+            # print(olocs[0].shape[0])
+            return Block(location=olocs[0], data=odata[0])
 
     def forward(self, block: Block) -> Block:
         '''
         Return a new block chunked to given shape and with overlaps summed.
         '''
-        # fixme: May wish to put each in its own module if dynamic rebatching helps.
-        try:
-            return accumulate(chunkify2(block, self.chunk_shape))
-        except torch.cuda.OutOfMemoryError:
-            info("ChunkSum: Caught CUDA OutOfMemoryError using chunkify2; falling back to chunkify")
-            torch.cuda.empty_cache()
-            return accumulate(chunkify(block, self.chunk_shape))
-
+        return self._forward(block)
 
 class LacedConvo(nn.Module):
     '''
     Convolve an interlaced signal and a response.
     '''
-    def __init__(self, lacing=None, taxis=-1, symm_axis=0):
+    def __init__(self, lacing=None, taxis=-1, symm_axis=0, o_shape=None):
         super().__init__()
         if lacing is None:
             raise ValueError('a unitless, integer N-tensor lacing is required')
         constant(self, 'lacing', lacing, index_dtype)
         self._taxis = taxis
         self._symm_axis = symm_axis
+        self._o_shape = o_shape
 
     def forward(self, signal, response):
         '''
         Apply laced convolution.
         '''
         # fixme: allow for response to be pre-FFT'ed
-        return interlaced_symm_v2(signal, response, self.lacing, self._taxis, self._symm_axis)
+        return interlaced_symm_v2(signal, response, self.lacing, self._taxis, self._symm_axis, self._o_shape)
 
 
 class Charge(nn.Module):

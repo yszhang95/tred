@@ -8,7 +8,10 @@ import logging
 
 logger = logging.getLogger('tred.raster.steps')
 
-def to_tensor(source, device, dtype=torch.float32):
+float_dtype = torch.float64
+
+
+def to_tensor(source, device, dtype=float_dtype):
     '''Aliasing or create a tensor if not existing.
     Result tensor will be moved to the device
     '''
@@ -31,15 +34,15 @@ def compute_coordinate(idxs: Tensor, origin, grid_spacing, device='cpu'):
     return
         origin + spacing * idx
     '''
-    fidxs = to_tensor(idxs, device=device, dtype=torch.float32)
-    assert torch.any(fidxs <= MAX_INDEX), 'Overflow of index_dtype'
-    assert torch.any(fidxs >= MIN_INDEX), 'Underflow of index_dtype'
+    fidxs = to_tensor(idxs, device=device, dtype=float_dtype)
+    assert torch.all(fidxs <= MAX_INDEX), 'Overflow of index_dtype'
+    assert torch.all(fidxs >= MIN_INDEX), 'Underflow of index_dtype'
     idxs = to_tensor(idxs, device=device, dtype=index_dtype)
 
     if idxs.dim() == 1:
         idxs = idxs.unsqueeze(0)
-    origin = to_tensor(origin, device=idxs.device, dtype=torch.float32)
-    grid_spacing = to_tensor(grid_spacing, device=device, dtype=torch.float32)
+    origin = to_tensor(origin, device=idxs.device, dtype=float_dtype)
+    grid_spacing = to_tensor(grid_spacing, device=device, dtype=float_dtype)
     return origin.unsqueeze(0) + idxs * grid_spacing.unsqueeze(0)
 
 
@@ -60,8 +63,8 @@ def compute_index(coords, origin, grid_spacing, device='cpu'):
     grid_spacing = to_tensor(grid_spacing, device)
     idxs = (coords - origin.unsqueeze(0)) / grid_spacing.unsqueeze(0)
 
-    assert torch.any(idxs <= MAX_INDEX), 'Overflow of index_dtype'
-    assert torch.any(idxs >= MIN_INDEX), 'Underflow of index_dtype'
+    assert torch.all(idxs <= MAX_INDEX), f'Overflow of index_dtype {MAX_INDEX}'
+    assert torch.all(idxs >= MIN_INDEX), 'Underflow of index_dtype'
     return idxs.floor().to(index_dtype)
 
 
@@ -73,7 +76,7 @@ def compute_bounds_X0X1(X0X1, Sigma, n_sigma):
     return :
         bounds: (N, vdim, 2)
         '''
-    n_sigma = to_tensor(n_sigma, dtype=torch.float32, device=Sigma.device)
+    n_sigma = to_tensor(n_sigma, dtype=float_dtype, device=Sigma.device)
     offset = (n_sigma.unsqueeze(0) * Sigma) # (N, vdim)
     min_limits = torch.min(X0X1, dim=2).values - offset # torch.min(shape(N,vdim,2)) --> shape(N, vdim)
     max_limits = torch.max(X0X1, dim=2).values + offset
@@ -101,7 +104,7 @@ def compute_bounds_X0_X1(X0, X1, Sigma, n_sigma):
     return:
         (N, vdim, 2) float
     '''
-    n_sigma = to_tensor(n_sigma, dtype=torch.float32, device=Sigma.device)
+    n_sigma = to_tensor(n_sigma, dtype=float_dtype, device=Sigma.device)
     combined = _stack_X0X1(X0, X1)
     bounds = compute_bounds_X0X1(combined, Sigma, n_sigma)
     return bounds
@@ -273,6 +276,56 @@ def qline_diff3D_script(
     return charge
 
 
+def qpoint_diff3D(Q, X0, X1, Sigma, x, y, z):
+    """
+      Args:
+          Q (N,)
+          X0 (N, 3)
+          X1 (N, 3)
+          Sigma (N, 3)
+          x (N, other shape)
+          y (N, other shape)
+          z (N, other shape)
+      return:
+          q (N, othter shape)
+      """
+    num_dims_to_add = x.ndim - 1
+    shape_new = [-1] + num_dims_to_add * [1]
+
+    # Prepare for broadcasting
+    x0, y0, z0 = tuple(X0[:, i].view(shape_new) for i in range(3))
+    x1, y1, z1 = tuple(X1[:, i].view(shape_new) for i in range(3))
+    sx, sy, sz = tuple(Sigma[:, i].view(shape_new) for i in range(3))
+    Q = Q.view(shape_new)
+    xc, yc, zc = (x0+x1)/2, (y0+y1)/2, (z0+z1)/2
+    charge = Q / torch.pow(torch.tensor(2 * 3.1415926), 1.5) / sx / sy / sz \
+        * torch.exp(- (x - xc)**2 / 2 / sx**2
+                    - (y - yc)**2 / 2 / sy**2
+                    - (z - zc)**2 / 2 / sz**2)
+    return charge
+
+
+def too_short(X0, X1, Sigma, threshold=0.05):
+    #    sqrt2 = 1.4142135623730951
+    x0, y0, z0 = [X0[:, i] for i in range(3)]
+    x1, y1, z1 = [X1[:, i] for i in range(3)]
+    sx, sy, sz = [Sigma[:, i] for i in range(3)]
+
+    # Calculate differences
+    dx01 = x0 - x1
+    dy01 = y0 - y1
+    dz01 = z0 - z1
+
+    point_like = torch.stack(
+        [torch.abs(dx01) < threshold * sx,
+         torch.abs(dy01) < threshold * sy,
+         torch.abs(dz01) < threshold * sz], dim=1
+    )
+    point_like = torch.all(point_like, dim=1)
+
+    return point_like
+
+
 try:
     import scipy
     roots_legendre = scipy.special.roots_legendre
@@ -308,6 +361,7 @@ except:
         raise ValueError(f"customized roots_legendre does not support n = {n}"\
                      " (must be 1 <= n <= 6)")
 
+
 def _create_w1d_GL(npt, spacing, device='cpu'):
     '''
     Args:
@@ -317,7 +371,7 @@ def _create_w1d_GL(npt, spacing, device='cpu'):
         a tensor of weights of n-point GL quadrature after correcting for length of intervals
     '''
     _, weights = roots_legendre(npt)
-    w1d = torch.tensor(weights, dtype=torch.float32, requires_grad=False, device=device) * spacing/2
+    w1d = torch.tensor(weights, dtype=float_dtype, requires_grad=False, device=device) * spacing/2
     return w1d
 
 def _create_w1ds(method, npoints, grid_spacing, device='cpu'):
@@ -374,12 +428,21 @@ def _create_u1d_GL(npt, device='cpu'):
         a tensor of coefficients for interpolations at roots of npt-order GL polynomials
     '''
     roots, _ = roots_legendre(npt)
-    roots = torch.tensor(roots, dtype=torch.float32, requires_grad=False, device=device)
-    u = (roots+1)/2
-    u1d = torch.empty([npt, 2], dtype=torch.float32, requires_grad=False, device=device)
-    u1d[:, 0] = 1-u
-    u1d[:, 1] = u
-    return u1d
+    roots_tensor = torch.as_tensor(roots, dtype=float_dtype, device=device)
+    zeros_tensor = torch.zeros_like(roots_tensor)
+
+    negative_mask = roots_tensor < 0
+
+    neg_u = torch.stack(
+        [-roots_tensor / 2, 1 + roots_tensor / 2, zeros_tensor], dim=-1)
+
+    pos_u = torch.stack([
+        zeros_tensor, 1 - roots_tensor / 2, roots_tensor / 2], dim=-1)
+
+    u = torch.where(negative_mask.unsqueeze(-1), neg_u, pos_u)
+    u.requires_grad = False
+    return u
+
 
 def _create_u1ds(method, npoints, device='cpu'):
     '''
@@ -395,30 +458,33 @@ def _create_u1ds(method, npoints, device='cpu'):
         u1ds.append(_create_u1d_GL(npt, device))
     return u1ds
 
-def _create_u_block(u1ds):
+def _create_u_block(u1ds, interpo_npts=3):
     '''
     To create a weight block for u in 3D
     Requirements:
-        u1d in u1ds is Tensor with a shape of (npt, 2) where npt means n-point GL quad rule.
+        u1d in u1ds is Tensor with a shape of (npt, interpo_npts) where npt means n-point GL quad rule.
     Args:
         u1ds: list, (Tensor_1, Tensor_2, ..., Tensor_i, ...)
     Return:
-        A tesnor in a shape of (N_1, N_2, ..., N_i, ..., 2, 2, ..., 2_i, ...)
+        A tesnor in a shape of (N_1, N_2, ..., N_i, ..., interpo_npts, interpo_npts, ..., interpo_npts_i, ...)
     '''
     ndim = len(u1ds)
     for i in range(ndim):
-        if u1ds[i].shape[1] != 2:
-            raise ValueError('u1d must have a shape of (npt, 2)')
-    # [-1, 1, ..., 2, 1, ...]
-    shape_new = [-1,] + (ndim-1) * [1,] + [2,] + (ndim-1) * [1]
+        if u1ds[i].shape[-1] != interpo_npts:
+            raise ValueError(
+                f'u1ds must have last dimension of size '
+                f'{interpo_npts} for linear interpolation')
+    # [-1, 1, ..., 3, 1, ...]
+    shape_new = [-1,] + (ndim-1) * [1,] + [interpo_npts,] + (ndim-1) * [1]
     ublock = u1ds[0].view(shape_new)
     for i in range(1, ndim, 1):
         shape_new = [1, ] * ndim + [1, ] * ndim
         shape_new[i] = -1
-        shape_new[ndim+i] = 2
+        shape_new[ndim+i] = interpo_npts
         ublock = ublock * u1ds[i].view(shape_new)
 
     return ublock
+
 
 def create_u_block(method, npoints, device='cpu'):
     '''
@@ -557,7 +623,8 @@ def eval_qmodel(Q, X0, X1, Sigma, x, y, z, qmodel=qline_diff3D, **kwargs):
     return charge
 
 
-def eval_qeff(Q, X0, X1, Sigma, offset, shape, origin, grid_spacing, method, npoints, **kwargs):
+def eval_qeff(Q, X0, X1, Sigma, offset, shape, origin, grid_spacing,
+              method, npoints, **kwargs):
     '''
     Args:
         Q (Nsteps, )
@@ -570,18 +637,6 @@ def eval_qeff(Q, X0, X1, Sigma, offset, shape, origin, grid_spacing, method, npo
         grid_spacing (vdim,)
         npoints (vdim, )
         kwargs:
-            usemask: not used
-            n_sigma_band: for usemask, not used
-            quaddim: not used
-            skippad: skip padding when converting from intervals to grid points.
-                     Number of grid points will be smaller by one than padding.
-                     Offset of the box containing effective charegs is shifted to
-                     larger value by one unit.
-                     It is users' responsibility to make sure results are desired.
-            mem_limit: a soft maximum limit of memory, in MB,
-                       this paramter does not function when size per step is too large
-            xyz_limit: limit of x, y, z shape
-            shape_limit: limit of shape, used together with xyz_limit
             qmodel: method to calculate charges, taking (Q, X0, X1, Sigma, x, y, z)
                     as arguments. This argument will be passed to eval_qmodel
                     so that broadcasting is done properly.
@@ -600,93 +655,44 @@ def eval_qeff(Q, X0, X1, Sigma, offset, shape, origin, grid_spacing, method, npo
         raise ValueError('Q must be a torch.Tensor')
     device = Q.device
 
-    # FIXME: not support
-    usemask = kwargs.get('usemask', False)
-    # FIXME: not support
-    n_sigma_band = kwargs.get('n_sigma_band', False)
-    if usemask and not n_sigma:
-        raise ValueError('n_sigma_band must be given when using masks')
-
-    # FIXME: not used yet; place holder for future extension
-    quaddim = kwargs.get('quad_dim', (0,1,2))
-    if quaddim:
-        usequad = True
-    else:
-        usequad = False
-
-    skippad = kwargs.get('skippad', False)
-    # FIXME: Not friendly to jit
-    mem_limit = kwargs.get('mem_limit', 10*1024) # MB
-
-    # FIXME: not friendly to JIT
-    # FIXME: only support 3D
-    # at most 100 elements per axis by default
-    xyz_limit = kwargs.get('xyz_limit', torch.tensor([100, 100, 100], requires_grad=False,
-                                                     dtype=index_dtype, device=device))
-    shape_limit = kwargs.get('shape_limit', 1000_000) # 1000_000 elements by default
-    xyzchunk = (xyz_limit < shape) & (torch.prod(shape) > shape_limit) # check the axis
-    xyzchunkidx = torch.argmax(shape) # which one to use later
-    usex, usey, usez = xyzchunk & (torch.arange(3, device=device) == xyzchunkidx)
-    xchunk, ychunk, zchunk = xyz_limit[0], xyz_limit[1], xyz_limit[2]
+    qline_model = kwargs.get('qline_model', qline_diff3D)
+    qpoint_model = kwargs.get('qpoint_model', qpoint_diff3D)
+    threshold = kwargs.get('threshold', 0.1)
 
     # FIXME: dimensions are hard coded
     kernel = create_wu_block(method, npoints, grid_spacing, device)
-    kernel = torch.flip(kernel, [3, 4, 5]) # it does not matter we flip at first or we multiply w and u at first
+    # it does not matter we flip at first or we multiply w and u at first
+    kernel = torch.flip(kernel, [3, 4, 5])
     lmn = kernel.size()[:3]
-    lmn_prod = lmn[0] * lmn[1] *lmn[2]
+    lmn_prod = lmn[0] * lmn[1] * lmn[2]
     rst = kernel.size()[3:]
-    kernel = kernel.view(lmn_prod, 1, rst[0], rst[1], rst[2]) # out_channel, in_channel/groups, R, S, T
+    # out_channel, in_channel/groups, R, S, T
+    kernel = kernel.view(lmn_prod, 1, rst[0], rst[1], rst[2])
 
-    # FIXME: Not friendly to jit
-    nbtensor = Q.size(0) * torch.prod(shape+1) * lmn_prod * 4 / 1024**2 # MB
-    nbtensor = nbtensor * 5 # intermediate states inflate memory by 5.
-    nchunk = int(nbtensor // mem_limit) + 1
-
-    x, y, z = create_node1ds(method, npoints, origin, grid_spacing, offset, shape, device)
-    qeff = []
+    x, y, z = create_node1ds(method, npoints, origin, grid_spacing,
+                             offset, shape, device)
 
     # FIXME: may update batch dimension in the future
-    chunks = [v.chunk(nchunk, dim=0) for v in [Q, X0, X1, Sigma, x, y, z]]
+    too_short_mask = too_short(X0, X1, Sigma, threshold=threshold)
 
-    for Qi, X0i, X1i, Sigmai, xi, yi, zi in zip(*chunks):
-        if usex:
-            qjs = []
-            for j in range(0, xi.size(-1), xchunk):
-                qj = eval_qmodel(Qi, X0i, X1i, Sigmai, xi[..., j:j+xchunk], yi, zi)
-                qjs.append(qj)
-            charge = torch.cat(qjs, dim=-3)
-        elif usey:
-            qjs = []
-            for j in range(0, yi.size(-1), ychunk):
-                qj = eval_qmodel(Qi, X0i, X1i, Sigmai, xi, yi[..., j:j+ychunk], zi)
-                qjs.append(qj)
-            charge = torch.cat(qjs, dim=-2)
-        elif usez:
-            qjs = []
-            for j in range(0, zi.size(-1), zchunk):
-                qj = eval_qmodel(Qi, X0i, X1i, Sigmai, xi, yi, zi[..., j:j+zchunk])
-                qjs.append(qj)
-            charge = torch.cat(qjs, dim=-1)
-        else:
-            charge = eval_qmodel(Qi, X0i, X1i, Sigmai, xi, yi, zi, **kwargs)
+    charge = torch.zeros((Q.size(0), *lmn, *shape),
+                         dtype=float_dtype, device=device)
+    mask_shape = [-1,] + [1,] * (len(lmn) + len(shape))
+    expand_shape = [Q.size(0), *lmn] + [s.item() for s in shape]
+    too_short_mask = too_short_mask.view(mask_shape).expand(*expand_shape)
+    charge = torch.where(too_short_mask,
+                         eval_qmodel(Q, X0, X1, Sigma, x, y, z,
+                                     qmodel=qpoint_model, **kwargs),
+                         eval_qmodel(Q, X0, X1, Sigma, x, y, z,
+                                     qmodel=qline_model, **kwargs))
 
-        charge = charge.view(Qi.size(0), lmn_prod, shape[0], shape[1], shape[2]) # batch, channel, D1, D2, D3
-
-        if skippad:
-            # shape = shape - 1 # this line lead to wrong shape in the line above and may be due to wrong synchronization.
-            # need to recompute offset...
-            charge = torch.nn.functional.conv3d(charge, kernel, padding='valid',
-                                                    groups=lmn_prod)
-            offset = offset + 1
-        else:
-            charge = torch.nn.functional.pad(charge, pad=(rst[2]-1, rst[2]-1, rst[1]-1, rst[1]-1,
-                                                          rst[0]-1, rst[0]-1), mode="constant", value=0)
-            charge = torch.nn.functional.conv3d(charge, kernel, padding='valid',
-                                                groups=lmn_prod)
-
-        qeff.append(torch.sum(charge, dim=[1])) # 1 for merged l,m,n
-
-    return torch.cat(qeff, dim=0), offset
+    charge = charge.view(Q.size(0), lmn_prod,  # batch, chanenel
+                         shape[0], shape[1], shape[2])  # D1, D2, D3
+    # FIXME: the padding is only valid for interpolation points == 3
+    charge = torch.nn.functional.conv3d(charge, kernel, padding='same',
+                                        groups=lmn_prod)
+    charge = charge.sum(dim=1)
+    return charge, offset
 
 
 def compute_qeff(Q, X0, X1, Sigma, n_sigma, origin, grid_spacing, method, npoints, **kwargs):
@@ -702,6 +708,8 @@ def compute_qeff(Q, X0, X1, Sigma, n_sigma, origin, grid_spacing, method, npoint
         if not kwargs.get('skippad', False):
             kwargs['skippad'] = True
             logger.warning('Option "skippad" is overwritten to True, complying with option "recenter"')
+    # X0, X1 shifted by half bin, as in responses.org
+    # FIXME: how to handle the case when X0,X1 hit the anode?
     offset, shape = compute_charge_box(X0, X1, Sigma, n_sigma, origin, grid_spacing, **kwargs)
     qeff, offset = eval_qeff(Q, X0, X1, Sigma, offset, shape, origin, grid_spacing, method, npoints, **kwargs)
     return qeff, offset

@@ -1,0 +1,13 @@
+drtoa: 30.431 # cm
+response_path: "/home/yousen/Public/ndlar_shared/data/responses/response_44_v2a_full.npz"
+module_yaml: "/home/yousen/Documents/NDLAr2x2/tred/tests/playground/2x2_mod2mod_variation.yaml"
+tile_yaml: "/home/yousen/Documents/NDLAr2x2/tred/tests/playground/multi_tile_layout-2.4.16.yaml"
+lifetime: 2.2 # ms
+threshold: 5. # ke
+event_list: [1025,]
+uncorr_noise: null #ke
+reset_noise: null #ke
+thres_noise: null #ke
+save_waveform: true
+fluctuate: false
+eff_q_out: 20

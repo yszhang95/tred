@@ -13,10 +13,12 @@ from tred.types import index_dtype
 from tred.types import index_dtype
 from tred.units import cm, mm
 
+from tred.util import warning
+
 from importlib import reload  # Python 3.4+
 import tred.loaders
 
-def simple_geo_parser(det_yaml, tile_yaml):
+def simple_geo_parser(det_yaml, tile_yaml, old_version=True):
     '''
     FIXME: slight difference between GDML and YAMLs
 
@@ -27,7 +29,7 @@ def simple_geo_parser(det_yaml, tile_yaml):
         detprop = yaml.safe_load(f)
     with open(tile_yaml, 'r') as f:
         tile_layout = yaml.safe_load(f)
-            
+
     PIXEL_PITCH = tile_layout['pixel_pitch'] * mm / cm
     chip_channel_to_position = tile_layout['chip_channel_to_position']
 
@@ -40,15 +42,35 @@ def simple_geo_parser(det_yaml, tile_yaml):
 
     tile_indeces = tile_layout['tile_indeces']
     TILE_POSITIONS = tile_layout['tile_positions']
+    TILE_ORIENTATIONS = tile_layout['tile_orientations']
     tpc_ids = np.unique(np.array(list(tile_indeces.values()))[:,0], axis=0)
 
     anodes = defaultdict(list)
+    cathode_directions = dict() # What direction the cathode is relative to anode
     for tpc_id in tpc_ids:
+        tile_cathode_directions = []
         for tile in tile_indeces:
             if tile_indeces[tile][0] == tpc_id:
                 anodes[tpc_id].append(TILE_POSITIONS[tile])
+                tile_cathode_directions.append(TILE_ORIENTATIONS[tile][0])
 
-    DRIFT_LENGTH = detprop['drift_length']
+        if len(set(tile_cathode_directions)) != 1:
+            raise ValueError("Tiles in same anode plane have different drift directions.")
+
+        if tile_cathode_directions[0] not in [1, -1]:
+            raise ValueError("Cathode direction should be either 1 or -1.")
+        cathode_directions[tpc_id] = tile_cathode_directions[0]
+
+
+    if old_version:
+        DRIFT_LENGTH = detprop['drift_length'] * cm / cm
+    else:
+        try:
+            DRIFT_LENGTH = tile_layout['drift_length'] * mm / cm
+        except:
+            warning(f"{tile_yaml} does not contain drift_length. Use 0.5*(max(mod_anodes) - min(mod_anodes))")
+            mod_anodes = np.array(list(TILE_POSITIONS.values()))[:, 0]
+            DRIFT_LENGTH = 0.5 * (max(mod_anodes) - min(mod_anodes)) * mm / cm
 
     TPC_OFFSETS = np.array(detprop['tpc_offsets'])
 
@@ -57,7 +79,10 @@ def simple_geo_parser(det_yaml, tile_yaml):
     for it, tpc_offset in enumerate(TPC_OFFSETS):
         for ia, anode in enumerate(anodes):
             tiles = np.vstack(anodes[anode]) * mm /cm
-            drift_direction = 1 if anode == 1 else -1
+            if old_version:
+                drift_direction = 1 if anode == 1 else -1
+            else:
+                drift_direction = cathode_directions[anode]
             z_border = min(tiles[:,2]) + TILE_BORDERS[0][0] + tpc_offset[2], \
                        max(tiles[:,2]) + TILE_BORDERS[0][1] + tpc_offset[2]
             y_border = min(tiles[:,1]) + TILE_BORDERS[1][0] + tpc_offset[1], \
@@ -66,6 +91,13 @@ def simple_geo_parser(det_yaml, tile_yaml):
             x_border = min(tiles[:,0]) + tpc_offset[0], \
                        max(tiles[:,0]) + DRIFT_LENGTH * drift_direction + tpc_offset[0]
             TPC_BORDERS[it*2+ia] = (x_border, y_border, z_border)
+    # reorder new output to fit to old version
+    if not old_version:
+        if cathode_directions[1] == 1:
+            pass
+        else:
+            TPC_BORDERS = TPC_BORDERS.reshape(-1, 2, 3, 2)[:,[1,0]].reshape(-1, 3, 2)
+
     return torch.tensor(TPC_BORDERS, requires_grad=False)
 
 def tpc_label(borders, X0, X1=None, **kwargs):
@@ -93,11 +125,11 @@ def tpc_label(borders, X0, X1=None, **kwargs):
         X1cs = [None] * len(X0cs)
 
     labels = []
-    
+
     boxes = borders
     vmin = torch.min(boxes, dim=2)[0] # (ntpc, 3)
     vmax = torch.max(boxes, dim=2)[0] # (ntpc, 3)
-    
+
     for X0c, X1c in zip(X0cs, X1cs):
         labelc = torch.full((len(X0c),), -1, dtype=index_dtype)
         if X1c is None:
@@ -140,6 +172,8 @@ def tpc_drift_direction(borders):
     anodes = []
     cathodes = []
     drift_directions = []
+    lower_left_corners = []
+    upper_corners = []
 
     for ibox, box in enumerate(borders):
         b0 = torch.min(box, dim=1)[0] # (3, )
@@ -152,9 +186,11 @@ def tpc_drift_direction(borders):
         else:
             assert box[0,0] > box[0,1], 'Expect borders[i,0,0] > borders[i,0,1] for odd i so that borders[i,0,0] is the anode position and the drift position is 1.'
             drift_directions.append(1)
+        lower_left_corners.append(b0[[1,2]])
+        upper_corners.append(b1[[1,2]])
         anodes.append(box[0,0])
         cathodes.append(box[0,1])
-    return torch.stack(anodes), torch.stack(cathodes), torch.tensor(drift_directions, requires_grad=False)
+    return torch.stack(anodes), torch.stack(cathodes), torch.tensor(drift_directions, requires_grad=False), torch.stack(lower_left_corners), torch.stack(upper_corners)
 
 def check_features(features):
     '''
@@ -177,7 +213,7 @@ class TPCDataset(Dataset):
     The first dimension of each tensor is batch dimension.
     The label array is an integer array for entry labels and TPC labels. TPC labels are optional.
     '''
-    def __init__(self, features, labels, tpc_id, anode=0, cathode=0, drift=0, tpc_label_index=None, sort_index=None):
+    def __init__(self, features, labels, tpc_id, anode=0, cathode=0, drift=0, lower_left_corner=(0,0), upper_corner=(0,0), tpc_label_index=None, sort_index=None):
         '''
         `features` and `labels` are selected according to tpc_id if `labels` consists of the TPC labels as the second label.
         Otherwise, all data in `features` and `labels` are saved.
@@ -225,6 +261,9 @@ class TPCDataset(Dataset):
         self.cathode = cathode
         self.drift = drift
 
+        self.lower_left_corner = lower_left_corner
+        self.upper_corner = upper_corner
+
     def __getitem__(self, idx):
         return (self.features[0][idx], self.features[1][idx], self.features[2][idx]), self.labels[idx]
 
@@ -246,7 +285,7 @@ def create_tpc_datasets_from_steps(features, labels, borders, **kwargs):
         raise ValueError('steps must be a size of (N_batch, 8). Please check `StepLoader`.')
     X0, X1 = steps[:,2:5], steps[:,5:8]
     tpclabels = tpc_label(borders, X0, X1, **kwargs)
-    anodes, cathodes, drift_dir = tpc_drift_direction(borders)
+    anodes, cathodes, drift_dir, lower_left_corners, upper_corners = tpc_drift_direction(borders)
     unique_labels = torch.unique(tpclabels, return_inverse=False, return_counts=False, sorted=True)
     tpcs = []
 
@@ -259,6 +298,8 @@ def create_tpc_datasets_from_steps(features, labels, borders, **kwargs):
             anode=anodes[tpclabel],
             cathode=cathodes[tpclabel],
             drift=drift_dir[tpclabel],
+            lower_left_corner=lower_left_corners[tpclabel],
+            upper_corner=upper_corners[tpclabel],
         ))
     return tpcs
 
@@ -306,7 +347,7 @@ class EagerLabelBatchSampler(Sampler):
             assert len(indices) == 1
             for j in range(0, len(indices[0]), self.batch_size):
                 self.batches.append(indices[0][j:j+batch_size])
-    
+
     def __iter__(self):
         # Optionally, shuffle the batches if needed
         return iter(self.batches)
@@ -328,7 +369,7 @@ class SortedLabelBatchSampler(Sampler):
             indices = torch.nonzero(inverse_indices == i, as_tuple=True) # tuple of indices for advanced indexing
             assert len(indices) == 1
             self.groups.append(indices[0]) # indices along batch should be 1D
-            
+
     def __iter__(self):
         for g in self.groups:
             for i in range(0, len(g), self.batch_size):
@@ -337,16 +378,16 @@ class SortedLabelBatchSampler(Sampler):
     def __len__(self):
         return len(self.__iter__())
 
-        
+
 def nd_collate_fn(batch):
     '''
     `batch` is assumed to be (features, labels)
     NOT [(features_sample1, labels_sample1), (features_sample2, labels_sample2), ...].
-    
+
     This function does task different from general collate_fn.
     In general, collate_fn is expected to convert [(features_sample1, labels_sample1), ...]
     to ([features_sample1, ...], [labels_sample1, ...]).
-    
+
     This function will convert time of creation to global + offset.
 
     `Features` is a list/tuple, (FloatTensor, DoubleTensor, IntTensor)
@@ -354,7 +395,7 @@ def nd_collate_fn(batch):
     Tensors are in a shape of (N_batch, n_feature)
 
     The time of creation is assumed to be the first component of DoubleTensor.
-    '''        
+    '''
     features, labels = batch
     # features, labels = zip(*batch) # for generatel conversion from [(features_sample1, labels_sample1), ...] to ([features_sample1, ...], [labels_sample1, ...])
     t64bit = features[1] if features[1].dim() == 1 else features[1][:,0]
@@ -365,7 +406,7 @@ def nd_collate_fn(batch):
     dt = t64bit - t
     ts = torch.stack([t.to(torch.float32), dt.to(torch.float32)], dim=1)
     features = (torch.concatenate([features[0], ts], dim=1), features[1], features[2])
-    
+
     return features, labels
 
 
@@ -376,15 +417,15 @@ class CustomNDLoader():
     def __init__(self, dataset, sampler=None, collate_fn=None, batch_size=None):
         '''
         The loader is not supposed to have automatic batching.
-        
+
         It can only support a fixed batch size from `batch_size`, or a batch scheme provided by `sampler`.
         Arguments `sampler` and `batch_size` are mutually exclusive.
-        
+
         Dataset must be map-style, having method __getitem__().
 
         Argument `collate_fn` is not in the general sense. It does not collect and combine but do transformation on the fly.
         In the original PyTorch way, collate_fn is expected to convert [(features_sample1, labels_sample1), ...]
-        to ([features_sample1, ...], [labels_sample1, ...]). This function skip the step but assuming data that will be processed 
+        to ([features_sample1, ...], [labels_sample1, ...]). This function skip the step but assuming data that will be processed
         already in the foramt of ([features_sample1, ...], [labels_sample1, ...]) and perform further transformation.
 
         When sampler is given, `CustomNDLoader(dataset, sampler=sampler, collate_fn=collate_fn)` is expected to behave like

@@ -272,6 +272,90 @@ def chunkify2(block: Block, shape: IntTensor) -> Block:
 
     return Block(location=locs_new, data=data)
 
+def accumulate_nd_blocks_v1(block, cshape: tuple[int, ...]):
+    X = block.data
+    indices = block.location
+    N, *spatial = X.shape
+    k = len(spatial)
+    assert indices.shape == (N, k) and len(cshape) == k
+
+    # 1) compute how many blocks along each dim
+    mshape = [spatial[i] // cshape[i] for i in range(k)]
+
+    # 2) reshape+permute into a view of all blocks:
+    #    shape before permute: (N, m1, c1, m2, c2, ...)
+    view_shape = [N] + sum([[mshape[i], cshape[i]] for i in range(k)], [])
+    Xb = X.view(*view_shape)
+    #    now permute to (N, m1, m2, ..., c1, c2,...)
+    perm = [0] + [2*i+1 for i in range(k)] + [2*i+2 for i in range(k)]
+    Xb = Xb.permute(*perm)   # STILL a view?no copy!
+
+    # 3) build per?block absolute starts: shape (N, m1,?, k)
+    coords = [torch.arange(mshape[i], device=Xb.device) * cshape[i]
+              for i in range(k)]
+    grid = torch.stack(torch.meshgrid(*coords, indexing="ij"), dim=-1)
+    idx_exp = (indices.view(N, *([1]*k), k)
+                     .expand(N, *mshape, k)
+               + grid[None])
+    # 4) find unique starts + inverse?map
+    flat_starts = idx_exp.reshape(-1, k)
+    unique_pairs, inverse = torch.unique(flat_starts, dim=0, return_inverse=True)
+
+    # 5) for each unique start, mask & sum **all** blocks at once
+    U = unique_pairs.size(0)
+    out = torch.zeros((U, *cshape), dtype=X.dtype, device=X.device)
+
+    for u, up in enumerate(unique_pairs):
+        mask = (idx_exp == up).all(dim=-1)
+        # pick blocks and sum
+        out[u] = Xb[mask].sum(dim=0)
+
+    return Block(data=out, location=unique_pairs)
+
+def accumulate_nd_blocks_v2(block, cshape: tuple[int, ...]):
+    X = block.data
+    indices = block.location
+    N, *spatial = X.shape
+    k = len(spatial)
+    assert indices.shape == (N, k) and len(cshape) == k
+
+    # 1) compute how many blocks along each dim
+    mshape = [spatial[i] // cshape[i] for i in range(k)]
+
+    # 2) reshape+permute into a view of all blocks:
+    #    shape before permute: (N, m1, c1, m2, c2, ...)
+    view_shape = [N] + sum([[mshape[i], cshape[i]] for i in range(k)], [])
+    Xb = X.view(*view_shape)
+    #    now permute to (N, m1, m2, ..., c1, c2,...)
+    perm = [0] + [2*i+1 for i in range(k)] + [2*i+2 for i in range(k)]
+    Xb = Xb.permute(*perm)   # STILL a view?no copy!
+
+    # 3) build per?block absolute starts: shape (N, m1,?, k)
+    coords = [torch.arange(mshape[i], device=Xb.device) * cshape[i]
+              for i in range(k)]
+    grid = torch.stack(torch.meshgrid(*coords, indexing="ij"), dim=-1)
+    grid = (indices.view(N, *([1]*k), k)
+                     .expand(N, *mshape, k)
+               + grid[None])
+
+    # reduce batch * first M dimension
+
+    grid = grid.view(-1, *mshape[1:],k)
+    uq, inv = grid.unique(dim=0, return_inverse=True)
+    for ib in range(k-1+k):
+        inv = inv.unsqueeze(-1)
+
+    inds = inv.expand(-1, *mshape[1:], *cshape)
+    Xb = Xb.view(-1, *Xb.shape[2:])
+    acc0 = torch.zeros((uq.size(0), *Xb.shape[1:]), device=Xb.device, dtype=Xb.dtype)
+
+    acc0.scatter_add_(0, inds, Xb)
+
+    uq, inv = torch.unique(uq.view(-1,k), dim=0, return_inverse=True)
+    acc = torch.zeros((uq.size(0), *cshape), device=Xb.device, dtype=Xb.dtype)
+    acc.index_add_(0, inv, acc0.view(-1, *cshape))
+
+    return Block(data=acc, location=uq)
 
 def index_chunks(sgrid: SGrid, chunk: Block) -> Block:
     '''

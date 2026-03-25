@@ -352,7 +352,7 @@ def interlaced_symm_v2(signal: Block, response: Tensor, steps: IntTensor, taxis:
     c_shape = dft_shape(torch.tensor(signal.data.shape[1:]).to(steps.device)//steps, torch.tensor(response.shape).to(steps.device)//steps)
     if o_shape is None:
         o_shape = c_shape
-    elif any(tuple(s1 >= s2 for s1,s2 in zip(c_shape, o_shape))):
+    elif any(tuple(s1 > s2 for s1,s2 in zip(c_shape, o_shape))):
         raise ValueError(f"Invalid output shape after padding: expected at least Ns + Nr - 1, {c_shape}, but got {o_shape}")
 
     # output locations

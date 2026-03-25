@@ -5,6 +5,7 @@ Some basic utility functions
 import sys
 import subprocess
 from pathlib import Path
+from typing import Sequence, Iterator, Tuple
 
 import functools
 import warnings
@@ -22,6 +23,7 @@ import logging
 
 log = logging.getLogger("tred")
 debug = log.debug
+warning = log.warning
 info = log.info
 
 def tenstr(ten):
@@ -154,3 +156,55 @@ def deprecated(reason):
             return func(*args, **kwargs)
         return wrapped
     return decorator
+
+
+def iter_tensor_chunks(
+    tensors: Sequence[Tensor],
+    *,
+    chunk_size: int | None = None,
+    dim: int = 0,
+) -> Iterator[Tuple[Tensor, ...]]:
+    """
+    Yield tuples of tensor views, chunked in sync along `dim`.
+
+    Args:
+        tensors: List/tuple of tensors to chunk together.
+        chunk_size: Number of items per chunk (mutually exclusive with num_chunks).
+        dim: Dimension along which to chunk (default 0).
+
+    Yields:
+        Tuple of tensor views, one view per input tensor, for each chunk.
+
+    Notes:
+        - Uses .narrow(...) so chunks are views (no data copy).
+        - All tensors must have the same size along `dim`.
+    """
+    if not isinstance(tensors, (list, tuple)) or len(tensors) == 0:
+        return
+    if (chunk_size is None):
+        raise ValueError("Specify exactly one of chunk_size.")
+    if any(not isinstance(t, Tensor) for t in tensors):
+        raise TypeError("All items must be torch.Tensors.")
+
+    # Normalize dim (support negative dims)
+    ref = tensors[0]
+    D = ref.dim()
+    dim = dim if dim >= 0 else D + dim
+    if dim < 0 or dim >= D:
+        raise ValueError(f"dim {dim} out of range for tensors with {D} dims.")
+
+    # Ensure equal length along chunking dim
+    n = ref.size(dim)
+    for t in tensors[1:]:
+        if t.size(dim) != n:
+            raise ValueError("All tensors must match in size along the chunking dimension.")
+
+    if chunk_size is not None:
+        if chunk_size <= 0:
+            raise ValueError("chunk_size must be > 0.")
+        start = 0
+        while start < n:
+            end = min(start + chunk_size, n)
+            size = end - start
+            yield tuple(t.narrow(dim, start, size) for t in tensors)
+            start = end
