@@ -204,7 +204,8 @@ def fixed_interval_readout(block, adc_hold_delay, one_tick=1,
     if uncorr_noise is not None:
         Xacc += torch.normal(0, torch.full_like(Xacc, fill_value=uncorr_noise, device=Xacc.device))
     records = Xacc[..., offset_to_align::adc_hold_delay]
-    truehits = Xacc_true[..., offset_to_align::adc_hold_delay]
+    # truehits = Xacc_true[..., offset_to_align::adc_hold_delay]
+    truehits = Xacc_true[..., ::adc_hold_delay] # always align starts of true with the field response...
     for i in pixel_axes:
         if records.shape[i] != 1:
             raise ValueError(f"Pixel axis {i} has size {records.shape[i]}, expected 1.")
