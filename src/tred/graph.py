@@ -119,18 +119,22 @@ class Drifter(nn.Module):
                   of (npt,), the position of start point of each step.
 
         Note: the meaning of tail and head are swappable when they are given together.
-              The method internally redefines the tail to be closet point to anode
-              and the head to be farthest point to anode. It is worth noting the
-              swap does not affect the input but gives the definition of dtail,
-              dhead at the output.
+              The method internally reorders the two endpoints according to the
+              drift direction before evaluating drift time, diffusion, and charge
+              loss. The reordered ``tail`` is the endpoint used to define the
+              returned ``dtime``. For positive velocity it is the endpoint with
+              the smaller coordinate along ``vaxis``; for negative velocity it is
+              the endpoint with the larger coordinate along ``vaxis``. This swap
+              does not modify the input tensors in place, but it does define the
+              meaning of ``dtail`` and ``dhead`` at the output.
 
         Returns tuple one larger than input args with sigma prepended.
 
         dsigma :: post-drift diffusion width at target plane.
         dtime :: post-drift time is the time for tail. Shifts may be applied.
         dcharge :: post-drift charge at target plane.
-        dtail :: post-drift positions of depo or point closest to anode of each step.
-        dhead :: post-drift positions of depo, or point farthest to anode of each step.
+        dtail :: post-drift positions of depo or the reordered tail endpoint of each step.
+        dhead :: post-drift positions of depo, or the reordered head endpoint of each step.
         '''
 
         if head is not None:
@@ -154,20 +158,24 @@ class Drifter(nn.Module):
     @staticmethod
     def _ensure_tail_closer_to_anode(tail, head, velocity, vaxis):
         """
-        Ensures that the `tail` position is always closer to the anode than the `head`.
+        Reorder the two step endpoints into the convention used by ``Drifter``.
 
         This function reorders the `tail` and `head` tensors based on their positions along a specified axis (`vaxis`).
             The reordering is determined by the sign of `velocity`:
-            - If `velocity > 0`, the function ensures `tail[:, vaxis] > head[:, vaxis]`, swapping elements where necessary.
-            - If `velocity < 0`, it ensures `tail[:, vaxis] < head[:, vaxis]`.
+            - If `velocity > 0`, the function ensures `tail[:, vaxis] <= head[:, vaxis]`, swapping elements where necessary.
+            - If `velocity < 0`, it ensures `tail[:, vaxis] >= head[:, vaxis]`.
+
+        This convention makes ``tail`` the endpoint used to define the step
+        drift time in ``Drifter.forward()``. It is an ordering convention based
+        on drift direction, not a direct comparison to the anode target value.
 
         The swap operation is performed in-place for efficiency.
 
         Parameters:
             - tail (torch.Tensor): Tensor representing tail positions, either 1D (`(npt,)`) or 2D (`(npt, vdim)`).
             - head (torch.Tensor): Tensor representing head positions, either 1D (`(npt,)`) or 2D (`(npt, vdim)`).
-            - velocity (float): Determines the direction of drift. Positive values prioritize larger `tail[:, vaxis]`,
-                            while negative values prioritize smaller ones.
+            - velocity (float): Determines the direction of drift. Positive values prioritize smaller `tail[:, vaxis]`,
+                            while negative values prioritize larger ones.
             - vaxis (int): The index of the axis along which the positions are compared.
 
         Returns:
@@ -186,6 +194,7 @@ class Drifter(nn.Module):
             )
 
         tail_new, head_new = tail.clone().detach(), head.clone().detach()
+        vaxis = int(vaxis)
 
         # Handle 1D input by temporarily adding an extra dimension
         squeeze = tail.dim() == 1
@@ -194,10 +203,10 @@ class Drifter(nn.Module):
 
         if vaxis >= tail_new.size(1):
             raise ValueError(
-                f'Allow vaxis is only up to {tail.size(1)}.'
+                f'allowed vaxis is only up to {tail_new.size(1) - 1}.'
             )
 
-        # Identify indices where swapping is needed
+        # Order the step endpoints deterministically based on drift direction.
         mask = (tail_new[:, vaxis] > head_new[:, vaxis]) if velocity > 0 else (tail_new[:, vaxis] < head_new[:, vaxis])
         swap_idx = torch.nonzero(mask, as_tuple=True)[0]
 

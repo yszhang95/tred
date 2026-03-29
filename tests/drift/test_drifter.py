@@ -6,6 +6,11 @@ from tred.graph import Drifter
 import numpy as np
 import matplotlib.pyplot as plt
 
+DEVICES = [
+    "cpu",
+    pytest.param("cuda", marks=pytest.mark.skipif(not torch.cuda.is_available(), reason="CUDA not available")),
+]
+
 @pytest.mark.parametrize("diffusion,lifetime,velocity,target,expect_error", [
     (None, 10.0, 1.0, 0.0, True),      # diffusion is None
     (0.1, None, 1.0, 0.0, True),       # lifetime is None
@@ -26,10 +31,7 @@ def test_drifter_init_validation(diffusion, lifetime, velocity, target, expect_e
         d = Drifter(diffusion, lifetime, velocity, target=target)
         assert isinstance(d, Drifter)
 
-@pytest.mark.parametrize("device",[
-    'cpu',
-    'cuda',
-])
+@pytest.mark.parametrize("device", DEVICES)
 def test_drifter_forward_no_head(device):
     """
     Test Drifter forward pass (no head). Check shapes and basic value correctness.
@@ -72,10 +74,7 @@ def test_drifter_forward_no_head(device):
     assert torch.allclose(dcharge, expected_charge), "Charge should follow exponential quenching."
 
 
-@pytest.mark.parametrize("device",[
-    'cpu',
-    'cuda',
-])
+@pytest.mark.parametrize("device", DEVICES)
 def test_drifter_forward_with_head(device):
     """
     Test Drifter forward pass when a head location is provided.
@@ -96,8 +95,8 @@ def test_drifter_forward_with_head(device):
     tail = torch.tensor([[0.0, 3.0], [2.0, 3.0]], device=device)
     head = torch.tensor([[1.0, 1.0], [3.0, 4.0]], device=device) # for vaxis == 1
 
-    tail_reorder = torch.tensor([[0.0, 3.0], [3.0, 4.0]], device=device)
-    head_reorder = torch.tensor([[1.0, 1.0], [2.0, 3.0]], device=device) # for vaxis == 1
+    tail_reorder = torch.tensor([[1.0, 1.0], [2.0, 3.0]], device=device)
+    head_reorder = torch.tensor([[0.0, 3.0], [3.0, 4.0]], device=device) # for vaxis == 1
 
     time = torch.tensor([0.1, 1.2], device=device)
     charge = torch.tensor([300.0, 400.0], device=device)
@@ -296,7 +295,7 @@ def test_drifter_drtoa_interference(locs, times, velocity, target, drtoa):
     lifetime = 10.0
     charge = None
     drifter_with = Drifter(diffusion, lifetime, velocity, target, vaxis=0, drtoa=drtoa)
-    drifter_without = Drifter(diffusion, lifetime, velocity, target, vaxis=0, drtoa=drtoa)
+    drifter_without = Drifter(diffusion, lifetime, velocity, target, vaxis=0)
     out_with = drifter_with.forward(times, charge, locs)
     out_without = drifter_without.forward(times, charge, locs)
     # Compare sigma, charge, and tail locs remain unchanged.
@@ -307,7 +306,7 @@ def test_drifter_drtoa_interference(locs, times, velocity, target, drtoa):
 
 def test_drifter_mutually_exclusive_tshift_and_drtoa():
     """
-    Test that Drifter.forward raises an error when both tshift and drtoa are provided.
+    Test that Drifter.__init__ raises an error when both tshift and drtoa are provided.
     """
     locs = torch.tensor([1.0, 3.0])
     diffusion = 0.1
