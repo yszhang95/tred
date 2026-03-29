@@ -306,6 +306,8 @@ class Raster(nn.Module):
         dt = self._time_diff(tail, head)
 
         tail = self._transform(tail, time)
+        sigma = self._transform(sigma, None)
+        sigma[:, self._tdim] = sigma[:, self._tdim] / torch.abs(self.velocity) # distance to time
 
         debug(f'grid:{tenstr(self.grid_spacing)} tail:{tenstr(tail)} sigma:{tenstr(sigma)} charge:{tenstr(charge)}')
         if head is None:        # depos, not steps
@@ -313,8 +315,6 @@ class Raster(nn.Module):
             return Block(location = offsets, data=rasters)
 
         head = self._transform(head, dt+time)
-        sigma = self._transform(sigma, None)
-        sigma[:, self._tdim] = sigma[:, self._tdim] / torch.abs(self.velocity) # distance to time
         rasters, offsets = raster_steps(self.grid_spacing, tail, head, sigma, charge, nsigma=self.nsigma, npoints=self._npoints)
 
         return Block(location = offsets, data=rasters)
