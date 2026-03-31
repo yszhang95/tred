@@ -59,7 +59,11 @@ import torch
 from ..util import to_tensor, debug, tenstr
 from ..types import index_dtype
 
-def binned_1d(grid, centers, widths, q, nsigma=None, minbins=None):
+DEFAULT_FLOAT_DTYPE = torch.float64
+
+
+def binned_1d(grid, centers, widths, q, nsigma=None, minbins=None,
+              dtype=DEFAULT_FLOAT_DTYPE):
     '''
     1D.
 
@@ -80,17 +84,25 @@ def binned_1d(grid, centers, widths, q, nsigma=None, minbins=None):
     - nsigma :: minimum multiple of Gaussian sigma to cover.
     - minbins :: per-dimension absolute minimum number of grid points to cover half the Gaussian.
     '''
+    device = centers.device
+    grid = to_tensor(grid, dtype=dtype, device=device)
+    centers = to_tensor(centers, dtype=dtype, device=device)
+    widths = to_tensor(widths, dtype=dtype, device=device)
+    q = to_tensor(q, dtype=dtype, device=device)
+    if minbins is not None:
+        minbins = to_tensor(minbins, dtype=index_dtype, device=device)
     if nsigma is None:
         nsigma = 3.0
+    nsigma = to_tensor(nsigma, dtype=dtype, device=device)
 
     # Find number of grid points that span half the largest Gaussian.
-    n_half = torch.round((widths*nsigma)/grid).to(dtype=torch.int32)
+    n_half = torch.round((widths*nsigma)/grid).to(dtype=index_dtype)
     if minbins is not None:
         n_half = torch.vstack((n_half, minbins))
     n_half = torch.max(n_half)
 
     # find the grid index nearest to each center.
-    gridc = torch.round(centers/grid).to(dtype=torch.int32)
+    gridc = torch.round(centers/grid).to(dtype=index_dtype)
 
     # find the grid index at the starting point for each region.
     grid0 = gridc - n_half
@@ -99,7 +111,8 @@ def binned_1d(grid, centers, widths, q, nsigma=None, minbins=None):
 
     # Enumerate the grid points covering the two halves.
     # Note, add 1 as we do a shift-by-one subtraction below.
-    rel_grid_ind = torch.linspace(0, 2*n_half, 2*n_half + 1)
+    rel_grid_ind = torch.linspace(0, 2*n_half, 2*n_half + 1,
+                                  dtype=dtype, device=device)
     rel_grid_ind = torch.unsqueeze(rel_grid_ind, 0)
 
     # (ndepos, 1=vdim)
@@ -120,12 +133,13 @@ def binned_1d(grid, centers, widths, q, nsigma=None, minbins=None):
     erfs = torch.erf(normals)
     integ = 0.5*(erfs[:, 1:] - erfs[:, :-1])
     integ[spikes] = 0
-    integ[spikes, rel_gridc[spikes]] = 1.0
+    integ[spikes, rel_gridc[spikes].to(dtype=torch.long)] = 1.0
     raster = torch.unsqueeze(q, -1)*integ
     return (raster, torch.squeeze(grid0))
 
 
-def binned_nd(grid, centers, sigmas, charges, nsigma=None, minbins=None):
+def binned_nd(grid, centers, sigmas, charges, nsigma=None, minbins=None,
+              dtype=DEFAULT_FLOAT_DTYPE):
     '''
     N-dimensional (N>1)
 
@@ -140,11 +154,16 @@ def binned_nd(grid, centers, sigmas, charges, nsigma=None, minbins=None):
 
     '''
     device = centers.device
+    centers = to_tensor(centers, dtype=dtype, device=device)
+    sigmas = to_tensor(sigmas, dtype=dtype, device=device)
+    charges = to_tensor(charges, dtype=dtype, device=device)
 
     if isinstance(grid, (tuple,list)):
-        grid = to_tensor(grid, dtype=torch.float32, device=device)
+        grid = to_tensor(grid, dtype=dtype, device=device)
     if not isinstance(grid, torch.Tensor):
-        grid = torch.tensor([grid], dtype=index_dtype, device=device) # make 1D (vdim,)
+        grid = torch.tensor([grid], dtype=dtype, device=device) # make 1D (vdim,)
+    else:
+        grid = grid.to(device=device, dtype=dtype)
     if len(grid.shape) != 1:
         raise ValueError(f'illegal grid spacing shape {grid.shape}, expect 1D vector')
 
@@ -156,7 +175,11 @@ def binned_nd(grid, centers, sigmas, charges, nsigma=None, minbins=None):
     if nsigma is None:
         nsigma = 3.0
     if not isinstance(nsigma, torch.Tensor):
-        nsigma = torch.tensor([nsigma]*vdims, device=device)
+        nsigma = torch.tensor([nsigma]*vdims, dtype=dtype, device=device)
+    else:
+        nsigma = nsigma.to(device=device, dtype=dtype)
+    if minbins is not None:
+        minbins = to_tensor(minbins, dtype=index_dtype, device=device)
 
     ndepos = centers.shape[0]
 
@@ -197,7 +220,8 @@ def binned_nd(grid, centers, sigmas, charges, nsigma=None, minbins=None):
         # Enumerate the grid points covering the two halves of this dim's Gaussian
         # Note, add 1 as we do a shift-by-one subtraction after erf()'s below
         # (npts,)
-        rel_grid_ind = torch.linspace(0, 2*dim_n_half, 2*dim_n_half+1).to(device=device)
+        rel_grid_ind = torch.linspace(0, 2*dim_n_half, 2*dim_n_half+1,
+                                      dtype=dtype, device=device)
 
         abs_grid_pts = ((grid0[:,dim][:,None] + rel_grid_ind[None,:]) - 0.5) * grid[dim]
 
@@ -210,7 +234,7 @@ def binned_nd(grid, centers, sigmas, charges, nsigma=None, minbins=None):
         integ = 0.5*(erfs[:, 1:] - erfs[:, :-1])
 
         integ[spikes] = 0
-        integ[spikes, rel_gridc[spikes, dim]] = 1.0
+        integ[spikes, rel_gridc[spikes, dim].to(dtype=torch.long)] = 1.0
         integs.append(integ)
 
     # integs = [torch.unsqueeze(one, dim=0) for one in integs]
@@ -231,12 +255,12 @@ def binned_nd(grid, centers, sigmas, charges, nsigma=None, minbins=None):
 
 
 
-def binned(grid, centers, sigmas, charges, nsigma=None, minbins=None):
+def binned(grid, centers, sigmas, charges, nsigma=None, minbins=None,
+           dtype=DEFAULT_FLOAT_DTYPE):
     '''
     Raster depos by integrating Gaussian distribution around each grid point 
 
     nsigma is either scalar or N-dimensional giving the number of sigma over
     which to perform the integration.
     '''
-    return binned_nd(grid, centers, sigmas, charges, nsigma, minbins)
-
+    return binned_nd(grid, centers, sigmas, charges, nsigma, minbins, dtype=dtype)

@@ -49,7 +49,8 @@ def raster_steps(*args,**kwds):
                         Sigma=args[3], Q=args[4],
                         n_sigma=(kwds['nsigma'], kwds['nsigma'], kwds['nsigma']),
                         origin=(0,0,0), method='gauss_legendre',
-                        npoints=kwds.get('npoints', (2, 2, 2)))
+                        npoints=kwds.get('npoints', (2, 2, 2)),
+                        dtype=kwds.get('dtype', torch.float64))
 
 def param(thing, dtype=torch.float32):
     if isinstance(thing, torch.Tensor):
@@ -224,7 +225,8 @@ class Raster(nn.Module):
     '''
     Raster depos or steps.
     '''
-    def __init__(self, velocity, grid_spacing, pdims=(1,2), tdim=-1, nsigma=3.0, npoints=(2,2,2)):
+    def __init__(self, velocity, grid_spacing, pdims=(1,2), tdim=-1,
+                 nsigma=3.0, npoints=(2,2,2), dtype=torch.float64):
         '''
         - velocity :: signed velocity for computing time difference between tail and head
         - pdims :: the N-1 dimensions for transverse pitch indexing into input points.
@@ -232,6 +234,7 @@ class Raster(nn.Module):
         - tdim :: the 1 dimension for time/drift.
                   This is the target axis of the new tensor to be processed.
         - grid_spacing :: 1D tensor or tuple/list. Spacing of grid is in the transformed coordinate.
+        - dtype :: floating-point compute dtype used by rasterization, default float64.
         '''
         super().__init__()
 
@@ -239,11 +242,14 @@ class Raster(nn.Module):
             raise ValueError('a velocity value is required (units [distance]/[time])')
         if grid_spacing is None:
             raise ValueError('a real-valued grid spacing N-tensor is required (units [distance])')
+        if not torch.empty((), dtype=dtype).is_floating_point():
+            raise ValueError('Raster dtype must be a floating-point torch.dtype')
 
-        constant(self, 'velocity', velocity)
-        constant(self, 'grid_spacing', grid_spacing)
-        constant(self, 'nsigma', nsigma)
+        constant(self, 'velocity', velocity, dtype)
+        constant(self, 'grid_spacing', grid_spacing, dtype)
+        constant(self, 'nsigma', nsigma, dtype)
         self._npoints = npoints
+        self._dtype = dtype
 
         self._pdims = pdims or ()
         self._tdim = tdim if tdim>=0 else len(self._pdims) + 1 + tdim
@@ -303,6 +309,13 @@ class Raster(nn.Module):
 
         If head is None then tail is a depo point.  Otherwise the two make a step.
         '''
+        sigma = sigma.to(dtype=self._dtype)
+        time = time.to(dtype=self._dtype)
+        charge = charge.to(dtype=self._dtype)
+        tail = tail.to(dtype=self._dtype)
+        if head is not None:
+            head = head.to(dtype=self._dtype)
+
         dt = self._time_diff(tail, head)
 
         tail = self._transform(tail, time)
@@ -311,11 +324,14 @@ class Raster(nn.Module):
 
         debug(f'grid:{tenstr(self.grid_spacing)} tail:{tenstr(tail)} sigma:{tenstr(sigma)} charge:{tenstr(charge)}')
         if head is None:        # depos, not steps
-            rasters, offsets = raster_depos(self.grid_spacing, tail, sigma, charge, nsigma=self.nsigma)
+            rasters, offsets = raster_depos(self.grid_spacing, tail, sigma, charge,
+                                            nsigma=self.nsigma, dtype=self._dtype)
             return Block(location = offsets, data=rasters)
 
         head = self._transform(head, dt+time)
-        rasters, offsets = raster_steps(self.grid_spacing, tail, head, sigma, charge, nsigma=self.nsigma, npoints=self._npoints)
+        rasters, offsets = raster_steps(self.grid_spacing, tail, head, sigma, charge,
+                                        nsigma=self.nsigma, npoints=self._npoints,
+                                        dtype=self._dtype)
 
         return Block(location = offsets, data=rasters)
 
