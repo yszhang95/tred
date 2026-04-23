@@ -25,6 +25,35 @@ def to_tensor(source, device, dtype=DEFAULT_FLOAT_DTYPE):
     return t
 
 
+def _coarsest_float_dtype(default_dtype, *values):
+    """Return the lowest-precision supported floating dtype among the inputs."""
+    rank = {
+        torch.float32: 0,
+        torch.float64: 1,
+    }
+    dtypes = []
+    if default_dtype in rank:
+        dtypes.append(default_dtype)
+    elif default_dtype is not None:
+        raise TypeError(f'Unsupported floating dtype: {default_dtype}')
+    for value in values:
+        if isinstance(value, torch.Tensor) and value.is_floating_point():
+            if value.dtype not in rank:
+                raise TypeError(f'Unsupported floating dtype: {value.dtype}')
+            dtypes.append(value.dtype)
+    if not dtypes:
+        return DEFAULT_FLOAT_DTYPE
+    return min(dtypes, key=rank.__getitem__)
+
+
+def _snap_near_integer(values: Tensor, source_dtype):
+    """Snap values close to an integer boundary before flooring."""
+    nearest = torch.round(values)
+    eps = torch.finfo(source_dtype).eps
+    tol = 8 * eps * torch.clamp(nearest.abs(), min=1.0)
+    return torch.where((values - nearest).abs() <= tol, nearest, values)
+
+
 def compute_coordinate(idxs: Tensor, origin, grid_spacing, device='cpu',
                        dtype=DEFAULT_FLOAT_DTYPE):
     '''
@@ -58,12 +87,14 @@ def compute_index(coords, origin, grid_spacing, device='cpu',
     return
         (coords - origin)//spacing, index of grid point
     '''
-    coords = to_tensor(coords, device, dtype=dtype)
+    source_dtype = _coarsest_float_dtype(dtype, coords, origin, grid_spacing)
+    coords = to_tensor(coords, device, dtype=torch.float64)
     if coords.dim() == 1:
         coords = coords.unsqueeze(0)
-    origin = to_tensor(origin, device, dtype=dtype)
-    grid_spacing = to_tensor(grid_spacing, device, dtype=dtype)
+    origin = to_tensor(origin, device, dtype=torch.float64)
+    grid_spacing = to_tensor(grid_spacing, device, dtype=torch.float64)
     idxs = (coords - origin.unsqueeze(0)) / grid_spacing.unsqueeze(0)
+    idxs = _snap_near_integer(idxs, source_dtype)
 
     assert torch.all(idxs <= MAX_INDEX), f'Overflow of index_dtype {MAX_INDEX}'
     assert torch.all(idxs >= MIN_INDEX), 'Underflow of index_dtype'

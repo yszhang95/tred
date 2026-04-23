@@ -256,31 +256,38 @@ Relevant location:
 
 - `tests/effq/test_effq.py`
 
-### Dtype-dependent boundary behavior
+### ~~Dtype-dependent boundary behavior~~
 
-Raster now supports both `float32` and `float64` compute, but the same logical inputs can still produce:
+Fixed in the current source for the reviewed near-boundary case.
+
+Raster now supports both `float32` and `float64` compute. Earlier in review, the same logical raster bounds could produce:
 
 - different block shapes
 - different block offsets
 
-when switching the compute dtype.
+when switching dtype near bin edges.
 
-This was observed in focused smoke tests on `Raster.forward()` for both:
-
-- depo path
-- step path
-
-The likely source is boundary sensitivity in:
+The sensitive path was:
 
 - `compute_index()`
 - `compute_charge_box()`
 
-where `floor()` and raster box construction depend on floating-point rounding near bin edges.
+where `floor()` acted directly on floating-point values near integer grid boundaries.
+
+This is now handled by:
+
+- computing the index ratio in `float64`
+- snapping values within a source-dtype tolerance of an integer boundary to that integer
+- then applying `floor()`
+
+This fix is covered by:
+
+- `tests/effq/test_grid.py::test_compute_charge_box_dtype_stable_on_grid_boundary`
 
 Conclusion:
 
-- this is still an open behavior question
-- it may be acceptable, but it should be decided explicitly rather than left implicit
+- exact-on-edge charge-box indexing is now dtype-stable across `float32` and `float64`
+- the boundary rule is now explicit instead of implicit
 
 ### Hard-coded integral expectations are stale
 
@@ -321,6 +328,7 @@ Issues:
 Conclusion:
 
 - this file is partly stale with respect to current dtype behavior
+- it now includes a focused regression test for dtype-stable charge-box indexing on a grid boundary
 
 ## `tests/effq/test_effq.py`
 
@@ -445,8 +453,7 @@ Conclusion:
    - most still assume legacy dtype and reference-value behavior
 5. The new dtype smoke test improves coverage of the explicit dtype contract.
 6. Direct depos backend coverage now exists in `tests/effq/test_depos.py`.
-7. One open technical question remains:
-   - should raster box shape/offset be allowed to vary between `float32` and `float64`, or should boundary handling be made dtype-stable?
+7. Charge-box boundary handling is now explicitly dtype-stable for the reviewed exact-on-edge case.
 
 ## Command Used
 

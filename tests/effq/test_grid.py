@@ -191,6 +191,26 @@ def test_compute_charge_box():
                         f'exact lower bound: {exact_bounds[0]}, exact upper bound: {exact_bounds[1]}, '\
                         f'lower bound={bounds_lw[i,j]}, upper bound={bounds_up[i,j]}'
 
+
+def test_compute_charge_box_dtype_stable_on_grid_boundary():
+    origin = (0.0, 0.0, 0.0)
+    grid_spacing = (0.1, 0.1, 0.1)
+    n_sigma = (2.0, 2.0, 2.0)
+    expected_offset = torch.tensor([[1, 1, 1]], dtype=index_dtype)
+    expected_shape = torch.tensor([5, 5, 5], dtype=index_dtype)
+
+    for input_dtype in (torch.float32, torch.float64):
+        X0 = torch.tensor([[0.3, 0.3, 0.3]], dtype=input_dtype)
+        X1 = torch.tensor([[0.3, 0.3, 0.3]], dtype=input_dtype)
+        sigma = torch.tensor([[0.1, 0.1, 0.1]], dtype=input_dtype)
+
+        for compute_dtype in (torch.float32, torch.float64):
+            offset, shape = compute_charge_box(
+                X0, X1, sigma, n_sigma, origin, grid_spacing, dtype=compute_dtype
+            )
+            assert torch.equal(offset, expected_offset)
+            assert torch.equal(shape, expected_shape)
+
 def main():
     print('----- test_grid() ------')
     test_grid()
