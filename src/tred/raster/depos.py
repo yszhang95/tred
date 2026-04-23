@@ -96,7 +96,8 @@ def binned_1d(grid, centers, widths, q, nsigma=None, minbins=None,
     nsigma = to_tensor(nsigma, dtype=dtype, device=device)
 
     # Find number of grid points that span half the largest Gaussian.
-    n_half = torch.round((widths*nsigma)/grid).to(dtype=index_dtype)
+    n_half = torch.ceil((widths*nsigma)/grid).to(dtype=index_dtype)
+    n_half = torch.clamp(n_half, min=1)
     if minbins is not None:
         n_half = torch.vstack((n_half, minbins))
     n_half = torch.max(n_half)
