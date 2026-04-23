@@ -139,7 +139,7 @@ class Drifter(nn.Module):
         '''
 
         if head is not None:
-            tail, head = Drifter._ensure_tail_closer_to_anode(tail, head,
+            tail, head = Drifter._order_step_endpoints_for_drift_time(tail, head,
                                                      self.velocity, self.vaxis)
         # note, can in principle, drift with pare-existing sigmas.  But here we
         # assume point-like.
@@ -157,9 +157,9 @@ class Drifter(nn.Module):
 
 
     @staticmethod
-    def _ensure_tail_closer_to_anode(tail, head, velocity, vaxis):
+    def _order_step_endpoints_for_drift_time(tail, head, velocity, vaxis):
         """
-        Reorder the two step endpoints into the convention used by ``Drifter``.
+        Reorder step endpoints into the convention used to compute drift time.
 
         This function reorders the `tail` and `head` tensors based on their positions along a specified axis (`vaxis`).
             The reordering is determined by the sign of `velocity`:
@@ -254,11 +254,16 @@ class Raster(nn.Module):
         self._pdims = pdims or ()
         self._tdim = tdim if tdim>=0 else len(self._pdims) + 1 + tdim
 
-    def _time_diff(self, tail, head=None):
+    def _head_time_offset_from_tail(self, tail, head=None):
         """
-        Always return (head - tail)/v if head is not None.
+        Return the time offset to add to tail time to get head time.
 
-        taild and head are in a shape of (npt, vdim) or (npt,).
+        ``Raster.forward()`` receives ``time`` as the already-computed tail
+        time. For step rasterization, the head time is:
+
+        ``head_time = tail_time + (tail - head)/velocity``
+
+        tail and head are in a shape of (npt, vdim) or (npt,).
         """
         if head is None:
             return None
@@ -307,6 +312,9 @@ class Raster(nn.Module):
         coordinates. Later, the drift-direction component is
         transformed in terms of time.
 
+        The input time is the tail time. If head is given, the head time is
+        derived as ``time + (tail - head)/velocity`` along the drift dimension.
+
         If head is None then tail is a depo point.  Otherwise the two make a step.
         '''
         sigma = sigma.to(dtype=self._dtype)
@@ -316,7 +324,7 @@ class Raster(nn.Module):
         if head is not None:
             head = head.to(dtype=self._dtype)
 
-        dt = self._time_diff(tail, head)
+        dt = self._head_time_offset_from_tail(tail, head)
 
         tail = self._transform(tail, time)
         sigma = self._transform(sigma, None)

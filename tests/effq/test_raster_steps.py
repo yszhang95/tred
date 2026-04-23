@@ -59,15 +59,14 @@ def test_transform(level=None):
     p = raster._transform(points, time)
     assert p.equal(torch.tensor([3, 5, 2]).view(1,3)), f'points after transformation is {p}.'
 
-def test_time_diff():
-    """Test the _time_diff method.
-        Test _time_diff with head as None."""
+def test_head_time_offset_from_tail():
+    """Test the head-time offset used to convert tail time to head time."""
     velocity = 2.0
     grid_spacing = torch.tensor([0.5])
     raster = tg.Raster(velocity, grid_spacing, pdims=())
     tail = torch.tensor([0.0, 1.0, 2.0])
     head = torch.tensor([2.0, 3.0, 4.0])
-    result = raster._time_diff(tail, head)
+    result = raster._head_time_offset_from_tail(tail, head)
     expected = (tail - head) / velocity
     assert torch.equal(result, expected), f"expected {expected}, result {result}"
 
@@ -75,11 +74,11 @@ def test_time_diff():
     raster = tg.Raster(velocity, grid_spacing, pdims=(1,2))
     tail = torch.tensor([[0.0, 1.0, 2.0]])
     head = torch.tensor([[2.0, 3.0, 4.0]])
-    result = raster._time_diff(tail, head)
+    result = raster._head_time_offset_from_tail(tail, head)
     expected = (tail[:,0]-head[:,0]) / velocity
     assert torch.equal(result, expected)
 
-    result = raster._time_diff(torch.tensor([1.0, 2.0, 3.0]))
+    result = raster._head_time_offset_from_tail(torch.tensor([1.0, 2.0, 3.0]))
     assert result is None
 
 
@@ -122,7 +121,7 @@ def test_drift_raster_positions():
     grid_spacing = torch.tensor([0.5, 0.5, 0.5])
     raster = tg.Raster(velocity, grid_spacing, pdims=(1,2))
     ttail = dtime
-    thead = ttail + raster._time_diff(dtail, dhead)
+    thead = ttail + raster._head_time_offset_from_tail(dtail, dhead)
 
     for i in range(tail.size(0)):
         if i == 0:
@@ -192,7 +191,7 @@ def main():
     # print('-------- test_transform ---------')
     test_transform()
 
-    test_time_diff()
+    test_head_time_offset_from_tail()
 
     test_drift_raster_positions()
 

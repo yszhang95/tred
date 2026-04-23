@@ -52,7 +52,7 @@ Current status of the drift tests:
   the no-shift/no-=drtoa= outputs instead of comparing a tensor to
   itself.
 - The =Drifter= documentation now matches the desired behavior of
-  =_ensure_tail_closer_to_anode()=: it imposes a deterministic
+  =_order_step_endpoints_for_drift_time()=: it imposes a deterministic
   tail/head ordering based on drift direction, not a "closest to
   anode" convention.
 

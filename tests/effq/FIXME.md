@@ -44,7 +44,7 @@ In practice, this is the implementation used by the depo path of `Raster.forward
 
 `Raster` is the graph wrapper around the two raster backends.
 
-- `_time_diff()` computes the head-tail time separation used for steps
+- `_head_time_offset_from_tail()` computes the offset added to tail time to get head time for steps
 - `_transform()` permutes axes into raster coordinates and optionally replaces the drift axis with time
 - `forward()` dispatches:
   - to `raster_depos()` when `head is None`
@@ -52,56 +52,76 @@ In practice, this is the implementation used by the depo path of `Raster.forward
 
 ## Inconsistencies
 
-### Docstring mismatch in `Raster._time_diff()`
+### ~~Docstring mismatch in `Raster._head_time_offset_from_tail()`~~
 
-`Raster._time_diff()` documents:
+Fixed in the current source. The old `Raster._time_diff()` helper has been renamed to `Raster._head_time_offset_from_tail()` and now documents that it returns the offset added to tail time to get head time.
 
-> Always return `(head - tail)/v` if `head is not None`.
+~~`Raster._time_diff()` documents:~~
 
-But the implementation returns:
+~~> Always return `(head - tail)/v` if `head is not None`.~~
 
-- `(tail - head) / velocity`
+~~But the implementation returns:
+
+- `(tail - head) / velocity`~~
 
 The tests in `tests/effq/test_raster_steps.py` also expect `(tail - head) / velocity`.
 
 Conclusion:
 
-- the code and tests agree
-- the `_time_diff()` docstring is stale
+- ~~the code and tests agree~~
+- ~~the old `_time_diff()` docstring is stale~~
+- fixed
 
 Relevant locations:
 
 - `src/tred/graph.py`
 - `tests/effq/test_raster_steps.py`
 
-### Inconsistency in `Raster.forward()` before the local change
+### Raster tail-time convention
 
-`Raster.forward()` says that:
+`Raster.forward()` treats the input `time` as the tail time. For steps, it derives the head time as:
+
+```python
+head_time = time + (tail - head) / velocity
+```
+
+This matches the Drifter convention:
+
+- `Drifter._order_step_endpoints_for_drift_time()` selects the reordered tail endpoint
+- `Drifter.forward()` computes `dtime` from that reordered tail
+- `Raster.forward()` receives that `dtime` as its `time` input
+
+### ~~Inconsistency in `Raster.forward()` before the local change~~
+
+Fixed in the current source: `sigma` is transformed before dispatching to either the depo or step raster backend.
+
+~~`Raster.forward()` says that:
 
 - `tail`, `head`, and `sigma` are provided in spatial coordinates
-- the drift-direction component is transformed into time for rasterization
+- the drift-direction component is transformed into time for rasterization~~
 
-That was only fully true for the step path.
+~~That was only fully true for the step path.~~
 
-Before the current local edit:
+~~Before the current local edit:
 
 - `tail` was transformed before both depos and steps
 - `head` was transformed for steps
-- `sigma` was transformed only inside the step branch
+- `sigma` was transformed only inside the step branch~~
 
-That means the depo path used:
+~~That means the depo path used:
 
 - transformed `tail`
-- untransformed `sigma`
+- untransformed `sigma`~~
 
-This is inconsistent with both:
+~~This is inconsistent with both:
 
 - the method docstring
-- the step path behavior
+- the step path behavior~~
 
 Conclusion:
 
-- the local change that moves the `sigma` transform into the common path is justified
+- ~~the local change that moves the `sigma` transform into the common path is justified~~
+- fixed in current source
 
 ### Explicit raster compute dtype
 
@@ -130,75 +150,84 @@ Conclusion:
 - raster no longer needs to infer float dtype from the input tensors
 - raster defaults to `float64` compute while still accepting `float32` inputs
 
-## Status of the current local source changes
+## ~~Status of the current local source changes~~
 
-Current local diff in `src/tred/graph.py`:
+This section is no longer a pending local-change note. The described `Raster.forward()` change is present in the current source.
+
+~~Current local diff in `src/tred/graph.py`:
 
 - moves
   - `sigma = self._transform(sigma, None)`
   - `sigma[:, self._tdim] = sigma[:, self._tdim] / torch.abs(self.velocity)`
-- from the step-only path to the common path before checking `head is None`
+- from the step-only path to the common path before checking `head is None`~~
 
-Why this is justified:
+~~Why this is justified:
 
 - `Raster` transforms positions into raster coordinates
 - `sigma` represents widths in the same coordinate system
 - the drift-axis width must therefore be converted from distance-width to time-width for both:
   - depos
-  - steps
+  - steps~~
 
-Without this change, the depo path mixes transformed positions with untransformed widths.
+~~Without this change, the depo path mixes transformed positions with untransformed widths.~~
 
 Conclusion:
 
-- the local `Raster.forward()` change is consistent with the documented raster-space contract
-- it fixes a real inconsistency even though current tests do not cover the depo path well
+- ~~the local `Raster.forward()` change is consistent with the documented raster-space contract~~
+- ~~it fixes a real inconsistency even though current tests do not cover the depo path well~~
+- fixed in current source and covered by `tests/effq/test_raster_dtype.py`
 
 ## Problems in `src/tred/raster/depos.py`
 
 These are source-level issues observed during review.
 
-### Fixed: indexing bug in `binned_1d()` and `binned_nd()`
+### ~~Indexing bug in `binned_1d()` and `binned_nd()`~~
 
-Earlier in this review, both:
+Fixed in the current source.
+
+~~Earlier in this review, both:
 
 - `binned_1d()`
-- `binned_nd()`
+- `binned_nd()`~~
 
-failed on CPU with:
+~~failed on CPU with:~~
 
 ```text
 IndexError: tensors used as indices must be long, byte or bool tensors
 ```
 
-The issue came from advanced indexing with `int32` tensors at:
+~~The issue came from advanced indexing with `int32` tensors at:
 
 - `src/tred/raster/depos.py:123`
-- `src/tred/raster/depos.py:213`
+- `src/tred/raster/depos.py:213`~~
 
 This has now been fixed by converting those indexing tensors to `long` at the indexing sites.
 
 Conclusion:
 
-- this bug is no longer considered outstanding
+- ~~this bug is no longer considered outstanding~~
+- fixed
 
-### Fixed: scalar-grid branch in `binned_nd()`
+### ~~Scalar-grid branch in `binned_nd()`~~
 
-`binned_nd()` documents:
+Fixed in the current source.
 
-- `grid` may be a real scalar or a 1D N-vector
+~~`binned_nd()` documents:
 
-But in the scalar branch it builds:
+- `grid` may be a real scalar or a 1D N-vector~~
 
-- `torch.tensor([grid], dtype=index_dtype, ...)`
+~~But in the scalar branch it builds:
 
-That was inconsistent with the documented meaning of `grid` as a spacing value.
+- `torch.tensor([grid], dtype=index_dtype, ...)`~~
+
+~~That was inconsistent with the documented meaning of `grid` as a spacing value.~~
 
 This has now been changed to use the raster compute dtype instead of `index_dtype`.
 
 Conclusion:
 
-- this issue is no longer considered outstanding
+- ~~this issue is no longer considered outstanding~~
+- fixed
 
 ## Problems in `src/tred/raster/steps.py`
 
@@ -318,27 +347,28 @@ Conclusion:
 This file covers:
 
 - `Raster._transform()`
-- `Raster._time_diff()`
+- `Raster._head_time_offset_from_tail()`
 - `tred.graph.raster_steps()`
 - a step-based `Raster` integration check
 - one plotting helper
 
 Useful points:
 
-- `_time_diff()` tests confirm the implementation returns `(tail - head) / velocity`
+- `_head_time_offset_from_tail()` tests confirm the implementation returns `(tail - head) / velocity`
 - `_transform()` tests are still useful
 
 Issues:
 
-- there is no real unit test of the depo path:
-  - `Raster.forward(sigma, time, charge, tail, head=None)`
+- ~~there is no real unit test of the depo path:~~
+  - ~~`Raster.forward(sigma, time, charge, tail, head=None)`~~
 - the integral checks use stale reference values
 - `test_drift_raster_positions()` is a plotting script, not a unit test
 
 Conclusion:
 
 - the file is useful for step semantics
-- it does not protect the depo path affected by the current local change
+- ~~it does not protect the depo path affected by the current local change~~
+- the depo path is now covered by `tests/effq/test_raster_dtype.py`
 
 ## `tests/effq/test_raster_dtype.py`
 
@@ -366,6 +396,27 @@ Conclusion:
 - this is a focused smoke test for the new dtype contract
 - it does not replace the older numerical/reference tests
 
+## `tests/effq/test_depos.py`
+
+This file now provides direct depos backend tests.
+
+It covers:
+
+- `binned_1d()` finite-width Gaussian behavior
+- `binned_1d()` finite-width numerical regression
+- `binned_1d()` zero-width spike behavior
+- `binned_nd()` zero-width spike numerical regression
+
+for both:
+
+- `torch.float32`
+- `torch.float64`
+
+Conclusion:
+
+- the most immediate missing direct `depos.py` coverage has been added
+- broader `binned_nd()` finite-width, `minbins`, and `binned()` wrapper coverage are still reasonable follow-ups
+
 ## `tests/raster/test_raster_graph.py`
 
 This file is a visualization-oriented smoke test for:
@@ -385,15 +436,16 @@ Conclusion:
 
 ## Overall Conclusions
 
-1. The local change in `Raster.forward()` is justified.
-2. The clearest docstring inconsistency is in `Raster._time_diff()`.
+1. ~~The local change in `Raster.forward()` is justified.~~ Fixed in current source.
+2. ~~The clearest docstring inconsistency is in the old `Raster._time_diff()`.~~ Fixed in current source by renaming it to `Raster._head_time_offset_from_tail()` and updating the docstring.
 3. Raster now has an explicit compute dtype with default `float64`.
 4. The older raster/effq tests are only partially up to date:
    - some are useful
    - several are stale
    - most still assume legacy dtype and reference-value behavior
 5. The new dtype smoke test improves coverage of the explicit dtype contract.
-6. One open technical question remains:
+6. Direct depos backend coverage now exists in `tests/effq/test_depos.py`.
+7. One open technical question remains:
    - should raster box shape/offset be allowed to vary between `float32` and `float64`, or should boundary handling be made dtype-stable?
 
 ## Command Used
@@ -423,3 +475,13 @@ PYTHONPATH=src pytest -q tests/effq/test_raster_dtype.py
 Observed result in this tree:
 
 - `6 passed`
+
+The focused depos backend tests were checked with:
+
+```bash
+PYTHONPATH=src pytest -q tests/effq/test_depos.py
+```
+
+Observed result in this tree:
+
+- `8 passed`
