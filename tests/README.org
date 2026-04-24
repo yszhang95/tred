@@ -20,6 +20,10 @@ Top-level layout relevant to raster and drift:
 
 Additional notes:
 - =tests/effq/= is the most direct backend-facing test area for rasterization.
+- =tests/effq/test_depos.py= now includes a direct multi-dimensional
+  regression for the non-integer =nsigma*sigma/grid= case that motivated issue
+  =#55=. The current depos backends use =ceil()=, so the test pins the required
+  expanded support window instead of allowing truncated coverage to regress.
 - =tests/raster/test_raster_graph.py= remains primarily a manual-inspection
   smoke test. It is useful for visual checks, but it does not yet assert the
   detailed numerical behavior expected from a strong unit test.

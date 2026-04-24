@@ -132,6 +132,11 @@ dtype instead of the index dtype.
 The current tests also cover the finite-width `vdim=1` consistency between
 `binned_nd()` and `binned_1d()`.
 
+The non-integer support-width regression behind issue `#55` is now covered in
+both the 1D and true 2D finite-width paths. The current implementation uses
+`ceil()` when converting `nsigma * sigma / grid` into a half-width bin count,
+which correctly extends the support window instead of truncating it.
+
 ### `eval_qeff()` tests and current charge checks
 
 `tests/effq/test_effq.py` now calls `eval_qeff()` using the current interface:
@@ -265,6 +270,7 @@ It covers:
 - `binned_1d()` finite-width numerical regression
 - `binned_1d()` zero-width spike behavior
 - `binned_nd()` finite-width `vdim=1` consistency with `binned_1d()`
+- `binned_nd()` finite-width 2D numerical regression for non-integer `sigma/grid`
 - `binned_nd()` zero-width spike numerical regression
 
 for both:
@@ -272,8 +278,7 @@ for both:
 - `torch.float32`
 - `torch.float64`
 
-Broader `binned_nd()` finite-width coverage, `minbins`, and the `binned()`
-wrapper remain reasonable follow-ups.
+`minbins` and the `binned()` wrapper remain reasonable follow-ups.
 
 ## Commands Recently Used
 
@@ -285,7 +290,7 @@ PYTHONPATH=src pytest -q tests/effq
 
 Observed result in this tree:
 
-- `43 passed`
+- `45 passed`
 
 The focused dtype smoke test was checked with:
 
@@ -305,4 +310,4 @@ PYTHONPATH=src pytest -q tests/effq/test_depos.py
 
 Observed result in this tree:
 
-- `10 passed`
+- `12 passed`
