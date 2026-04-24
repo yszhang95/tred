@@ -231,30 +231,21 @@ Conclusion:
 
 ## Problems in `src/tred/raster/steps.py`
 
-### `eval_qeff()` test API mismatch
+### ~~`eval_qeff()` test API mismatch~~
 
-`eval_qeff()` now branches internally using:
+Fixed in the current tests.
+
+`tests/effq/test_effq.py` now calls `eval_qeff()` using the current interface:
 
 - `qline_model`
 - `qpoint_model`
 
-But one test still calls it with:
-
-- `qmodel=...`
-
-That currently leads to:
-
-```text
-TypeError: tred.raster.steps.eval_qmodel() got multiple values for keyword argument 'qmodel'
-```
+The older `qmodel=...` call path is no longer used there.
 
 Conclusion:
 
-- the test no longer matches the implementation interface
-
-Relevant location:
-
-- `tests/effq/test_effq.py`
+- ~~the test no longer matches the implementation interface~~
+- fixed in current tests
 
 ### ~~Dtype-dependent boundary behavior~~
 
@@ -289,22 +280,32 @@ Conclusion:
 - exact-on-edge charge-box indexing is now dtype-stable across `float32` and `float64`
 - the boundary rule is now explicit instead of implicit
 
-### Hard-coded integral expectations are stale
+### Hard-coded integral expectations are partly stale
 
 For current code in this tree:
 
 - `compute_qeff(..., npoints=(2,2,2))` gives about `0.29399486735385094`
 - `compute_qeff(..., npoints=(4,4,4))` gives about `0.29597755499800044`
 
-Some tests still expect about:
+The older stale reference values were about:
 
 - `0.3137`
 - `0.313723`
 
+The direct `qeff` tests in `tests/effq/test_effq.py` have now been rewritten to avoid those hard-coded sums. They instead:
+
+- use `+-3 sigma` support boxes
+- compare recovered rasterized charge against the input `Q`
+- include direct `qpoint` coverage, including an `erf`-based box-integral check for `qpoint_diff3D()`
+
+The remaining stale `0.313723` checks are in:
+
+- `tests/effq/test_raster_steps.py`
+
 Conclusion:
 
-- these reference values do not match the current implementation
-- either the implementation changed, or the reference numbers were produced under a different convention/setup
+- the old hard-coded sums are no longer a general test target
+- only the raster-step wrapper tests still need to be updated away from `0.313723`
 
 ## Test Review
 
@@ -320,15 +321,17 @@ This file covers:
 - `compute_charge_box()`
 - `reduce_to_universal()`
 
-Issues:
+Current status:
 
-- several assertions compare `float32` expected tensors against `float64` outputs from `steps.py`
-- one strict bound assertion fails on a floating-point roundoff edge
+- the stale `float32` expected coordinates have been updated for the reviewed case
+- the strict floating-point bound coverage checks were replaced with a small tolerance helper
+- the helper explicitly notes that it is only intended for the current grid-aligned cases and is not a general rule for arbitrary decimal bounds
+- the focused regression test for dtype-stable charge-box indexing on a grid boundary remains in place
 
 Conclusion:
 
-- this file is partly stale with respect to current dtype behavior
-- it now includes a focused regression test for dtype-stable charge-box indexing on a grid boundary
+- the reviewed `test_grid.py` failures have been fixed in the current tests
+- this file is no longer one of the active failing areas in the `tests/effq` suite
 
 ## `tests/effq/test_effq.py`
 
@@ -341,14 +344,19 @@ This file exercises:
 
 Issues:
 
-- opens `exact_qline_gaus.json` by relative path and fails from repo root
-- assumes `float32` in multiple places while implementation uses `float64`
-- still uses `qmodel=...` against `eval_qeff()`
-- contains stale hard-coded integral expectations
+- the `exact_qline_gaus.json` path issue has been fixed by resolving it relative to the test file
+- the older `qmodel=...` call against `eval_qeff()` has been removed
+- the old hard-coded `qeff` integral checks have been replaced with `+-3 sigma` charge-recovery checks against `Q`
+- `qpoint` coverage was added with:
+  - an exact finite-box `erf` comparison for `qpoint_diff3D()`
+  - a point-branch `eval_qeff()` charge-recovery test
+  - a short-segment agreement test between forced `qline` and forced `qpoint`
+- several helper tests still assume `float32` while implementation now returns `float64`
 
 Conclusion:
 
-- multiple tests in this file are outdated or brittle
+- the `eval_qeff()` / `compute_qeff()` coverage in this file has been substantially updated
+- the remaining failures in this file are concentrated in the older quadrature/grid helper tests that still hard-code `float32`
 
 ## `tests/effq/test_raster_steps.py`
 
@@ -376,11 +384,12 @@ Conclusion:
 
 - the file is useful for step semantics
 - ~~it does not protect the depo path affected by the current local change~~
-- the depo path is now covered by `tests/effq/test_raster_dtype.py`
+- a local dtype smoke test was used during review to cover the depo path
+- the two remaining numerical failures in the current `tests/effq` suite are the stale `0.313723` assertions in this file
 
-## `tests/effq/test_raster_dtype.py`
+## Local dtype smoke test
 
-This file was added during the dtype work.
+A local untracked smoke test was used during the dtype work.
 
 It covers:
 
@@ -403,6 +412,7 @@ Conclusion:
 
 - this is a focused smoke test for the new dtype contract
 - it does not replace the older numerical/reference tests
+- it is not part of the tracked `tests/effq` suite in this branch
 
 ## `tests/effq/test_depos.py`
 
@@ -449,31 +459,30 @@ Conclusion:
 3. Raster now has an explicit compute dtype with default `float64`.
 4. The older raster/effq tests are only partially up to date:
    - some are useful
-   - several are stale
-   - most still assume legacy dtype and reference-value behavior
-5. The new dtype smoke test improves coverage of the explicit dtype contract.
+   - several have now been updated
+   - the remaining failures are mostly concentrated in older helper tests with legacy dtype assumptions, plus the stale `0.313723` raster-step references
+5. A local dtype smoke test was used during review to exercise the explicit dtype contract, but it is not part of the tracked `tests/effq` suite in this branch.
 6. Direct depos backend coverage now exists in `tests/effq/test_depos.py`.
 7. Charge-box boundary handling is now explicitly dtype-stable for the reviewed exact-on-edge case.
 
 ## Command Used
 
-The current raster-related test subset was checked with:
+The current effq test suite was checked with:
 
 ```bash
-PYTHONPATH=src pytest -q \
-  tests/effq/test_grid.py \
-  tests/effq/test_effq.py \
-  tests/effq/test_raster_steps.py \
-  tests/raster/test_raster_graph.py
+PYTHONPATH=src pytest -q tests/effq
 ```
 
 Observed result in this tree:
 
-- `14 failed, 9 passed`
+- `9 failed, 32 passed`
 
-Those failures are still dominated by stale raster-suite expectations and API drift.
+Those failures are now:
 
-The focused dtype smoke test was checked with:
+- `7` helper-test dtype mismatches in `tests/effq/test_effq.py`
+- `2` stale `0.313723` raster-step reference checks in `tests/effq/test_raster_steps.py`
+
+A local untracked dtype smoke test was checked with:
 
 ```bash
 PYTHONPATH=src pytest -q tests/effq/test_raster_dtype.py
