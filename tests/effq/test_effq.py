@@ -1,12 +1,14 @@
 import tred.raster.steps as ts
 from tred.raster.steps import (
     compute_index, compute_coordinate, compute_charge_box,
-    qline_diff3D, roots_legendre,
+    qline_diff3D, qpoint_diff3D, roots_legendre,
 )
 
 import json
 import logging
+import math
 import sys
+from pathlib import Path
 
 import torch
 
@@ -14,6 +16,7 @@ logger = logging.getLogger('tred/tests/effq/test_effq.py')
 
 THREE_SIGMA = (3, 3, 3)
 CHARGE_RECOVERY_REL_TOL = 5e-3
+QPOINT_CHARGE_RECOVERY_REL_TOL = 7e-3
 TEST_Q_VALUES = (0.25, 1.0, 2.5)
 
 
@@ -46,7 +49,7 @@ def test_QModel():
                                 x.unsqueeze(2).unsqueeze(2),
                                 y.unsqueeze(2).unsqueeze(1),
                                 z.unsqueeze(1).unsqueeze(1))
-    with open('exact_qline_gaus.json') as f:
+    with Path(__file__).with_name('exact_qline_gaus.json').open() as f:
         exact = json.load(f)
     for i in range(testq.shape[1]):
         for j in range(testq.shape[2]):
@@ -57,6 +60,97 @@ def test_QModel():
                     f'testq = {testq[0,i,j,k].item()}, q from mathematica = {exact[i][j][k]}'
                 assert torch.isclose(testq[0,i,j,k], torch.tensor(exact[i][j][k], dtype=torch.float64),
                                      atol=1E-12, rtol=1E-12), msg
+
+
+def test_qpoint_diff3D_matches_erf_box_integral():
+    Q = torch.tensor([1.0], dtype=torch.float64)
+    center = torch.tensor([[0.5, 2.5, 3.5]], dtype=torch.float64)
+    Sigma = torch.tensor([[0.5, 0.5, 0.5]], dtype=torch.float64)
+    origin = (0, 0, 0)
+    grid_spacing = (0.1, 0.1, 0.1)
+    offset = torch.tensor([(-10, 10, 20)], dtype=torch.int32)
+    shape = (30, 30, 30)
+    npt = (4, 4, 4)
+
+    x, y, z = ts.create_node1ds(
+        'gauss_legendre', npt, origin, grid_spacing, offset, shape, dtype=torch.float64
+    )
+    q = ts.eval_qmodel(Q, center, center, Sigma, x, y, z, qmodel=qpoint_diff3D)
+    w = ts.create_w_block('gauss_legendre', npt, grid_spacing, dtype=torch.float64)
+    approx = torch.sum(w[None, ..., None, None, None] * q)
+
+    lower = ts.compute_coordinate(offset, origin, grid_spacing, dtype=torch.float64)[0]
+    upper = ts.compute_coordinate(
+        offset + torch.tensor(shape, dtype=torch.int32), origin, grid_spacing, dtype=torch.float64
+    )[0]
+    exact = Q[0].item()
+    for lo, hi, mu, sigma in zip(
+        lower.tolist(), upper.tolist(), center[0].tolist(), Sigma[0].tolist()
+    ):
+        exact *= 0.5 * (
+            math.erf((hi - mu) / (math.sqrt(2) * sigma))
+            - math.erf((lo - mu) / (math.sqrt(2) * sigma))
+        )
+
+    assert torch.isfinite(approx)
+    assert torch.isclose(approx, torch.tensor(exact, dtype=approx.dtype), atol=1E-10, rtol=1E-7)
+
+
+def test_eval_qeff_qpoint_charge_recovery():
+    npt = (4, 4, 4)
+    method = 'gauss_legendre'
+    origin = (0, 0, 0)
+    grid_spacing = (0.1, 0.1, 0.1)
+    Q = torch.tensor(TEST_Q_VALUES, dtype=torch.float64)
+    X0 = torch.tensor([(0.5, 2.5, 3.5)] * len(Q), dtype=torch.float64)
+    X1 = X0.clone()
+    Sigma = torch.tensor([(0.5, 0.5, 0.5)] * len(Q), dtype=torch.float64)
+
+    offset, shape = ts.compute_charge_box(
+        X0, X1, Sigma, THREE_SIGMA, origin, grid_spacing, dtype=torch.float64
+    )
+    qeff_default, _ = ts.eval_qeff(
+        Q=Q, X0=X0, X1=X1, Sigma=Sigma, offset=offset, shape=shape,
+        origin=origin, grid_spacing=grid_spacing, method=method, npoints=npt,
+        dtype=torch.float64,
+    )
+    qeff_point, _ = ts.eval_qeff(
+        Q=Q, X0=X0, X1=X1, Sigma=Sigma, offset=offset, shape=shape,
+        origin=origin, grid_spacing=grid_spacing, method=method, npoints=npt,
+        dtype=torch.float64, threshold=10.0,
+    )
+
+    assert_charge_recovery(qeff_default, Q, rel_tol=QPOINT_CHARGE_RECOVERY_REL_TOL)
+    assert_charge_recovery(qeff_point, Q, rel_tol=QPOINT_CHARGE_RECOVERY_REL_TOL)
+    assert torch.allclose(qeff_default, qeff_point, atol=1E-12, rtol=1E-12)
+
+
+def test_qline_and_qpoint_agree_for_short_segment():
+    npt = (4, 4, 4)
+    method = 'gauss_legendre'
+    origin = (0, 0, 0)
+    grid_spacing = (0.1, 0.1, 0.1)
+    Q = torch.tensor([1.0], dtype=torch.float64)
+    X0 = torch.tensor([[0.495, 2.5, 3.5]], dtype=torch.float64)
+    X1 = torch.tensor([[0.505, 2.5, 3.5]], dtype=torch.float64)
+    Sigma = torch.tensor([[0.5, 0.5, 0.5]], dtype=torch.float64)
+
+    offset, shape = ts.compute_charge_box(
+        X0, X1, Sigma, THREE_SIGMA, origin, grid_spacing, dtype=torch.float64
+    )
+    qeff_line, _ = ts.eval_qeff(
+        Q=Q, X0=X0, X1=X1, Sigma=Sigma, offset=offset, shape=shape,
+        origin=origin, grid_spacing=grid_spacing, method=method, npoints=npt,
+        dtype=torch.float64, threshold=0.0,
+    )
+    qeff_point, _ = ts.eval_qeff(
+        Q=Q, X0=X0, X1=X1, Sigma=Sigma, offset=offset, shape=shape,
+        origin=origin, grid_spacing=grid_spacing, method=method, npoints=npt,
+        dtype=torch.float64, threshold=10.0,
+    )
+
+    assert_charge_recovery(qeff_point, Q, rel_tol=QPOINT_CHARGE_RECOVERY_REL_TOL)
+    assert torch.allclose(qeff_line, qeff_point, atol=1E-6, rtol=1E-5)
 
 def test_roots_legendre():
     local_logger = logger.getChild('test_roots_legendre')
