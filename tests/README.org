@@ -1,9 +1,36 @@
 * Tests for =tred=
 ** General
+This directory contains both assertion-driven unit tests and a smaller number of
+visualization-oriented helpers used for manual inspection during raster and
+drift debugging.
+
 Tests are spread in three parts.
 - plots
 - tests
 - tests/functionalities
+
+Top-level layout relevant to raster and drift:
+- =tests/effq/= :: Focused backend-facing coverage for:
+  - =src/tred/raster/steps.py=
+  - =src/tred/raster/depos.py=
+  - the =Raster= graph wrapper in =src/tred/graph.py=
+- =tests/raster/= :: Raster integration and visualization-oriented smoke checks.
+- =tests/drift/= :: Drifter behavior, including plotting helpers used for
+  debugging drift geometry and transport behavior.
+
+Additional notes:
+- =tests/effq/= is the most direct backend-facing test area for rasterization.
+- =tests/raster/test_raster_graph.py= remains primarily a manual-inspection
+  smoke test. It is useful for visual checks, but it does not yet assert the
+  detailed numerical behavior expected from a strong unit test.
+- Plot-producing helpers under =tests/raster/= and =tests/drift/= are still
+  being organized into a more standard inspection workflow. At present they are
+  best treated as diagnostic tools rather than baseline image-regression tests.
+
+For more detailed backend-specific notes, see:
+- =tests/effq/README.md=
+- =tests/raster/README.md=
+- =tests/drift/README.md=
 ** Drift
 The drift tests treat =src/tred/drift.py= as the reference
 implementation and check =src/tred/graph.py:Drifter= as a wrapper that
@@ -57,6 +84,9 @@ Current status of the drift tests:
   anode" convention.
 
 ** Rasterization
+See =tests/effq/README.md= for the detailed raster backend review and the
+current status of the effq-facing tests.
+
 ** Convolution
 *** Loading the response
 Two functions in ~tests/convo/test_response.py~.
