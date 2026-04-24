@@ -191,7 +191,8 @@ def binned_nd(grid, centers, sigmas, charges, nsigma=None, minbins=None,
 
     # Find number of grid points that span half the largest Gaussian.
     # (ndepos, vdims)
-    n_half = torch.ceil(1 + sigmas*(nsigma/grid))
+    n_half = torch.ceil(sigmas*(nsigma/grid)).to(dtype=index_dtype, device=device)
+    n_half = torch.clamp(n_half, min=1)
 
     if minbins is not None:
         # (ndepos+1, vdims)

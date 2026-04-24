@@ -58,6 +58,26 @@ def test_binned_1d_zero_width_spike(dtype):
 
 
 @pytest.mark.parametrize("dtype", [torch.float32, torch.float64])
+def test_binned_nd_matches_binned_1d_for_finite_width(dtype):
+    centers_1d = torch.tensor([1.0], dtype=torch.float32)
+    widths_1d = torch.tensor([0.2], dtype=torch.float32)
+    charges = torch.tensor([2.0], dtype=torch.float32)
+
+    qeff_1d, offset_1d = binned_1d(0.5, centers_1d, widths_1d, charges, dtype=dtype)
+    qeff_nd, offset_nd = binned_nd(
+        (0.5,),
+        centers_1d[:, None],
+        widths_1d[:, None],
+        charges,
+        dtype=dtype,
+    )
+
+    assert offset_nd.shape == (1, 1)
+    assert offset_nd[0, 0] == offset_1d
+    assert torch.allclose(qeff_nd, qeff_1d, atol=1e-6, rtol=1e-6)
+
+
+@pytest.mark.parametrize("dtype", [torch.float32, torch.float64])
 def test_binned_nd_zero_width_spike_numerical(dtype):
     centers = torch.tensor([[1.0, 1.0]], dtype=torch.float32)
     sigmas = torch.tensor([[0.0, 0.0]], dtype=torch.float32)
