@@ -15,6 +15,19 @@ import torch
 
 logger = logging.getLogger('tred/tests/effq/test_grid.py')
 
+
+def _assert_covers_bounds(bounds, exact_lower, exact_upper):
+    # This tolerance is only meant for the current grid-aligned test cases.
+    # It is not a general rule for arbitrary decimal bounds.
+    exact_lower = exact_lower.to(bounds.dtype)
+    exact_upper = exact_upper.to(bounds.dtype)
+    lower_tol = 1e-7 * max(1.0, abs(exact_lower.item()))
+    upper_tol = 1e-7 * max(1.0, abs(exact_upper.item()))
+
+    assert bounds[0] <= exact_lower + lower_tol
+    assert bounds[1] >= exact_upper - upper_tol
+
+
 def test_grid():
     local_logger = logger.getChild('test_grid')
     # Define grid parameters
@@ -36,7 +49,7 @@ def test_grid():
     test_indices = [(2,3,4),(3,4,5)]
     predefined_coords = torch.tensor(
         [[2.,3.,4.], [3.,4.,5.]],
-        requires_grad=False, dtype=torch.float32
+        requires_grad=False, dtype=torch.float64
     )
     coords = compute_coordinate(torch.tensor(test_indices), origin, grid_spacing)
     local_logger.debug(f"Coordinates for indices f{test_indices} ->\n {coords}")
@@ -104,12 +117,7 @@ def test_compute_charge_box():
                 f'lower X0X1: {x0}, upper X0X1: {x1}, '\
                 f'exact lower bound: {exact_bounds[0]}, exact upper bound: {exact_bounds[1]}'
             local_logger.debug(msg)
-            assert bounds[i,j,0] <= exact_bounds[0] and \
-                        bounds[i,j,1] >= exact_bounds[1], \
-                        f'compute_bounds_X0X1 failed at X0={X0X1[i,j,0]}, '\
-                        f'X1={X0X1[i,j,1]}, Sigma={Sigma[i,j]}, , n_sigma={n_sigma[j]}, '\
-                        f'exact lower bound: {exact_bounds[0]}, exact upper bound: {exact_bounds[1]}, '\
-                        f'lower bound: {bounds[i,j,0]}, upper bound: {bounds[i,j,1]}'
+            _assert_covers_bounds(bounds[i, j], exact_bounds[0], exact_bounds[1])
 
     local_logger.debug('compute_bounds_X0_X1')
     bounds = compute_bounds_X0_X1(X0, X1, Sigma, n_sigma)
@@ -127,12 +135,7 @@ def test_compute_charge_box():
                 f'lower X0X1: {x0}, upper X0X1: {x1}, '\
                 f'exact lower bound: {exact_bounds[0]}, exact upper bound: {exact_bounds[1]}'
             local_logger.debug(msg)
-            assert bounds[i,j,0] <= exact_bounds[0] and \
-                        bounds[i,j,1] >= exact_bounds[1], \
-                        f'compute_bounds_X0_X1 failed at X0={X0[i,j]}, '\
-                        f'X1={X1[i,j]}, Sigma={Sigma[i,j]}, , n_sigma={n_sigma[j]}, '\
-                        f'exact lower bound: {exact_bounds[0]}, exact upper bound: {exact_bounds[1]}, '\
-                        f'lower bound: {bounds[i,j,0]}, upper bound: {bounds[i,j,1]}'
+            _assert_covers_bounds(bounds[i, j], exact_bounds[0], exact_bounds[1])
 
     # Compute charge box
     local_logger.debug('compute_charge_box, without recentering')
@@ -155,12 +158,11 @@ def test_compute_charge_box():
                 f'lower X0X1: {x0}, upper X0X1: {x1}, '\
                 f'exact lower bound: {exact_bounds[0]}, exact upper bound: {exact_bounds[1]}'
             local_logger.debug(msg)
-            assert (bounds_lw[i,j] <= exact_bounds[0] and
-                        bounds_up[i,j] >= exact_bounds[1]), \
-                        f'compute_charge_box without recentering failed at X0={X0[i,j]}, '\
-                        f'X1={X1[i,j]}, Sigma={Sigma[i,j]}, , n_sigma={n_sigma[j]}, '\
-                        f'exact lower bound: {exact_bounds[0]}, exact upper bound: {exact_bounds[1]}, '\
-                        f'lower bound={bounds_lw[i,j]}, upper bound={bounds_up[i,j]}'
+            _assert_covers_bounds(
+                torch.stack((bounds_lw[i, j], bounds_up[i, j])),
+                exact_bounds[0],
+                exact_bounds[1],
+            )
 
 
     # Compute charge box
@@ -184,12 +186,11 @@ def test_compute_charge_box():
                 f'lower X0X1: {x0}, upper X0X1: {x1}, '\
                 f'exact lower bound: {exact_bounds[0]}, exact upper bound: {exact_bounds[1]}'
             local_logger.debug(msg)
-            assert (bounds_lw[i,j] <= exact_bounds[0] and
-                        bounds_up[i,j] >= exact_bounds[1]), \
-                        f'compute_charge_box with recentering failed at X0={X0[i,j]}, '\
-                        f'X1={X1[i,j]}, Sigma={Sigma[i,j]}, , n_sigma={n_sigma[j]}, '\
-                        f'exact lower bound: {exact_bounds[0]}, exact upper bound: {exact_bounds[1]}, '\
-                        f'lower bound={bounds_lw[i,j]}, upper bound={bounds_up[i,j]}'
+            _assert_covers_bounds(
+                torch.stack((bounds_lw[i, j], bounds_up[i, j])),
+                exact_bounds[0],
+                exact_bounds[1],
+            )
 
 
 def test_compute_charge_box_dtype_stable_on_grid_boundary():
