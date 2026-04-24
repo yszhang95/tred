@@ -78,6 +78,37 @@ def test_binned_nd_matches_binned_1d_for_finite_width(dtype):
 
 
 @pytest.mark.parametrize("dtype", [torch.float32, torch.float64])
+def test_binned_nd_2d_gaussian_non_integer_sigma_grid(dtype):
+    centers = torch.tensor([[1.0, 1.0]], dtype=torch.float32)
+    sigmas = torch.tensor([[0.2, 0.2]], dtype=torch.float32)
+    charges = torch.tensor([2.0], dtype=torch.float32)
+
+    qeff, offset = binned_nd(
+        (0.5, 0.5),
+        centers,
+        sigmas,
+        charges,
+        nsigma=3.0,
+        dtype=dtype,
+    )
+    expected = torch.tensor(
+        [[[6.4669144225304531e-15, 4.3842240681465299e-09,
+           1.0495944035451135e-07, 4.3842240681465299e-09],
+          [4.3842240681465299e-09, 2.9721876829640587e-03,
+           7.1155008659702842e-02, 2.9721876829640587e-03],
+          [1.0495944035451135e-07, 7.1155008659702842e-02,
+           1.7034913724948017e+00, 7.1155008659702842e-02],
+          [4.3842240681465299e-09, 2.9721876829640587e-03,
+           7.1155008659702842e-02, 2.9721876829640587e-03]]],
+        dtype=dtype,
+    )
+
+    assert offset.equal(torch.tensor([[0, 0]], dtype=index_dtype))
+    assert torch.allclose(qeff, expected, atol=1e-6, rtol=1e-6)
+    assert torch.isclose(qeff.sum(), charges.to(dtype=dtype).sum(), atol=1e-6, rtol=1e-6)
+
+
+@pytest.mark.parametrize("dtype", [torch.float32, torch.float64])
 def test_binned_nd_zero_width_spike_numerical(dtype):
     centers = torch.tensor([[1.0, 1.0]], dtype=torch.float32)
     sigmas = torch.tensor([[0.0, 0.0]], dtype=torch.float32)
