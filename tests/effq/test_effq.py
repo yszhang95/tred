@@ -272,11 +272,26 @@ def test_create_u1d_GL(level=None):
 
     import scipy as sp
 
-    sp_u = (sp.special.roots_legendre(npt)[0]+1)/2
-    sp_u = torch.tensor(sp_u, dtype=torch.float32)
     u1d = ts._create_u1d_GL(npt)
-    assert torch.allclose(u1d[:,1], sp_u, atol=1E-10, rtol=1E-5)
-    assert torch.allclose(u1d[:,0], 1-sp_u, atol=1E-10, rtol=1E-5)
+    roots = torch.as_tensor(sp.special.roots_legendre(npt)[0], dtype=u1d.dtype)
+    expected = torch.where(
+        (roots < 0).unsqueeze(-1),
+        torch.stack(
+            (-roots / 2, 1 + roots / 2, torch.zeros_like(roots)),
+            dim=-1,
+        ),
+        torch.stack(
+            (torch.zeros_like(roots), 1 - roots / 2, roots / 2),
+            dim=-1,
+        ),
+    )
+    assert torch.allclose(u1d, expected, atol=1E-10, rtol=1E-5)
+    assert torch.allclose(
+        torch.sum(u1d, dim=-1),
+        torch.ones(npt, dtype=u1d.dtype),
+        atol=1E-10,
+        rtol=1E-5,
+    )
     local_logger.debug(f'pass assertion at rel. delta < 1E-5, given {npt}-point GL')
 
 def test_create_u1ds(level=None):
@@ -429,7 +444,7 @@ def test_create_grid1d(level=None):
     for i in range(len(offset)):
         for j in range(shape):
             coord = origin + spacing * offset[i] + spacing * j
-            assert torch.allclose(torch.tensor(coord),
+            assert torch.allclose(torch.tensor(coord, dtype=grid.dtype),
                                   grid[i,j], atol=1E-10, rtol=1E-5)
     local_logger.debug(
         'pass assertion with rel. delta < 1E-5'
@@ -461,7 +476,7 @@ def test_create_node1d_GL(level=None):
                 x0 = (offset[i] + k) * spacing + origin
                 x1 = (offset[i] + k+1) * spacing + origin
                 x = (x1-x0) * (roots[j]+1)/2 + x0
-                x = torch.tensor(x, dtype=torch.float32)
+                x = torch.tensor(x, dtype=node1d.dtype)
                 assert torch.allclose(node1d[i,j,k], x, atol=1E-10, rtol=1E-5)
     local_logger.debug(
         'pass assertion with rel. delta < 1E-5'
