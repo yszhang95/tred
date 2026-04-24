@@ -35,10 +35,10 @@ Some of the design and performance goals that guide tred development are:
 
 - Aspirational target processing speed of one GPU-second to GPU-minute per "typical" event.
 
-  
+
 * Installation
 
-Developers only for now.  Requires [[https://github.com/astral-sh/uv][uv]].
+Recommended way: [[https://github.com/astral-sh/uv][uv]].
 
 #+begin_example
 $ git clone git@github.com:brettviren/tred.git
@@ -51,20 +51,13 @@ On first run, this will make a virtual environment and install dependencies incl
 $ uv sync --extra matplotlib --extra numpy --extra hdf
 ## or short hand for all dependencies:
 $ uv sync --extra all
+## for ndlar
+$ uv sync --group ndlar
 #+end_example
 
 
 * Usage
-
-This package is not ready for use yet.
-
 Currently, development is driven by this command:
-
-#+begin_example
-$ uv run tred plots
-#+end_example
-
-It produces a PDF of diagnostic plots.
 
 To run a full simulation:
 #+begin_src shell

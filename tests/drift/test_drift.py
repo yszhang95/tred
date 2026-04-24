@@ -165,7 +165,7 @@ def test_tshift_interference(locs, times, velocity, target, tshift, expected):
     lifetime = 10.0
     o00, _, o02, o03 = drift(locs, velocity, diffusion, lifetime, target=target, times=times, tshift=tshift)
     o10, _, o12, o13 = drift(locs, velocity, diffusion, lifetime, target=target, times=times, tshift=None)
-    assert o00.allclose(o10) and o02.allclose(o12) and o03.allclose(o03)
+    assert o00.allclose(o10) and o02.allclose(o12) and o03.allclose(o13)
 
 # Test drtoa corrections with various data formats.
 @pytest.mark.parametrize("locs, times, velocity, target, drtoa, expected", [
@@ -207,7 +207,7 @@ def test_drtoa_interference(locs, times, velocity, target, drtoa, expected):
     lifetime = 10.0
     o00, _, o02, o03 = drift(locs, velocity, diffusion, lifetime, target=target, times=times, drtoa=drtoa)
     o10, _, o12, o13 = drift(locs, velocity, diffusion, lifetime, target=target, times=times, drtoa=None)
-    assert o00.allclose(o10) and o02.allclose(o12) and o03.allclose(o03)
+    assert o00.allclose(o10) and o02.allclose(o12) and o03.allclose(o13)
 
 # Test that tshift and drtoa are mutually exclusive.
 def test_mutually_exclusive_tshift_and_drtoa():

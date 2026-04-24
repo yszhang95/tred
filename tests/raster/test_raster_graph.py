@@ -101,9 +101,6 @@ def test_drifter_raster():
         axes[i,0].legend()
 
 
-    plt.show()
-    plt.savefig("rasterized_steps.png")
+    fig.canvas.draw()
+    plt.close(fig)
     print("Test finished.")
-
-# Run the test function
-test_drifter_raster()

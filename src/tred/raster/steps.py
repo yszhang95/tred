@@ -8,10 +8,10 @@ import logging
 
 logger = logging.getLogger('tred.raster.steps')
 
-float_dtype = torch.float64
+DEFAULT_FLOAT_DTYPE = torch.float64
 
 
-def to_tensor(source, device, dtype=float_dtype):
+def to_tensor(source, device, dtype=DEFAULT_FLOAT_DTYPE):
     '''Aliasing or create a tensor if not existing.
     Result tensor will be moved to the device
     '''
@@ -25,7 +25,37 @@ def to_tensor(source, device, dtype=float_dtype):
     return t
 
 
-def compute_coordinate(idxs: Tensor, origin, grid_spacing, device='cpu'):
+def _coarsest_float_dtype(default_dtype, *values):
+    """Return the lowest-precision supported floating dtype among the inputs."""
+    rank = {
+        torch.float32: 0,
+        torch.float64: 1,
+    }
+    dtypes = []
+    if default_dtype in rank:
+        dtypes.append(default_dtype)
+    elif default_dtype is not None:
+        raise TypeError(f'Unsupported floating dtype: {default_dtype}')
+    for value in values:
+        if isinstance(value, torch.Tensor) and value.is_floating_point():
+            if value.dtype not in rank:
+                raise TypeError(f'Unsupported floating dtype: {value.dtype}')
+            dtypes.append(value.dtype)
+    if not dtypes:
+        return DEFAULT_FLOAT_DTYPE
+    return min(dtypes, key=rank.__getitem__)
+
+
+def _snap_near_integer(values: Tensor, source_dtype):
+    """Snap values close to an integer boundary before flooring."""
+    nearest = torch.round(values)
+    eps = torch.finfo(source_dtype).eps
+    tol = 8 * eps * torch.clamp(nearest.abs(), min=1.0)
+    return torch.where((values - nearest).abs() <= tol, nearest, values)
+
+
+def compute_coordinate(idxs: Tensor, origin, grid_spacing, device='cpu',
+                       dtype=DEFAULT_FLOAT_DTYPE):
     '''
     Arguments:
         idxs : (N, vdim); index of grid point, Tensor of index_dtype
@@ -34,19 +64,20 @@ def compute_coordinate(idxs: Tensor, origin, grid_spacing, device='cpu'):
     return
         origin + spacing * idx
     '''
-    fidxs = to_tensor(idxs, device=device, dtype=float_dtype)
+    fidxs = to_tensor(idxs, device=device, dtype=dtype)
     assert torch.all(fidxs <= MAX_INDEX), 'Overflow of index_dtype'
     assert torch.all(fidxs >= MIN_INDEX), 'Underflow of index_dtype'
     idxs = to_tensor(idxs, device=device, dtype=index_dtype)
 
     if idxs.dim() == 1:
         idxs = idxs.unsqueeze(0)
-    origin = to_tensor(origin, device=idxs.device, dtype=float_dtype)
-    grid_spacing = to_tensor(grid_spacing, device=device, dtype=float_dtype)
+    origin = to_tensor(origin, device=idxs.device, dtype=dtype)
+    grid_spacing = to_tensor(grid_spacing, device=device, dtype=dtype)
     return origin.unsqueeze(0) + idxs * grid_spacing.unsqueeze(0)
 
 
-def compute_index(coords, origin, grid_spacing, device='cpu'):
+def compute_index(coords, origin, grid_spacing, device='cpu',
+                  dtype=DEFAULT_FLOAT_DTYPE):
     '''
     Arguments:
         coords : (N, vdim)
@@ -56,19 +87,21 @@ def compute_index(coords, origin, grid_spacing, device='cpu'):
     return
         (coords - origin)//spacing, index of grid point
     '''
-    coords = to_tensor(coords, device)
+    source_dtype = _coarsest_float_dtype(dtype, coords, origin, grid_spacing)
+    coords = to_tensor(coords, device, dtype=torch.float64)
     if coords.dim() == 1:
         coords = coords.unsqueeze(0)
-    origin = to_tensor(origin, device)
-    grid_spacing = to_tensor(grid_spacing, device)
+    origin = to_tensor(origin, device, dtype=torch.float64)
+    grid_spacing = to_tensor(grid_spacing, device, dtype=torch.float64)
     idxs = (coords - origin.unsqueeze(0)) / grid_spacing.unsqueeze(0)
+    idxs = _snap_near_integer(idxs, source_dtype)
 
     assert torch.all(idxs <= MAX_INDEX), f'Overflow of index_dtype {MAX_INDEX}'
     assert torch.all(idxs >= MIN_INDEX), 'Underflow of index_dtype'
     return idxs.floor().to(index_dtype)
 
 
-def compute_bounds_X0X1(X0X1, Sigma, n_sigma):
+def compute_bounds_X0X1(X0X1, Sigma, n_sigma, dtype=DEFAULT_FLOAT_DTYPE):
     '''
         X0X1 : (N, vdim, 2)
         Sigma : (N, vdim)
@@ -76,7 +109,9 @@ def compute_bounds_X0X1(X0X1, Sigma, n_sigma):
     return :
         bounds: (N, vdim, 2)
         '''
-    n_sigma = to_tensor(n_sigma, dtype=float_dtype, device=Sigma.device)
+    X0X1 = to_tensor(X0X1, device=Sigma.device, dtype=dtype)
+    Sigma = to_tensor(Sigma, device=Sigma.device, dtype=dtype)
+    n_sigma = to_tensor(n_sigma, dtype=dtype, device=Sigma.device)
     offset = (n_sigma.unsqueeze(0) * Sigma) # (N, vdim)
     min_limits = torch.min(X0X1, dim=2).values - offset # torch.min(shape(N,vdim,2)) --> shape(N, vdim)
     max_limits = torch.max(X0X1, dim=2).values + offset
@@ -94,7 +129,7 @@ def _stack_X0X1(X0, X1):
     return torch.stack((X0, X1), dim=2)
 
 
-def compute_bounds_X0_X1(X0, X1, Sigma, n_sigma):
+def compute_bounds_X0_X1(X0, X1, Sigma, n_sigma, dtype=DEFAULT_FLOAT_DTYPE):
     '''
     Arguments:
         X0: (N, vdim)
@@ -104,9 +139,12 @@ def compute_bounds_X0_X1(X0, X1, Sigma, n_sigma):
     return:
         (N, vdim, 2) float
     '''
-    n_sigma = to_tensor(n_sigma, dtype=float_dtype, device=Sigma.device)
+    X0 = to_tensor(X0, device=Sigma.device, dtype=dtype)
+    X1 = to_tensor(X1, device=Sigma.device, dtype=dtype)
+    Sigma = to_tensor(Sigma, device=Sigma.device, dtype=dtype)
+    n_sigma = to_tensor(n_sigma, dtype=dtype, device=Sigma.device)
     combined = _stack_X0X1(X0, X1)
-    bounds = compute_bounds_X0X1(combined, Sigma, n_sigma)
+    bounds = compute_bounds_X0X1(combined, Sigma, n_sigma, dtype=dtype)
     return bounds
 
 def reduce_to_universal(shape: Tensor):
@@ -125,7 +163,8 @@ def reduce_to_universal(shape: Tensor):
 
 
 def compute_charge_box(X0: Tensor, X1: Tensor, Sigma: Tensor,
-                       n_sigma, origin, grid_spacing, **kwargs):
+                       n_sigma, origin, grid_spacing,
+                       dtype=DEFAULT_FLOAT_DTYPE, **kwargs):
     '''
     FIXME: Output is only meaningful for vdim == 3.
 
@@ -144,17 +183,20 @@ def compute_charge_box(X0: Tensor, X1: Tensor, Sigma: Tensor,
     compare_key = kwargs.get('compare_key', 'index')
 
     device = X0.device
+    X0 = to_tensor(X0, device=device, dtype=dtype)
+    X1 = to_tensor(X1, device=device, dtype=dtype)
+    Sigma = to_tensor(Sigma, device=device, dtype=dtype)
 
-    n_sigma = to_tensor(n_sigma, device)
+    n_sigma = to_tensor(n_sigma, device, dtype=dtype)
 
-    extremes = compute_bounds_X0_X1(X0, X1, Sigma, n_sigma) # (N, vdim, 2)
+    extremes = compute_bounds_X0_X1(X0, X1, Sigma, n_sigma, dtype=dtype) # (N, vdim, 2)
 
     min_limit = extremes[:, :, 0] # (N, vdim)
     max_limit = extremes[:, :, 1] # (N, vdim)
 
     if compare_key == 'index':
-        min_limit = compute_index(min_limit, origin, grid_spacing, device=device)
-        max_limit = compute_index(max_limit, origin, grid_spacing, device=device)
+        min_limit = compute_index(min_limit, origin, grid_spacing, device=device, dtype=dtype)
+        max_limit = compute_index(max_limit, origin, grid_spacing, device=device, dtype=dtype)
         offset = min_limit
 
         shape = max_limit - min_limit + 1
@@ -362,7 +404,7 @@ except:
                      " (must be 1 <= n <= 6)")
 
 
-def _create_w1d_GL(npt, spacing, device='cpu'):
+def _create_w1d_GL(npt, spacing, device='cpu', dtype=DEFAULT_FLOAT_DTYPE):
     '''
     Args:
         npt : integer
@@ -371,10 +413,11 @@ def _create_w1d_GL(npt, spacing, device='cpu'):
         a tensor of weights of n-point GL quadrature after correcting for length of intervals
     '''
     _, weights = roots_legendre(npt)
-    w1d = torch.tensor(weights, dtype=float_dtype, requires_grad=False, device=device) * spacing/2
+    w1d = torch.tensor(weights, dtype=dtype, requires_grad=False, device=device) * spacing/2
     return w1d
 
-def _create_w1ds(method, npoints, grid_spacing, device='cpu'):
+def _create_w1ds(method, npoints, grid_spacing, device='cpu',
+                 dtype=DEFAULT_FLOAT_DTYPE):
     '''
     Args:
         method : str
@@ -388,7 +431,7 @@ def _create_w1ds(method, npoints, grid_spacing, device='cpu'):
         raise NotImplementedError('Not implemented method but gauss legendre quadrature')
     w1ds = []
     for ipt, npt in enumerate(npoints):
-        w1ds.append(_create_w1d_GL(npt, grid_spacing[ipt], device))
+        w1ds.append(_create_w1d_GL(npt, grid_spacing[ipt], device, dtype=dtype))
     return w1ds
 
 def _create_w_block(w1ds):
@@ -407,7 +450,8 @@ def _create_w_block(w1ds):
         wblock = wblock * w1ds[i].view(shape_new)
     return wblock
 
-def create_w_block(method, npoints, grid_spacing, device='cpu'):
+def create_w_block(method, npoints, grid_spacing, device='cpu',
+                   dtype=DEFAULT_FLOAT_DTYPE):
     '''create a weight block
     Args:
         method : str
@@ -416,11 +460,11 @@ def create_w_block(method, npoints, grid_spacing, device='cpu'):
     Returns:
         weights: Tensor, in a shape of (N_1, N_2, ..., N_i, ...) for i from 1 to vdim
     '''
-    w1ds = _create_w1ds(method, npoints, grid_spacing, device)
+    w1ds = _create_w1ds(method, npoints, grid_spacing, device, dtype=dtype)
     return _create_w_block(w1ds)
 
 
-def _create_u1d_GL(npt, device='cpu'):
+def _create_u1d_GL(npt, device='cpu', dtype=DEFAULT_FLOAT_DTYPE):
     '''
     Args:
         npt : integer
@@ -428,7 +472,7 @@ def _create_u1d_GL(npt, device='cpu'):
         a tensor of coefficients for interpolations at roots of npt-order GL polynomials
     '''
     roots, _ = roots_legendre(npt)
-    roots_tensor = torch.as_tensor(roots, dtype=float_dtype, device=device)
+    roots_tensor = torch.as_tensor(roots, dtype=dtype, device=device)
     zeros_tensor = torch.zeros_like(roots_tensor)
 
     negative_mask = roots_tensor < 0
@@ -444,7 +488,7 @@ def _create_u1d_GL(npt, device='cpu'):
     return u
 
 
-def _create_u1ds(method, npoints, device='cpu'):
+def _create_u1ds(method, npoints, device='cpu', dtype=DEFAULT_FLOAT_DTYPE):
     '''
     Arguments:
         method : str
@@ -455,7 +499,7 @@ def _create_u1ds(method, npoints, device='cpu'):
     '''
     u1ds = []
     for ipt, npt in enumerate(npoints):
-        u1ds.append(_create_u1d_GL(npt, device))
+        u1ds.append(_create_u1d_GL(npt, device, dtype=dtype))
     return u1ds
 
 def _create_u_block(u1ds, interpo_npts=3):
@@ -486,7 +530,7 @@ def _create_u_block(u1ds, interpo_npts=3):
     return ublock
 
 
-def create_u_block(method, npoints, device='cpu'):
+def create_u_block(method, npoints, device='cpu', dtype=DEFAULT_FLOAT_DTYPE):
     '''
     To create a weight block for u in 3D
     Args:
@@ -497,7 +541,7 @@ def create_u_block(method, npoints, device='cpu'):
         A tesnor in a shape of (N_1, N_2, ..., N_i, ..., 2, 2, ..., 2_i, ...)
 
     '''
-    u1ds = _create_u1ds(method, npoints, device)
+    u1ds = _create_u1ds(method, npoints, device, dtype=dtype)
     return _create_u_block(u1ds)
 
 
@@ -517,13 +561,15 @@ def _create_wu_block(w, u):
     return w.view(shape) * u
 
 
-def create_wu_block(method, npoints, grid_spacing, device='cpu'):
-    w = create_w_block(method, npoints, grid_spacing, device)
-    u = create_u_block(method, npoints, device)
+def create_wu_block(method, npoints, grid_spacing, device='cpu',
+                    dtype=DEFAULT_FLOAT_DTYPE):
+    w = create_w_block(method, npoints, grid_spacing, device, dtype=dtype)
+    u = create_u_block(method, npoints, device, dtype=dtype)
     return _create_wu_block(w, u)
 
 
-def create_grid1d(origin_1d, grid_spacing_1d, offset_1d, ngrid_1d : int, device='cpu'):
+def create_grid1d(origin_1d, grid_spacing_1d, offset_1d, ngrid_1d : int,
+                  device='cpu', dtype=DEFAULT_FLOAT_DTYPE):
     '''
     Args:
         origin: float or 0-dimensional Tensor
@@ -544,10 +590,11 @@ def create_grid1d(origin_1d, grid_spacing_1d, offset_1d, ngrid_1d : int, device=
                               device=device) # (shp_1d, )
     idx_2d = offset_1d[:,None] + ngrid_idx_1d[None, :]
     grid_1d = compute_coordinate(idx_2d, (origin_1d,), (grid_spacing_1d,),
-                                 device=device)
+                                 device=device, dtype=dtype)
     return grid_1d
 
-def _create_node1d_GL(npt, origin_1d, grid_spacing_1d, offset_1d, shp_1d, device='cpu'):
+def _create_node1d_GL(npt, origin_1d, grid_spacing_1d, offset_1d, shp_1d,
+                      device='cpu', dtype=DEFAULT_FLOAT_DTYPE):
     '''
     Args:
         origin_1d : float or 0-dimensional Tensor
@@ -565,9 +612,10 @@ def _create_node1d_GL(npt, origin_1d, grid_spacing_1d, offset_1d, shp_1d, device
     # if shp_1d > MAX_INDEX:
     #     raise ValueError(f'shp_1d={shp_1d} is larger than MAX_INDEX {MAX_INDEX}.')
 
-    grid_1d = create_grid1d(origin_1d, grid_spacing_1d, offset_1d, shp_1d+1, device)
+    grid_1d = create_grid1d(origin_1d, grid_spacing_1d, offset_1d, shp_1d+1,
+                            device, dtype=dtype)
     roots, _ = roots_legendre(npt)
-    roots = to_tensor(roots, device=device)
+    roots = to_tensor(roots, device=device, dtype=dtype)
     half_delta = (grid_1d[:, 1:] - grid_1d[:, :-1])/2. # (Nsteps, shp_1d-1)
     avg = (grid_1d[:,1:] + grid_1d[:,:-1])/2. # (Nsteps, shp_1d-1)
     node_1d = half_delta[:, None, :] * roots[None, :, None] \
@@ -575,7 +623,8 @@ def _create_node1d_GL(npt, origin_1d, grid_spacing_1d, offset_1d, shp_1d, device
     return node_1d
 
 
-def create_node1ds(method, npoints, origin, grid_spacing, offset, shape, device='cpu'):
+def create_node1ds(method, npoints, origin, grid_spacing, offset, shape,
+                   device='cpu', dtype=DEFAULT_FLOAT_DTYPE):
     '''
     Args:
         method : str
@@ -596,7 +645,7 @@ def create_node1ds(method, npoints, origin, grid_spacing, offset, shape, device=
     for i in range(len(origin)):
         node1ds.append(
             _create_node1d_GL(npoints[i], origin[i], grid_spacing[i],
-                              offset[:,i], shape[i], device)
+                              offset[:,i], shape[i], device, dtype=dtype)
         )
     return node1ds
 
@@ -624,8 +673,24 @@ def eval_qmodel(Q, X0, X1, Sigma, x, y, z, qmodel=qline_diff3D, **kwargs):
 
 
 def eval_qeff(Q, X0, X1, Sigma, offset, shape, origin, grid_spacing,
-              method, npoints, **kwargs):
+              method, npoints, dtype=DEFAULT_FLOAT_DTYPE, **kwargs):
     '''
+    Rasterize effective charge on a finite charge box.
+
+    Validity assumptions:
+        - The chosen raster box must be wide enough that truncation outside the
+          box is small compared to the total integral. In practice this method
+          is intended for boxes that extend to about +/- 3 sigma on each axis
+          and retain at least about 99.5% of the total integral
+          (equivalently, less than about 0.5% is lost outside the box).
+        - The rasterization includes an interpolation step, so the summed
+          rasterized charge does not exactly equal the exact integral over the
+          finite box even when the box is fixed. Small tails outside the box
+          are therefore required so that truncation error remains subdominant
+          to the interpolation error.
+        - The source model used for rasterization should be non-negative over
+          the rasterized range.
+
     Args:
         Q (Nsteps, )
         X0 (Nsteps, 3)
@@ -635,13 +700,22 @@ def eval_qeff(Q, X0, X1, Sigma, offset, shape, origin, grid_spacing,
         shape (vdim,)
         origin (vdim,)
         grid_spacing (vdim,)
+        method: quadrature/interpolation backend name
         npoints (vdim, )
+        dtype: floating compute dtype for node generation, model evaluation,
+            and accumulation
         kwargs:
-            qmodel: method to calculate charges, taking (Q, X0, X1, Sigma, x, y, z)
-                    as arguments. This argument will be passed to eval_qmodel
-                    so that broadcasting is done properly.
+            qline_model: charge model used for non-point-like steps. The
+                callable must take (Q, X0, X1, Sigma, x, y, z) and is passed
+                through eval_qmodel() for broadcasting.
+            qpoint_model: charge model used when too_short() classifies a step
+                as point-like. The callable must have the same signature as
+                qline_model.
+            threshold: point-like classification threshold passed to too_short().
     Return:
-        effective charge
+        qeff, offset:
+            qeff is a tensor of rasterized effective charge with shape
+            (Nsteps, *shape), and offset is returned unchanged.
 
     FIXME:
        w block, u blocks supports vdim = any number,
@@ -654,13 +728,21 @@ def eval_qeff(Q, X0, X1, Sigma, offset, shape, origin, grid_spacing,
     if not isinstance(Q, torch.Tensor):
         raise ValueError('Q must be a torch.Tensor')
     device = Q.device
+    Q = Q.to(device=device, dtype=dtype)
+    X0 = X0.to(device=device, dtype=dtype)
+    X1 = X1.to(device=device, dtype=dtype)
+    Sigma = Sigma.to(device=device, dtype=dtype)
+    offset = offset.to(device=device, dtype=index_dtype)
+    shape = shape.to(device=device, dtype=index_dtype)
+    grid_spacing = to_tensor(grid_spacing, device=device, dtype=dtype)
+    origin = to_tensor(origin, device=device, dtype=dtype)
 
     qline_model = kwargs.get('qline_model', qline_diff3D)
     qpoint_model = kwargs.get('qpoint_model', qpoint_diff3D)
     threshold = kwargs.get('threshold', 0.1)
 
     # FIXME: dimensions are hard coded
-    kernel = create_wu_block(method, npoints, grid_spacing, device)
+    kernel = create_wu_block(method, npoints, grid_spacing, device, dtype=dtype)
     # it does not matter we flip at first or we multiply w and u at first
     kernel = torch.flip(kernel, [3, 4, 5])
     lmn = kernel.size()[:3]
@@ -670,13 +752,13 @@ def eval_qeff(Q, X0, X1, Sigma, offset, shape, origin, grid_spacing,
     kernel = kernel.view(lmn_prod, 1, rst[0], rst[1], rst[2])
 
     x, y, z = create_node1ds(method, npoints, origin, grid_spacing,
-                             offset, shape, device)
+                             offset, shape, device, dtype=dtype)
 
     # FIXME: may update batch dimension in the future
     too_short_mask = too_short(X0, X1, Sigma, threshold=threshold)
 
     charge = torch.zeros((Q.size(0), *lmn, *shape),
-                         dtype=float_dtype, device=device)
+                         dtype=dtype, device=device)
     mask_shape = [-1,] + [1,] * (len(lmn) + len(shape))
     expand_shape = [Q.size(0), *lmn] + [s.item() for s in shape]
     too_short_mask = too_short_mask.view(mask_shape).expand(*expand_shape)
@@ -697,9 +779,41 @@ def eval_qeff(Q, X0, X1, Sigma, offset, shape, origin, grid_spacing,
 
 def compute_qeff(Q, X0, X1, Sigma, n_sigma, origin, grid_spacing, method, npoints, **kwargs):
     '''
-    See compute_charge_box, eval_qeff,
+    Compute a charge box from the step geometry and then rasterize the
+    effective charge within that box.
+
+    Validity assumptions:
+        - The charge box selected through n_sigma should be large enough that
+          the omitted tail outside the box is small. In practice this means
+          choosing a box close to +/- 3 sigma on each axis and retaining at
+          least about 99.5% of the total integral
+          (equivalently, less than about 0.5% lies outside the box).
+        - The rasterization includes an interpolation step, so the summed
+          rasterized charge only approximates the exact integral over the
+          chosen finite box. The tail outside the box should therefore be
+          sufficiently small that truncation error does not dominate this
+          interpolation error.
+        - The source model should remain non-negative over the rasterized
+          range.
+
+    Args:
+        Q (Nsteps, )
+        X0 (Nsteps, 3)
+        X1 (Nsteps, 3)
+        Sigma (Nsteps, 3)
+        n_sigma: charge-box half-width in units of sigma for each axis
+        origin (vdim,)
+        grid_spacing (vdim,)
+        method: quadrature/interpolation backend name
+        npoints (vdim,)
+        kwargs: forwarded to compute_charge_box() and eval_qeff(). If either
+            recenter=True or skippad=True is requested, both are enabled to
+            keep the charge box and raster output aligned.
+
     Return:
-        qeff, offset
+        qeff, offset:
+            qeff is the rasterized effective charge tensor and offset is the
+            lower grid index of the computed charge box.
     '''
     if kwargs.get('recenter', False) or kwargs.get('skippad', False):
         if not kwargs.get('recenter', False):
@@ -708,8 +822,13 @@ def compute_qeff(Q, X0, X1, Sigma, n_sigma, origin, grid_spacing, method, npoint
         if not kwargs.get('skippad', False):
             kwargs['skippad'] = True
             logger.warning('Option "skippad" is overwritten to True, complying with option "recenter"')
-    # X0, X1 shifted by half bin, as in responses.org
-    # FIXME: how to handle the case when X0,X1 hit the anode?
-    offset, shape = compute_charge_box(X0, X1, Sigma, n_sigma, origin, grid_spacing, **kwargs)
-    qeff, offset = eval_qeff(Q, X0, X1, Sigma, offset, shape, origin, grid_spacing, method, npoints, **kwargs)
+    dtype = kwargs.pop('dtype', DEFAULT_FLOAT_DTYPE)
+    Q = Q.to(dtype=dtype)
+    X0 = X0.to(dtype=dtype)
+    X1 = X1.to(dtype=dtype)
+    Sigma = Sigma.to(dtype=dtype)
+    offset, shape = compute_charge_box(X0, X1, Sigma, n_sigma, origin, grid_spacing,
+                                       dtype=dtype, **kwargs)
+    qeff, offset = eval_qeff(Q, X0, X1, Sigma, offset, shape, origin, grid_spacing,
+                             method, npoints, dtype=dtype, **kwargs)
     return qeff, offset
