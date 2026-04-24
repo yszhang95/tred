@@ -3,7 +3,7 @@
 
 [project]
 name = "tred"
-version = "0.1.0"
+version = "1.0.0"
 description = "Three dimensional response detector simulation"
 readme = {file = "README.org", content-type = "text/org"}
 requires-python = ">=3.11"
