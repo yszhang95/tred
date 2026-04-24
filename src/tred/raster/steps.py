@@ -675,6 +675,22 @@ def eval_qmodel(Q, X0, X1, Sigma, x, y, z, qmodel=qline_diff3D, **kwargs):
 def eval_qeff(Q, X0, X1, Sigma, offset, shape, origin, grid_spacing,
               method, npoints, dtype=DEFAULT_FLOAT_DTYPE, **kwargs):
     '''
+    Rasterize effective charge on a finite charge box.
+
+    Validity assumptions:
+        - The chosen raster box must be wide enough that truncation outside the
+          box is small compared to the total integral. In practice this method
+          is intended for boxes that extend to about +/- 3 sigma on each axis
+          and retain at least about 99.5% of the total integral
+          (equivalently, less than about 0.5% is lost outside the box).
+        - The rasterization includes an interpolation step, so the summed
+          rasterized charge does not exactly equal the exact integral over the
+          finite box even when the box is fixed. Small tails outside the box
+          are therefore required so that truncation error remains subdominant
+          to the interpolation error.
+        - The source model used for rasterization should be non-negative over
+          the rasterized range.
+
     Args:
         Q (Nsteps, )
         X0 (Nsteps, 3)
@@ -684,13 +700,22 @@ def eval_qeff(Q, X0, X1, Sigma, offset, shape, origin, grid_spacing,
         shape (vdim,)
         origin (vdim,)
         grid_spacing (vdim,)
+        method: quadrature/interpolation backend name
         npoints (vdim, )
+        dtype: floating compute dtype for node generation, model evaluation,
+            and accumulation
         kwargs:
-            qmodel: method to calculate charges, taking (Q, X0, X1, Sigma, x, y, z)
-                    as arguments. This argument will be passed to eval_qmodel
-                    so that broadcasting is done properly.
+            qline_model: charge model used for non-point-like steps. The
+                callable must take (Q, X0, X1, Sigma, x, y, z) and is passed
+                through eval_qmodel() for broadcasting.
+            qpoint_model: charge model used when too_short() classifies a step
+                as point-like. The callable must have the same signature as
+                qline_model.
+            threshold: point-like classification threshold passed to too_short().
     Return:
-        effective charge
+        qeff, offset:
+            qeff is a tensor of rasterized effective charge with shape
+            (Nsteps, *shape), and offset is returned unchanged.
 
     FIXME:
        w block, u blocks supports vdim = any number,
@@ -754,9 +779,41 @@ def eval_qeff(Q, X0, X1, Sigma, offset, shape, origin, grid_spacing,
 
 def compute_qeff(Q, X0, X1, Sigma, n_sigma, origin, grid_spacing, method, npoints, **kwargs):
     '''
-    See compute_charge_box, eval_qeff,
+    Compute a charge box from the step geometry and then rasterize the
+    effective charge within that box.
+
+    Validity assumptions:
+        - The charge box selected through n_sigma should be large enough that
+          the omitted tail outside the box is small. In practice this means
+          choosing a box close to +/- 3 sigma on each axis and retaining at
+          least about 99.5% of the total integral
+          (equivalently, less than about 0.5% lies outside the box).
+        - The rasterization includes an interpolation step, so the summed
+          rasterized charge only approximates the exact integral over the
+          chosen finite box. The tail outside the box should therefore be
+          sufficiently small that truncation error does not dominate this
+          interpolation error.
+        - The source model should remain non-negative over the rasterized
+          range.
+
+    Args:
+        Q (Nsteps, )
+        X0 (Nsteps, 3)
+        X1 (Nsteps, 3)
+        Sigma (Nsteps, 3)
+        n_sigma: charge-box half-width in units of sigma for each axis
+        origin (vdim,)
+        grid_spacing (vdim,)
+        method: quadrature/interpolation backend name
+        npoints (vdim,)
+        kwargs: forwarded to compute_charge_box() and eval_qeff(). If either
+            recenter=True or skippad=True is requested, both are enabled to
+            keep the charge box and raster output aligned.
+
     Return:
-        qeff, offset
+        qeff, offset:
+            qeff is the rasterized effective charge tensor and offset is the
+            lower grid index of the computed charge box.
     '''
     if kwargs.get('recenter', False) or kwargs.get('skippad', False):
         if not kwargs.get('recenter', False):
@@ -770,8 +827,6 @@ def compute_qeff(Q, X0, X1, Sigma, n_sigma, origin, grid_spacing, method, npoint
     X0 = X0.to(dtype=dtype)
     X1 = X1.to(dtype=dtype)
     Sigma = Sigma.to(dtype=dtype)
-    # X0, X1 shifted by half bin, as in responses.org
-    # FIXME: how to handle the case when X0,X1 hit the anode?
     offset, shape = compute_charge_box(X0, X1, Sigma, n_sigma, origin, grid_spacing,
                                        dtype=dtype, **kwargs)
     qeff, offset = eval_qeff(Q, X0, X1, Sigma, offset, shape, origin, grid_spacing,

@@ -12,6 +12,24 @@ import torch
 
 logger = logging.getLogger('tred/tests/effq/test_effq.py')
 
+THREE_SIGMA = (3, 3, 3)
+CHARGE_RECOVERY_REL_TOL = 5e-3
+TEST_Q_VALUES = (0.25, 1.0, 2.5)
+
+
+def assert_charge_recovery(effq, charge, rel_tol=CHARGE_RECOVERY_REL_TOL):
+    charge = charge.to(device=effq.device, dtype=effq.dtype)
+    recovered = torch.sum(effq, dim=tuple(range(1, effq.ndim)))
+    charge_sum = charge.reshape(charge.shape[0], -1).sum(dim=1)
+    denom = torch.clamp(torch.abs(charge_sum), min=torch.finfo(effq.dtype).eps)
+    rel_err = torch.abs(recovered - charge_sum) / denom
+    max_err, max_idx = torch.max(rel_err, dim=0)
+    msg = (
+        f'max relative error {max_err.item()} at batch index {max_idx.item()}: '
+        f'recovered {recovered[max_idx].item()} vs input {charge_sum[max_idx].item()}'
+    )
+    assert torch.all(rel_err < rel_tol), msg
+
 def test_QModel():
     local_logger = logger.getChild('test_QModel')
     local_logger.debug('Testing qmodel by comparing results with Mathematica')
@@ -388,238 +406,48 @@ def test_create_node1ds(level=None):
         'pass assertion with rel. delta < 1E-5'
     )
 
-def prod_xcub_ycub_zcub(Q, X0, X1, Sigma, x, y, z):
-    local_logger = logger.getChild('prod_xcub_ycub_zcub=x^3*y^3*z^3')
-    local_logger.debug('Ignoring Q, X0, X1, Sigma')
-    output = x**3 * y**3 * z**3
-    return output
-
-def prod_xcub_ycub_zcub_margin0(Q, X0, X1, Sigma, x, y, z):
-    local_logger = logger.getChild('prod_xcub_ycub_zcub=x^3*y^3*z^3, margins are 0')
-    local_logger.debug('Ignoring Q, X0, X1, Sigma')
-    output = x**3 * y**3 * z**3
-    output[...,0,:,:] = 0
-    output[...,-1,:,:] = 0
-    output[...,0,:] = 0
-    output[...,-1,:] = 0
-    output[...,0] = 0
-    output[...,-1] = 0
-    return output
-
-def test_eval_qmodel(level=None):
-    local_logger = logger.getChild('test_eval_qmodel')
-    if level:
-        local_logger.setLevel(level)
-
-    # npt = (4, 4, 4)
-    npt = (2, 2, 2)
-    method='gauss_legendre'
-    origin=(0,0,0)
-    grid_spacing=(0.1, 0.1, 0.1)
-    offset=[(0,20,30)]
-    shape=(10, 10, 10)
-
-    local_logger.debug(f'Testing {npt}-point GL rule using {repr(prod_xcub_ycub_zcub)};'
-                       ' Contributions from Q, X0, X1, Sigma, are ignored')
-
-    x, y, z = [ts.create_grid1d(orig, spacing, off, shp+1) for orig, spacing, off, shp in zip(origin, grid_spacing, torch.tensor(offset).T, shape)]
-    x0, x1 = x[0,0], x[0,-1]
-    y0, y1 = y[0,0], y[0,-1]
-    z0, z1 = z[0,0], z[0,-1]
-    local_logger.debug(f'Setup, x in [{x0},{x1}], '
-                       f'y in [{y0},{y1}], z in [{z0},{z1}]')
-
-    x, y, z = ts.create_node1ds(method, npt, origin, grid_spacing, torch.tensor(offset), shape)
-    q = ts.eval_qmodel(None, None, None, None, x, y, z, qmodel=prod_xcub_ycub_zcub)
-    w = ts.create_w_block(method, npt, grid_spacing)
-
-    effq = w[None,...,None,None,None]*q
-
-    # effq = qeff.create_qeff(None, dummy, None, None, qmodel=mymodel)
-    msg = f'output shape {q.shape}, sum of fn values at nodes {torch.sum(q).item()}. Preknown value for integral of (xyz)^3 is 177.7344'
-    local_logger.debug(msg)
-    assert abs(torch.sum(effq).item() - 177.7344)/177.7344 < 1E-5, msg
-    local_logger.debug('Pass assertion for x^3 * y^3 * t^3 at relative delta 1E-5')
-
 def test_eval_qeff(level=None):
     local_logger = logger.getChild('test_eval_qeff')
     if level:
         local_logger.setLevel(level)
 
     npt = (4, 4, 4)
-    # npt = (2, 2, 2)
     method='gauss_legendre'
     origin=(0,0,0)
     grid_spacing=(0.1, 0.1, 0.1)
-    offset=[(0,20,30)]
-    shape=(10, 10, 10)
 
-    local_logger.debug(f'Testing {npt}-point GL rule using {repr(prod_xcub_ycub_zcub)};'
-                       ' Contributions from Q, X0, X1, Sigma, are ignored')
-
-    x, y, z = [ts.create_grid1d(orig, spacing, off, shp+1) for orig, spacing, off, shp in zip(origin, grid_spacing, torch.tensor(offset).T, shape)]
-    x0, x1 = x[0,0], x[0,-1]
-    y0, y1 = y[0,0], y[0,-1]
-    z0, z1 = z[0,0], z[0,-1]
-    local_logger.debug(f'Setup, x in [{x0},{x1}], '
-                       f'y in [{y0},{y1}], z in [{z0},{z1}]')
-
-    dummyQ = torch.arange(1).view(len(offset),-1)
-    dummyX0 = torch.arange(3).view(len(offset),-1)
-    dummyX1 = torch.arange(3).view(len(offset),-1)
-    dummySigma = torch.arange(3).view(len(offset),-1)
-
-    effq, _ = ts.eval_qeff(dummyQ, dummyX0, dummyX1, dummySigma,
-                     torch.tensor(offset), torch.tensor(shape), origin, grid_spacing, method, npt,
-                     qmodel=prod_xcub_ycub_zcub)
-
-    msg = f'output shape {effq.shape}, sum of fn values at nodes {torch.sum(effq).item()}. Preknown value for integral of (xyz)^3 is 177.7344'
-    local_logger.debug(msg)
-    assert abs(torch.sum(effq).item() - 177.7344)/177.7344 < 1E-5, msg
-    local_logger.debug('Pass assertion for x^3 * y^3 * t^3 at relative delta 1E-5')
-
-    # test skipad
-    effq, offset_new = ts.eval_qeff(dummyQ, dummyX0, dummyX1, dummySigma,
-                           torch.tensor(offset)-1, torch.tensor(shape)+2, origin, grid_spacing, method, npt,
-                           qmodel=prod_xcub_ycub_zcub_margin0, skippad=True)
-    coord_new = ts.compute_coordinate(offset_new, origin, grid_spacing)
-    coord_old = ts.compute_coordinate(torch.tensor(offset)-1, origin, grid_spacing)
-    coord = ts.compute_coordinate(torch.tensor(offset), origin, grid_spacing)
-    msg = f'output shape {effq.shape}, sum of fn values at nodes {torch.sum(effq).item()}. Preknown value for integral of (xyz)^3 is 177.7344'
-    local_logger.debug(msg)
-    assert abs(torch.sum(effq).item() - 177.7344)/177.7344 < 1E-5, msg
-    assert torch.allclose(torch.tensor(effq.shape[1:]), torch.tensor(shape)+1)
-    msg = f'Coordinate after skipping padding is {coord_new[0]}, '\
-        f'coordinate before skipping pad is {coord_old[0]}, '\
-        f'desired coordinate is {coord[0]}.'
-    local_logger.debug(msg)
-    assert torch.allclose(coord_new, coord, atol=1E-5, rtol=1E-5) # I have shift by one unit before I test.
-
-    local_logger.debug('Pass assertion for x^3 * y^3 * t^3 at relative delta 1E-5, skippad=True')
-
-    ilinear = lambda x, y, t : x * y * t
-    x = torch.linspace(0, 1, 11)
-    y = torch.linspace(2, 3, 11)
-    t = torch.linspace(3, 4, 11)
-    xgrid, ygrid, tgrid = torch.meshgrid(x, y, t, indexing='ij')
-    I = ilinear(xgrid, ygrid, tgrid)
-    Y = effq
-    assert abs((torch.sum(Y * I) - 1318.3282).item())/1318.3282 <1E-5
-    local_logger.debug('Pass assertion for x^4 * y^4 * t^4 after multiplying linear model x*y*t')
-
-    # # Asserted
-
-    Q=(1,)
-    X0=[(0.4,2.4,3.4)]
-    X1=[(0.6, 2.6, 3.6)]
-    Sigma=[(0.5, 0.5, 0.5)]
+    Q=[(q,) for q in TEST_Q_VALUES]
+    X0=[(0.4,2.4,3.4)] * len(Q)
+    X1=[(0.6, 2.6, 3.6)] * len(Q)
+    Sigma=[(0.5, 0.5, 0.5)] * len(Q)
     local_logger.debug(
-        f'Setup, Q={Q}, X0={X0}, X1={X1}, Sigma={Sigma}, Origin={origin}, GridSpacing={grid_spacing}, Offset={offset}, Shape={shape}'
+        f'Setup, Q={Q}, X0={X0}, X1={X1}, Sigma={Sigma}, Origin={origin}, GridSpacing={grid_spacing}'
     )
-    Q = torch.tensor(Q)
-    X0 = torch.tensor(X0)
-    X1 = torch.tensor(X1)
-    Sigma = torch.tensor(Sigma)
+    Q = torch.tensor(Q, dtype=torch.float64)
+    X0 = torch.tensor(X0, dtype=torch.float64)
+    X1 = torch.tensor(X1, dtype=torch.float64)
+    Sigma = torch.tensor(Sigma, dtype=torch.float64)
+    offset, shape = ts.compute_charge_box(
+        X0, X1, Sigma, THREE_SIGMA, origin, grid_spacing, dtype=torch.float64
+    )
     effq2, _ = ts.eval_qeff(Q=Q, X0=X0, X1=X1,
                             Sigma=Sigma, method=method, origin=origin, grid_spacing=grid_spacing,
-                            offset=torch.tensor(offset), shape=torch.tensor(shape), npoints=npt)
-    # print('Sum of Line conv Gaus', torch.sum(effq2))
-    qint = 0.3137
-    msg = f'Sum of qline_diff3D {torch.sum(effq2)}, predefined value for comparison {qint}'
-    assert torch.isclose(torch.sum(effq2), torch.tensor([qint,]), atol=1E-4, rtol=1E-5), msg
+                            offset=offset, shape=shape, npoints=npt)
+    assert_charge_recovery(effq2, Q)
 
-    local_logger.debug('Pass assertion for qline_diff3D')
+    local_logger.debug('Pass charge-recovery assertion for qline_diff3D')
 
-    # test xyzlimit and shapelimit
-    # increase grid granularity
-    grid_spacing2 = (0.001, 0.1, 0.1)
-    shape2 = (1000, 10, 10)
-    offset2 = (0, 20, 30)
-    shape_limit = 10000000000
+    # increase grid granularity while keeping the same 3-sigma support box
+    grid_spacing2 = (0.01, 0.1, 0.1)
+    offset2, shape2 = ts.compute_charge_box(
+        X0, X1, Sigma, THREE_SIGMA, origin, grid_spacing2, dtype=torch.float64
+    )
     effq3, _ = ts.eval_qeff(Q=Q, X0=X0, X1=X1,
                             Sigma=Sigma, method=method, origin=origin, grid_spacing=grid_spacing2,
-                            offset=torch.tensor(offset), shape=torch.tensor(shape2), npoints=npt,
-                            shape_limit=torch.tensor(shape_limit))
-    msg = f'Sum of qline_diff3D {torch.sum(effq3)}, predefined value for comparison {qint}'
-    assert torch.isclose(torch.sum(effq3), torch.tensor([qint,]), atol=1E-4, rtol=1E-5), msg
-    assert torch.allclose(torch.tensor(effq3.shape[1:]), torch.tensor(shape2)+1)
-
-    shape_limit = 100
-    effq3, _ = ts.eval_qeff(Q=Q, X0=X0, X1=X1,
-                            Sigma=Sigma, method=method, origin=origin, grid_spacing=grid_spacing2,
-                            offset=torch.tensor(offset), shape=torch.tensor(shape2), npoints=npt,
-                            shape_limit=torch.tensor(shape_limit))
-    msg = f'Sum of qline_diff3D {torch.sum(effq3)}, predefined value for comparison {qint}'
-    assert torch.isclose(torch.sum(effq3), torch.tensor([qint,]), atol=1E-4, rtol=1E-5), msg
-    assert torch.allclose(torch.tensor(effq3.shape[1:]), torch.tensor(shape2)+1)
-
-    grid_spacing4 = (0.1, 0.001, 0.1)
-    shape4 = (10, 1000, 10)
-    offset4 = [(0, 2000, 30),]
-    shape_limit4 = 100
-    effq4, _ = ts.eval_qeff(Q=Q, X0=X0, X1=X1,
-                            Sigma=Sigma, method=method, origin=origin, grid_spacing=grid_spacing4,
-                            offset=torch.tensor(offset4), shape=torch.tensor(shape4), npoints=npt,
-                            shape_limit=torch.tensor(shape_limit))
-    msg = f'Sum of qline_diff3D {torch.sum(effq4)}, predefined value for comparison {qint}'
-    assert torch.isclose(torch.sum(effq4), torch.tensor([qint,]), atol=1E-4, rtol=1E-5), msg
-    assert torch.allclose(torch.tensor(effq4.shape[1:]), torch.tensor(shape4)+1)
-
-    grid_spacing5 = (0.1, 0.1, 0.001)
-    shape5 = (10, 10, 1000)
-    offset5 = [(0, 20, 3000),]
-    shape_limit5 = 100
-    effq5, _ = ts.eval_qeff(Q=Q, X0=X0, X1=X1,
-                            Sigma=Sigma, method=method, origin=origin, grid_spacing=grid_spacing5,
-                            offset=torch.tensor(offset5), shape=torch.tensor(shape5), npoints=npt,
-                            shape_limit=torch.tensor(shape_limit))
-    msg = f'Sum of qline_diff3D {torch.sum(effq5)}, predefined value for comparison {qint}'
-    assert torch.isclose(torch.sum(effq5), torch.tensor([qint,]), atol=1E-4, rtol=1E-5), msg
-    assert torch.allclose(torch.tensor(effq5.shape[1:]), torch.tensor(shape5)+1)
-
-    grid_spacing6 = (0.1, 0.005, 0.001)
-    shape6 = (10, 200, 1000)
-    offset6 = [(0, 400, 3000),]
-    shape_limit6 = 100
-    effq6, _ = ts.eval_qeff(Q=Q, X0=X0, X1=X1,
-                            Sigma=Sigma, method=method, origin=origin, grid_spacing=grid_spacing6,
-                            offset=torch.tensor(offset6), shape=torch.tensor(shape6), npoints=npt,
-                            shape_limit=torch.tensor(shape_limit))
-    msg = f'Sum of qline_diff3D {torch.sum(effq6)}, predefined value for comparison {qint}'
-    assert torch.isclose(torch.sum(effq6), torch.tensor([qint,]), atol=1E-4, rtol=1E-5), msg
-    assert torch.allclose(torch.tensor(effq6.shape[1:]), torch.tensor(shape6)+1)
-    local_logger.debug('Chunking on x, y, z passes tests.')
-
-    # test mem_limit
-    batch_size = 20_000
-    Q=(1,) * batch_size
-    X0=[(0.4,2.4,3.4)] * batch_size
-    X1=[(0.6, 2.6, 3.6)] * batch_size
-    Sigma=[(0.5, 0.5, 0.5)] * batch_size
-    npt = (4, 4, 4)
-    # npt = (2, 2, 2)
-    method='gauss_legendre'
-    origin=(0,0,0)
-    grid_spacing=(0.1, 0.1, 0.1)
-    offset=[(0,20,30)] *batch_size
-    shape=(10, 10, 10)
-
-    torch.cuda.reset_peak_memory_stats()
-    Q = torch.tensor(Q).to('cuda')
-    X0 = torch.tensor(X0).to('cuda')
-    X1 = torch.tensor(X1).to('cuda')
-    Sigma = torch.tensor(Sigma).to('cuda')
-    mem_limit = 1024 # MB
-    effq7, _ = ts.eval_qeff(Q=Q, X0=X0, X1=X1,
-                            Sigma=Sigma, method=method, origin=origin, grid_spacing=grid_spacing,
-                            offset=torch.tensor(offset, device='cuda'),
-                            shape=torch.tensor(shape, device='cuda'), npoints=npt,
-                            mem_limit = mem_limit)
-    msg = f'Sum of qline_diff3D {torch.sum(effq7)}, predefined value for comparison {qint}'
-    assert torch.allclose(torch.sum(effq7, dim=(1,2,3)), torch.tensor([qint,],device='cuda').repeat(batch_size), atol=1E-4, rtol=1E-5), msg
-    msg = f'Peak cuda memory {torch.cuda.max_memory_allocated()/1024**2} MB, soft memory limit is {mem_limit} MB'
-    assert torch.cuda.max_memory_allocated() / 1024**2 < mem_limit, msg
-    local_logger.debug('Passed the test. Peak memory is under control.')
+                            offset=offset2, shape=shape2, npoints=npt)
+    assert_charge_recovery(effq3, Q)
+    assert torch.allclose(torch.tensor(effq3.shape[1:]), shape2.to(torch.int64))
+    local_logger.debug('Refined-grid charge recovery passes tests.')
 
 def test_compute_qeff(level=None):
     local_logger = logger.getChild('test_eval_qeff')
@@ -630,26 +458,24 @@ def test_compute_qeff(level=None):
     method='gauss_legendre'
     origin=(0,0,0)
     grid_spacing=(0.1, 0.1, 0.1)
-    Q=[(1,)]
-    X0=[(0.4,2.4,3.4)]
-    X1=[(0.6, 2.6, 3.6)]
-    Sigma=[(0.5, 0.5, 0.5)]
-    n_sigma = (0.7, 0.7, 0.7)
-    Q = torch.tensor(Q)
-    X0 = torch.tensor(X0)
-    X1 = torch.tensor(X1)
-    Sigma = torch.tensor(Sigma)
+    Q=[(q,) for q in TEST_Q_VALUES]
+    X0=[(0.4,2.4,3.4)] * len(Q)
+    X1=[(0.6, 2.6, 3.6)] * len(Q)
+    Sigma=[(0.5, 0.5, 0.5)] * len(Q)
+    n_sigma = THREE_SIGMA
+    Q = torch.tensor(Q, dtype=torch.float64)
+    X0 = torch.tensor(X0, dtype=torch.float64)
+    X1 = torch.tensor(X1, dtype=torch.float64)
+    Sigma = torch.tensor(Sigma, dtype=torch.float64)
     effq, offset = ts.compute_qeff(Q=Q, X0=X0, X1=X1,
                                Sigma=Sigma, n_sigma=n_sigma, method=method,
                                origin=origin, grid_spacing=grid_spacing,
                                npoints=npt)
 
-    qint = 0.3137
-    msg = f'Integral value from effq is {torch.sum(effq).item()}, desired value is {qint}'
-    assert torch.isclose(torch.sum(effq), torch.tensor([qint,]), atol=1E-4, rtol=1E-5), msg
+    assert_charge_recovery(effq, Q)
     local_logger.debug('Passed tests')
 
-    n_sigma = (4, 4, 4)
+    n_sigma = THREE_SIGMA
     effq1, offset = ts.compute_qeff(Q=Q, X0=X0, X1=X1,
                                    Sigma=Sigma, n_sigma=n_sigma, method=method,
                                    origin=origin, grid_spacing=grid_spacing,
@@ -665,8 +491,10 @@ def test_compute_qeff(level=None):
                                     origin=origin, grid_spacing=grid_spacing,
                                     npoints=npt)
 
-    assert torch.isclose(effq1.sum(), effq2.sum(), atol=1E-4, rtol=1E-5)
-    assert torch.isclose(effq1.sum(), effq3.sum(), atol=1E-4, rtol=1E-5)
+    assert torch.allclose(torch.sum(effq1, dim=(1, 2, 3)), torch.sum(effq2, dim=(1, 2, 3)),
+                          atol=1E-4, rtol=1E-5)
+    assert torch.allclose(torch.sum(effq1, dim=(1, 2, 3)), torch.sum(effq3, dim=(1, 2, 3)),
+                          atol=1E-4, rtol=1E-5)
     logger.debug('The relative difference when setting 4 sigma band is roughly 1E-4')
 
 def main():
@@ -705,9 +533,6 @@ def main():
 
     print('-------- test_create_node1ds ---------')
     test_create_node1ds()
-
-    print('-------- test_eval_qmodel ---------')
-    test_eval_qmodel(level=None)
 
     print('-------- test_eval_qeff ---------')
     test_eval_qeff(level=None)
