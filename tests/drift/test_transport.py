@@ -56,7 +56,3 @@ def test_transport():
     velocity = torch.tensor(2.0)  # Scalar as tensor
     expected = torch.tensor([2.0, 1.5, 1.0])
     assert torch.allclose(transport(locs, target, velocity), expected), "Test 7 failed"
-
-    print("All tests passed!")
-
-test_transport()

@@ -1,11 +1,92 @@
 * Tests for =tred=
 ** General
+This directory contains both assertion-driven unit tests and a smaller number of
+visualization-oriented helpers used for manual inspection during raster and
+drift debugging.
+
 Tests are spread in three parts.
 - plots
 - tests
 - tests/functionalities
+
+Top-level layout relevant to raster and drift:
+- =tests/effq/= :: Focused backend-facing coverage for:
+  - =src/tred/raster/steps.py=
+  - =src/tred/raster/depos.py=
+  - the =Raster= graph wrapper in =src/tred/graph.py=
+- =tests/raster/= :: Raster integration and visualization-oriented smoke checks.
+- =tests/drift/= :: Drifter behavior, including plotting helpers used for
+  debugging drift geometry and transport behavior.
+
+Additional notes:
+- =tests/effq/= is the most direct backend-facing test area for rasterization.
+- =tests/raster/test_raster_graph.py= remains primarily a manual-inspection
+  smoke test. It is useful for visual checks, but it does not yet assert the
+  detailed numerical behavior expected from a strong unit test.
+- Plot-producing helpers under =tests/raster/= and =tests/drift/= are still
+  being organized into a more standard inspection workflow. At present they are
+  best treated as diagnostic tools rather than baseline image-regression tests.
+
+For more detailed backend-specific notes, see:
+- =tests/effq/README.md=
+- =tests/raster/README.md=
+- =tests/drift/README.md=
 ** Drift
+The drift tests treat =src/tred/drift.py= as the reference
+implementation and check =src/tred/graph.py:Drifter= as a wrapper that
+adds module state and step endpoint reordering.
+
+Recommended command:
+: PYTHONPATH=src pytest -q tests/drift
+
+Main unit-test files:
+- =tests/drift/test_transport.py= :: Unit checks for
+  ~tred.drift.transport~. Covers signed drift time, zero target
+  distance, fractional values, broadcasting, and zero-velocity
+  behavior.
+- =tests/drift/test_diffuse.py= :: Unit checks for
+  ~tred.drift.diffuse~. Covers scalar/vector diffusion coefficients,
+  optional input sigma, negative drift time handling, and shape
+  validation.
+- =tests/drift/test_absorb.py= :: Unit checks for
+  ~tred.drift.absorb~. Covers deterministic attenuation, stochastic
+  fluctuation, negative drift time behavior, output ranges, and sample
+  mean consistency with the expected exponential survival.
+- =tests/drift/test_drift.py= :: Integration-style unit checks for
+  ~tred.drift.drift~. Covers input validation, location updates,
+  returned tensor shapes, default charge, diffusion width, charge
+  attenuation, and the time corrections from =tshift= and =drtoa=.
+- =tests/drift/test_drifter.py= :: Unit checks for
+  ~tred.graph.Drifter~. Covers constructor validation, point-like
+  drifting, step drifting with reordered tail/head endpoints, negative
+  velocity, fluctuation passthrough, =vaxis= validation, and the
+  =tshift=/=drtoa= forwarding behavior.
+
+Support scripts in the same directory:
+- =tests/drift/test_drifter.py= also contains plotting helpers under
+  =__main__=. These are for visual inspection and are not required for
+  normal pytest execution.
+- =tests/drift/benchmark_drift.py= is a benchmark script for timing and
+  approximate memory studies of =Drifter=. It is not a correctness
+  test.
+
+Current status of the drift tests:
+- The stale import-time execution in some test scripts has been
+  removed, so pytest collection now behaves normally.
+- CUDA cases in =test_drifter.py= are skipped when CUDA is not
+  available instead of failing on CPU-only builds.
+- The interference checks for =tshift= and =drtoa= now compare against
+  the no-shift/no-=drtoa= outputs instead of comparing a tensor to
+  itself.
+- The =Drifter= documentation now matches the desired behavior of
+  =_order_step_endpoints_for_drift_time()=: it imposes a deterministic
+  tail/head ordering based on drift direction, not a "closest to
+  anode" convention.
+
 ** Rasterization
+See =tests/effq/README.md= for the detailed raster backend review and the
+current status of the effq-facing tests.
+
 ** Convolution
 *** Loading the response
 Two functions in ~tests/convo/test_response.py~.

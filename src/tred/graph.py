@@ -49,7 +49,8 @@ def raster_steps(*args,**kwds):
                         Sigma=args[3], Q=args[4],
                         n_sigma=(kwds['nsigma'], kwds['nsigma'], kwds['nsigma']),
                         origin=(0,0,0), method='gauss_legendre',
-                        npoints=kwds.get('npoints', (2, 2, 2)))
+                        npoints=kwds.get('npoints', (2, 2, 2)),
+                        dtype=kwds.get('dtype', torch.float64))
 
 def param(thing, dtype=torch.float32):
     if isinstance(thing, torch.Tensor):
@@ -119,22 +120,26 @@ class Drifter(nn.Module):
                   of (npt,), the position of start point of each step.
 
         Note: the meaning of tail and head are swappable when they are given together.
-              The method internally redefines the tail to be closet point to anode
-              and the head to be farthest point to anode. It is worth noting the
-              swap does not affect the input but gives the definition of dtail,
-              dhead at the output.
+              The method internally reorders the two endpoints according to the
+              drift direction before evaluating drift time, diffusion, and charge
+              loss. The reordered ``tail`` is the endpoint used to define the
+              returned ``dtime``. For positive velocity it is the endpoint with
+              the smaller coordinate along ``vaxis``; for negative velocity it is
+              the endpoint with the larger coordinate along ``vaxis``. This swap
+              does not modify the input tensors in place, but it does define the
+              meaning of ``dtail`` and ``dhead`` at the output.
 
         Returns tuple one larger than input args with sigma prepended.
 
         dsigma :: post-drift diffusion width at target plane.
         dtime :: post-drift time is the time for tail. Shifts may be applied.
         dcharge :: post-drift charge at target plane.
-        dtail :: post-drift positions of depo or point closest to anode of each step.
-        dhead :: post-drift positions of depo, or point farthest to anode of each step.
+        dtail :: post-drift positions of depo or the reordered tail endpoint of each step.
+        dhead :: post-drift positions of depo, or the reordered head endpoint of each step.
         '''
 
         if head is not None:
-            tail, head = Drifter._ensure_tail_closer_to_anode(tail, head,
+            tail, head = Drifter._order_step_endpoints_for_drift_time(tail, head,
                                                      self.velocity, self.vaxis)
         # note, can in principle, drift with pare-existing sigmas.  But here we
         # assume point-like.
@@ -152,22 +157,26 @@ class Drifter(nn.Module):
 
 
     @staticmethod
-    def _ensure_tail_closer_to_anode(tail, head, velocity, vaxis):
+    def _order_step_endpoints_for_drift_time(tail, head, velocity, vaxis):
         """
-        Ensures that the `tail` position is always closer to the anode than the `head`.
+        Reorder step endpoints into the convention used to compute drift time.
 
         This function reorders the `tail` and `head` tensors based on their positions along a specified axis (`vaxis`).
             The reordering is determined by the sign of `velocity`:
-            - If `velocity > 0`, the function ensures `tail[:, vaxis] > head[:, vaxis]`, swapping elements where necessary.
-            - If `velocity < 0`, it ensures `tail[:, vaxis] < head[:, vaxis]`.
+            - If `velocity > 0`, the function ensures `tail[:, vaxis] <= head[:, vaxis]`, swapping elements where necessary.
+            - If `velocity < 0`, it ensures `tail[:, vaxis] >= head[:, vaxis]`.
+
+        This convention makes ``tail`` the endpoint used to define the step
+        drift time in ``Drifter.forward()``. It is an ordering convention based
+        on drift direction, not a direct comparison to the anode target value.
 
         The swap operation is performed in-place for efficiency.
 
         Parameters:
             - tail (torch.Tensor): Tensor representing tail positions, either 1D (`(npt,)`) or 2D (`(npt, vdim)`).
             - head (torch.Tensor): Tensor representing head positions, either 1D (`(npt,)`) or 2D (`(npt, vdim)`).
-            - velocity (float): Determines the direction of drift. Positive values prioritize larger `tail[:, vaxis]`,
-                            while negative values prioritize smaller ones.
+            - velocity (float): Determines the direction of drift. Positive values prioritize smaller `tail[:, vaxis]`,
+                            while negative values prioritize larger ones.
             - vaxis (int): The index of the axis along which the positions are compared.
 
         Returns:
@@ -186,6 +195,7 @@ class Drifter(nn.Module):
             )
 
         tail_new, head_new = tail.clone().detach(), head.clone().detach()
+        vaxis = int(vaxis)
 
         # Handle 1D input by temporarily adding an extra dimension
         squeeze = tail.dim() == 1
@@ -194,10 +204,10 @@ class Drifter(nn.Module):
 
         if vaxis >= tail_new.size(1):
             raise ValueError(
-                f'Allow vaxis is only up to {tail.size(1)}.'
+                f'allowed vaxis is only up to {tail_new.size(1) - 1}.'
             )
 
-        # Identify indices where swapping is needed
+        # Order the step endpoints deterministically based on drift direction.
         mask = (tail_new[:, vaxis] > head_new[:, vaxis]) if velocity > 0 else (tail_new[:, vaxis] < head_new[:, vaxis])
         swap_idx = torch.nonzero(mask, as_tuple=True)[0]
 
@@ -215,7 +225,8 @@ class Raster(nn.Module):
     '''
     Raster depos or steps.
     '''
-    def __init__(self, velocity, grid_spacing, pdims=(1,2), tdim=-1, nsigma=3.0, npoints=(2,2,2)):
+    def __init__(self, velocity, grid_spacing, pdims=(1,2), tdim=-1,
+                 nsigma=3.0, npoints=(2,2,2), dtype=torch.float64):
         '''
         - velocity :: signed velocity for computing time difference between tail and head
         - pdims :: the N-1 dimensions for transverse pitch indexing into input points.
@@ -223,6 +234,7 @@ class Raster(nn.Module):
         - tdim :: the 1 dimension for time/drift.
                   This is the target axis of the new tensor to be processed.
         - grid_spacing :: 1D tensor or tuple/list. Spacing of grid is in the transformed coordinate.
+        - dtype :: floating-point compute dtype used by rasterization, default float64.
         '''
         super().__init__()
 
@@ -230,20 +242,28 @@ class Raster(nn.Module):
             raise ValueError('a velocity value is required (units [distance]/[time])')
         if grid_spacing is None:
             raise ValueError('a real-valued grid spacing N-tensor is required (units [distance])')
+        if not torch.empty((), dtype=dtype).is_floating_point():
+            raise ValueError('Raster dtype must be a floating-point torch.dtype')
 
-        constant(self, 'velocity', velocity)
-        constant(self, 'grid_spacing', grid_spacing)
-        constant(self, 'nsigma', nsigma)
+        constant(self, 'velocity', velocity, dtype)
+        constant(self, 'grid_spacing', grid_spacing, dtype)
+        constant(self, 'nsigma', nsigma, dtype)
         self._npoints = npoints
+        self._dtype = dtype
 
         self._pdims = pdims or ()
         self._tdim = tdim if tdim>=0 else len(self._pdims) + 1 + tdim
 
-    def _time_diff(self, tail, head=None):
+    def _head_time_offset_from_tail(self, tail, head=None):
         """
-        Always return (head - tail)/v if head is not None.
+        Return the time offset to add to tail time to get head time.
 
-        taild and head are in a shape of (npt, vdim) or (npt,).
+        ``Raster.forward()`` receives ``time`` as the already-computed tail
+        time. For step rasterization, the head time is:
+
+        ``head_time = tail_time + (tail - head)/velocity``
+
+        tail and head are in a shape of (npt, vdim) or (npt,).
         """
         if head is None:
             return None
@@ -292,21 +312,34 @@ class Raster(nn.Module):
         coordinates. Later, the drift-direction component is
         transformed in terms of time.
 
+        The input time is the tail time. If head is given, the head time is
+        derived as ``time + (tail - head)/velocity`` along the drift dimension.
+
         If head is None then tail is a depo point.  Otherwise the two make a step.
         '''
-        dt = self._time_diff(tail, head)
+        sigma = sigma.to(dtype=self._dtype)
+        time = time.to(dtype=self._dtype)
+        charge = charge.to(dtype=self._dtype)
+        tail = tail.to(dtype=self._dtype)
+        if head is not None:
+            head = head.to(dtype=self._dtype)
+
+        dt = self._head_time_offset_from_tail(tail, head)
 
         tail = self._transform(tail, time)
+        sigma = self._transform(sigma, None)
+        sigma[:, self._tdim] = sigma[:, self._tdim] / torch.abs(self.velocity) # distance to time
 
         debug(f'grid:{tenstr(self.grid_spacing)} tail:{tenstr(tail)} sigma:{tenstr(sigma)} charge:{tenstr(charge)}')
         if head is None:        # depos, not steps
-            rasters, offsets = raster_depos(self.grid_spacing, tail, sigma, charge, nsigma=self.nsigma)
+            rasters, offsets = raster_depos(self.grid_spacing, tail, sigma, charge,
+                                            nsigma=self.nsigma, dtype=self._dtype)
             return Block(location = offsets, data=rasters)
 
         head = self._transform(head, dt+time)
-        sigma = self._transform(sigma, None)
-        sigma[:, self._tdim] = sigma[:, self._tdim] / torch.abs(self.velocity) # distance to time
-        rasters, offsets = raster_steps(self.grid_spacing, tail, head, sigma, charge, nsigma=self.nsigma, npoints=self._npoints)
+        rasters, offsets = raster_steps(self.grid_spacing, tail, head, sigma, charge,
+                                        nsigma=self.nsigma, npoints=self._npoints,
+                                        dtype=self._dtype)
 
         return Block(location = offsets, data=rasters)
 
