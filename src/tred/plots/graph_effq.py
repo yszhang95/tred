@@ -196,8 +196,8 @@ def runit(device='cpu'):
     export_pickle = False
 
     # eventually replace this hard-wire with configuration
-    # twindow_max = 12_000 # 12_000 * 50ns = 600us
-    twindow_max = 7_200 # 12_000 * 50ns = 600us
+    twindow_max = 12_000 # 12_000 * 50ns = 600us
+    # twindow_max = 7_200 # 12_000 * 50ns = 600us
     DL = 6.6270 * units.cm2/units.s / (units.cm2/units.us) # value are in cm2/us
     DT = 13.2427 * units.cm2/units.s / (units.cm2/units.us) # value are in cm2/us
     diffusion = torch.tensor([DL, DT, DT])
@@ -545,17 +545,17 @@ def runit(device='cpu'):
                 # qbd = qbd_fg.sum(dim=(1,2,3))
                 # qbd = torch.cat([qblf32, qbd[:,None]], dim=1)
 
-                # hitl = hits[0].cpu()
-                # # FIXME: :,:3 is hard-coded
-                # hoff = torch.tensor([1/2, 1/2, adc_hold_delay-global_tref[1]//tspace]).to(torch.float32)
-                # hitlf32 = transform_indices_to_coord_3d(hitl[:,:3], pitch, tspace, velocity,
-                #                                         tpc_lower_left.to(torch.float32), tpcdataset.anode, tpcdataset.drift,
-                #                                         paxes=(0,1), taxis=-1, offset=hoff)
-                # hitlf32 = hitlf32[:, [2,0,1]]
-                # hitd = torch.cat([hitlf32, hits[1][:,None].cpu()], dim=1)
+                hitl = hits[0].cpu()
+                # FIXME: :,:3 is hard-coded
+                hoff = torch.tensor([1/2, 1/2, adc_hold_delay-global_tref[1]//tspace]).to(torch.float32)
+                hitlf32 = transform_indices_to_coord_3d(hitl[:,:3], pitch, tspace, velocity,
+                                                        tpc_lower_left.to(torch.float32), tpcdataset.anode, tpcdataset.drift,
+                                                        paxes=(0,1), taxis=-1, offset=hoff)
+                hitlf32 = hitlf32[:, [2,0,1]]
+                hitd = torch.cat([hitlf32, hits[1][:,None].cpu()], dim=1)
 
-                # waveforms[f'hits_tpc{tpcdataset.tpc_id}_batch{ibatch}'] = hitd.numpy()
-                # waveforms[f'hits_tpc{tpcdataset.tpc_id}_batch{ibatch}_location'] = hitl.numpy()
+                waveforms[f'hits_tpc{tpcdataset.tpc_id}_batch{ibatch}'] = hitd.numpy()
+                waveforms[f'hits_tpc{tpcdataset.tpc_id}_batch{ibatch}_location'] = hitl.numpy()
                 # waveforms[f'effq_tpc{tpcdataset.tpc_id}_batch{ibatch}'] = qbd
                 # waveforms[f'effq_tpc{tpcdataset.tpc_id}_batch{ibatch}_location'] = qbl
                 # waveforms[f'effq_fine_grain_tpc{tpcdataset.tpc_id}_batch{ibatch}'] = qbd_fg
@@ -586,7 +586,7 @@ def runit(device='cpu'):
     # waveforms["one_tick"] = one_tick
     # waveforms[f'time_spacing'] = tspace
 
-    # write_npz(output_path, **waveforms)
+    write_npz(output_path, **waveforms)
 
     info(f'{t1-t0} construct')
     info(f'{t2-t1} get response')
