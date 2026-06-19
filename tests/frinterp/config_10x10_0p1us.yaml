@@ -1,0 +1,16 @@
+response_path: "response_fr_4p4pitch_3.8pix_nogrid_10pathsperpixel_0.1us_25x25pixel_975tick_meanpool_tred.npz"
+module_yaml: "/home/yousen/Documents/NDLAr2x2/tred/tests/nd_geometry/ndlar-module.yaml"
+tile_yaml: "/home/yousen/Documents/NDLAr2x2/tred/tests/nd_geometry/multi_tile_layout-3.0.40.yaml"
+lifetime: 2.2 # ms
+threshold: 5. # ke
+event_list: [1003,]
+  # uncorr_noise: null #ke
+  # reset_noise: null #ke
+  # thres_noise: null #ke
+uncorr_noise: 0.5 #ke
+reset_noise: 0.9 #ke
+thres_noise: 0.65 #ke
+save_waveform: false
+fluctuate: false
+convo_o_shape: [4, 4, 2048]
+effq_out_nt: 1000
