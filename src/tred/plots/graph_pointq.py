@@ -783,4 +783,4 @@ def fullsim(config, finpath, foutpath):
         output_path = foutpath
 
     with torch.no_grad():
-        runit('cuda')
+        runit('cpu')
