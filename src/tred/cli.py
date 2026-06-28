@@ -85,6 +85,6 @@ def fullsim(ctx, infile, outfile):
     '''
     This command does not exist.
     '''
-    from .plots.graph_effq import fullsim as tred_fullsim
+    from .plots.graph_pointq import fullsim as tred_fullsim
     tred_fullsim(ctx.obj.get("config"), infile, outfile)
 

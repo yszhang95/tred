@@ -5,12 +5,7 @@ from tred.blocking import Block, concat_blocks, iter_chunk_block
 from tred import units
 from .response import get_ndlarsim
 from tred.util import debug, info, tenstr, warning, iter_tensor_chunks
-from tred.loaders import StepLoader, steps_from_ndh5
-from tred.io_nd import (
-    nd_collate_fn, create_tpc_datasets_from_steps,
-    LazyLabelBatchSampler, EagerLabelBatchSampler, SortedLabelBatchSampler, CustomNDLoader, simple_geo_parser
-)
-from tred.recombination import birks, box
+from tred.io_nd import simple_geo_parser, tpc_drift_direction
 from tred.io import write_npz
 from tred import chunking
 from tred.readout import nd_readout
@@ -20,6 +15,7 @@ import h5py
 import numpy as np
 import yaml
 from collections import defaultdict
+from types import SimpleNamespace
 import torch
 import time
 import os
@@ -41,6 +37,11 @@ save_waveform = None
 const_recomb = None
 
 npoints = None
+
+# point-charge generation
+point_charge = None  # ke- per iteration
+niter = None         # number of iterations to simulate and save
+tpc_id = None        # which TPC to drop the point charge into
 
 uncorr_noise = None
 reset_noise = None
@@ -157,17 +158,18 @@ def concatenate_waveforms(sparse_currents, Nt, event_t=0):
 
 def make_nd(device='cpu'):
     '''
-    This mocks up some file of depo sets.
+    Build per-TPC geometry (no input file needed). Each entry exposes the same
+    attributes used downstream as a TPCDataset: tpc_id, drift, anode, cathode,
+    lower_left_corner, upper_corner.
     '''
-
     borders = simple_geo_parser(module_yaml, tile_yaml, old_geo_config)
-    d0 = StepLoader(h5py.File(input_path), transform=steps_from_ndh5)
-    f0, f1, i0 = d0[:]
-    return (f0, f1, i0), i0, borders
-
-
-def segment_to_tpc(features, labels, borders):
-    tpcs = create_tpc_datasets_from_steps(features, labels, borders, sort_index=0)
+    anodes, cathodes, drifts, lowers, uppers = tpc_drift_direction(borders)
+    tpcs = []
+    for i in range(len(anodes)):
+        tpcs.append(SimpleNamespace(
+            tpc_id=i, drift=int(drifts[i]),
+            anode=anodes[i], cathode=cathodes[i],
+            lower_left_corner=lowers[i], upper_corner=uppers[i]))
     return tpcs
 
 
@@ -228,7 +230,9 @@ def runit(device='cpu'):
     chunksum_effq_out = ChunkSum(cshape_effq_out) # 1 pixel, 1 pixel, 60*0.05us*1.6cm/us=4.8mm
 
     chunksum_readout = ChunkSum((1,1,120))
-    convo = LacedConvo(lacing, o_shape=(8, 8, 512*4))
+    # de-laced signal (4,4,32) and de-laced response (9,9,*): c_shape = (12,12,*);
+    # time padded to 4096 (>= c_shape, multiple of chunksum_i time chunk 32).
+    convo = LacedConvo(lacing, o_shape=(4+9-1, 4+9-1, 4096))
     # FIXME: (4, 4, 32) is a common divider of chunk_shape and convo_o_shape
     chunksum_i = ChunkSum((4, 4, 32), method='chunksum_inplace_v2')
 
@@ -245,13 +249,16 @@ def runit(device='cpu'):
 
     t2 = time.time()
 
-    tpcs = segment_to_tpc(*make_nd('cpu'))
+    tpcs = make_nd('cpu')
 
     t3 = time.time()
 
     runtime = defaultdict(list)
 
     waveforms = {}
+    all_hits = []   # rows: [iter, pix_y, pix_z, time_tick, x, y, z, charge_ke]
+    all_effq = []   # rows: [iter, pix_y, pix_z, total_effq_ke]  (per-pixel true charge, summed over time)
+    truth = []      # rows: [iter, x, y, z, charge_dep_ke, charge_quench_ke]
 
     # Start recording memory snapshot history, initialized with a buffer
     # capacity of 100,000 memory events, via the `max_entries` field.
@@ -267,14 +274,13 @@ def runit(device='cpu'):
     info('Batch scheme: ' + str(batch_scheme))
 
     for itpc, tpcdataset in enumerate(tpcs):
+        if tpcdataset.tpc_id != tpc_id:
+            continue
         info(f"Drift direction: {tpcdataset.drift} in tpcid {tpcdataset.tpc_id}.")
         info(f"TPC lower corner: {tpcdataset.lower_left_corner} in itpc {tpcdataset.tpc_id}.")
         info(f"TPC upper corner: {tpcdataset.upper_corner} in itpc {tpcdataset.tpc_id}.")
         info(f"TPC anode: {tpcdataset.anode} in itpc {tpcdataset.tpc_id}.")
         info(f"TPC cathode: {tpcdataset.cathode} in itpc {tpcdataset.tpc_id}.")
-        sampler = SortedLabelBatchSampler(tpcdataset.labels[:,0], batch_size)
-        loader = CustomNDLoader(tpcdataset, sampler=sampler,
-                                batch_size=None, collate_fn=nd_collate_fn)
         drifter = Drifter(diffusion, lifetime, tpcdataset.drift*velocity, fluctuate=fluctuate,
                           target=tpcdataset.anode, drtoa=drtoa)
         drifter = drifter.to(device=device)
@@ -296,52 +302,58 @@ def runit(device='cpu'):
         inds_range = (tpcdataset.upper_corner - tpcdataset.lower_left_corner) // pitch
         inds_range = inds_range.to(torch.int32).to(device)
 
-        for ibatch, (features, labels) in enumerate(loader):
+        # TPC center, absolute coords (cm): x fixed at drift center, y/z transverse
+        xc = float((tpcdataset.anode + tpcdataset.cathode) / 2)
+        yc = float((tpcdataset.lower_left_corner[0] + tpcdataset.upper_corner[0]) / 2)
+        zc = float((tpcdataset.lower_left_corner[1] + tpcdataset.upper_corner[1]) / 2)
+
+        for ibatch in range(niter):
 
             stime = time.time()
             peak_mem = 0
             op_w_max_mem = 'NoOp'
             try:
-                if isinstance(event_list, list) and len(event_list)>0 and int(labels[0,0].numpy()) not in event_list:
-                    continue
-
-                global_tref = [features[0][0,-2].numpy(), torch.min(features[0][:,-1]).numpy()] # assume it is in us
-                waveforms[f'global_tref_tpc{tpcdataset.tpc_id}_batch{ibatch}'] = np.array(global_tref)
-                waveforms[f'event_id_tpc{tpcdataset.tpc_id}_batch{ibatch}'] = labels[0,0].numpy()
-                # assume there is only one particle in the event
-                waveforms[f'event_start_tpc{tpcdataset.tpc_id}_batch{ibatch}'] = features[0][0,2:5].numpy()
-                waveforms[f'event_end_tpc{tpcdataset.tpc_id}_batch{ibatch}'] = features[0][-1,5:8].numpy()
+                # point charge created at t=0 -> global time reference is zero
+                global_tref = [0.0, 0.0]
 
                 # enable when benchmark each stage
                 if device == 'cuda' and benchmark_each_stage:
                     torch.cuda.synchronize()
                 t00 = time.time()
-                features = [f.to(device=device) for f in features]
 
                 if device == 'cuda' and benchmark_each_stage:
                     torch.cuda.synchronize()
                 t01 = time.time()
 
-                charge = birks(dE=features[0][:,0], dEdx=features[0][:,1],
-                          efield=efield, rho=rho, A3t=A3t, k3t=k3t, Wi=Wi)
+                # point charge at TPC center with transverse-only offset, uniform
+                # over one pixel pitch: [-pitch/2, +pitch/2)
+                dy = (torch.rand(1).item() - 0.5) * pitch
+                dz = (torch.rand(1).item() - 0.5) * pitch
+                xtrue, ytrue, ztrue = xc, yc + dy, zc + dz
+
+                charge = torch.tensor([point_charge * 1E3], dtype=torch.float32, device=device)  # ke- -> e-
+                local_time = torch.zeros(1, dtype=torch.float32, device=device)
+                tail = torch.tensor([[xtrue, ytrue, ztrue]], dtype=torch.float32, device=device)
+                head = tail.clone()  # zero-length step: head == tail
+                tail[:,[1,2]] -= tpc_lower_left
+                head[:,[1,2]] -= tpc_lower_left
 
                 if device == 'cuda' and benchmark_each_stage:
                     torch.cuda.synchronize()
                 t02 = time.time()
 
-                local_time = features[0][:,-1]
-                tail = features[0][:,2:5]
-                head = features[0][:,5:8]
-                tail[:,[1,2]] -= tpc_lower_left
-                head[:,[1,2]] -= tpc_lower_left
-
-                # dsigma, dtime, dcharge, dtail, dhead
+                # steps path: head is given so the point is rasterized with the
+                # Gauss-Legendre quadrature rule (npoints).
                 drifted = drifter(local_time, charge, tail, head)
-                # dsigma, dtime, dcharge, dtail, dhead = drifter(local_time, charge, tail, head)
                 drifted = list(d for d in drifted)
                 min_sigma = torch.tensor([[tspace*abs(velocity)/2,
                                            pitch/10/2, pitch/10/2]]).to(device)
                 drifted[0] = torch.clamp(drifted[0], min=min_sigma)
+
+                # truth: deposited charge and quenched charge surviving lifetime
+                # absorption at the anode (drifted[2] is post-absorption, in e-)
+                q_quench = float(drifted[2].sum().item()) / 1E3  # e- -> ke-
+                truth.append([ibatch, xtrue, ytrue, ztrue, float(point_charge), q_quench])
 
                 if device == 'cuda' and benchmark_each_stage:
                     torch.cuda.synchronize()
@@ -382,10 +394,11 @@ def runit(device='cpu'):
                     if record_op_w_max_mem:
                         peak_mem, op_w_max_mem = update_peak_memory_label('chunksum_raster', peak_mem, op_w_max_mem)
 
-                    # effqb = chunksum_effq_out(qblock)
-                    # effqb.location[:, 0:2] //= nimperpix
-                    # effqb.location[:, -1] += int(abs(drtoa/velocity)//tspace)
-                    # effq_blocks.append(effqb)
+                    # effective charge per pixel: sum rasterized (post-quench)
+                    # charge over each pixel footprint; index -> pixel units
+                    effqb = chunksum_effq_out(qblock)
+                    effqb.location[:, 0:2] //= nimperpix
+                    effq_blocks.append(effqb)
                     qblock = None
                     effqb = None
                     Nqblock += signal.nbatches
@@ -437,7 +450,20 @@ def runit(device='cpu'):
                     #     torch.cuda.synchronize()
                     # t05 = time.time()
 
-                # effq_blocks = concat_blocks(effq_blocks, device='cpu')
+                # per-pixel effective (true) charge: total over each pixel footprint and time
+                effq = concat_blocks(effq_blocks)
+                if effq is not None:
+                    q_chunk = effq.data.sum(dim=(1, 2, 3))            # electrons per chunk
+                    pix = effq.location[:, 0:2]                       # pixel index (y, z)
+                    upix, inv = torch.unique(pix, dim=0, return_inverse=True)
+                    q_pix = torch.zeros(upix.shape[0], device=q_chunk.device, dtype=q_chunk.dtype)
+                    q_pix.scatter_add_(0, inv, q_chunk)
+                    pmask = ((upix <= inds_range) & (upix >= 0)).all(dim=1)
+                    upix = upix[pmask].cpu().to(torch.float32)
+                    q_pix = (q_pix[pmask] / 1E3).cpu()               # e- -> ke-
+                    if upix.shape[0] > 0:
+                        itercol = torch.full((upix.shape[0], 1), float(ibatch))
+                        all_effq.append(torch.cat([itercol, upix, q_pix[:, None]], dim=1))
 
                 # no need to chunk again; just sum
                 if device == 'cuda' and benchmark_each_stage:
@@ -458,7 +484,6 @@ def runit(device='cpu'):
 
                 if currents is None:
                     info(f'itpc{itpc}, tpc label {tpcdataset.tpc_id}, batch label {ibatch}, '
-                         f'N segments {len(features[0])}, '
                          f'N qblock {Nqblock}, '
                          f'elapsed {t07 - stime} sec on {device}. Skipped empty batch.')
                     continue
@@ -524,9 +549,21 @@ def runit(device='cpu'):
                     info(f'Peak cuda usage: {cuda_mem} MB')
 
                 info(f'itpc{itpc}, tpc label {tpcdataset.tpc_id}, batch label {ibatch}, '
-                      f'N segments {len(features[0])}, '
                       f'N qblock {Nqblock}, '
                       f'elapsed {t07 - stime} sec on {device}.')
+
+                # save hits: raw pixel/time indices and transformed detector coords (cm)
+                hitl = hits[0].cpu()
+                if hitl.shape[0] > 0:
+                    hoff = torch.tensor([1/2, 1/2, adc_hold_delay-global_tref[1]//tspace]).to(torch.float32)
+                    hitlf32 = transform_indices_to_coord_3d(hitl[:,:3], pitch, tspace, velocity,
+                                                            tpc_lower_left.to(torch.float32), tpcdataset.anode, tpcdataset.drift,
+                                                            paxes=(0,1), taxis=-1, offset=hoff)
+                    hitlf32 = hitlf32[:, [2,0,1]]  # (x, y, z)
+                    itercol = torch.full((hitl.shape[0], 1), float(ibatch))
+                    pix = hitl[:, :3].to(torch.float32)  # [pix_y, pix_z, time_tick]
+                    qcol = hits[1][:,None].cpu().to(torch.float32)
+                    all_hits.append(torch.cat([itercol, pix, hitlf32, qcol], dim=1))
 
                 # if save_waveform and currents is not None:
                 #     waveforms[f'current_tpc{tpcdataset.tpc_id}_batch{ibatch}'] = currents.data.cpu().numpy()
@@ -584,9 +621,21 @@ def runit(device='cpu'):
     # waveforms["adc_down_time"] = adc_down_time
     # waveforms["csa_reset_time "] = csa_reset_time
     # waveforms["one_tick"] = one_tick
-    # waveforms[f'time_spacing'] = tspace
+    waveforms[f'time_spacing'] = tspace
 
-    # write_npz(output_path, **waveforms)
+    # concatenated hits ([iter, pix_y, pix_z, time_tick, x, y, z, charge_ke])
+    # and per-iteration truth
+    waveforms['hits'] = (torch.cat(all_hits, dim=0).numpy() if all_hits
+                         else np.zeros((0, 8), dtype=np.float32))
+    # per-pixel effective (true) charge, summed over time: [iter, pix_y, pix_z, total_effq_ke]
+    waveforms['effq'] = (torch.cat(all_effq, dim=0).numpy() if all_effq
+                         else np.zeros((0, 4), dtype=np.float32))
+    waveforms['truth'] = np.array(truth, dtype=np.float32)  # [iter,x,y,z,charge_dep_ke,charge_quench_ke]
+    waveforms['point_charge'] = np.array(point_charge)
+    waveforms['niter'] = np.array(niter)
+    waveforms['tpc_id'] = np.array(tpc_id)
+
+    write_npz(output_path, **waveforms)
 
     info(f'{t1-t0} construct')
     info(f'{t2-t1} get response')
@@ -660,6 +709,10 @@ def fullsim(config, finpath, foutpath):
     global benchmark_each_stage
     global batch_scheme
 
+    global point_charge
+    global niter
+    global tpc_id
+
     with open(config, "r") as fconfig:
         config = yaml.safe_load(fconfig)
 
@@ -669,7 +722,7 @@ def fullsim(config, finpath, foutpath):
     drtoa = config.get("drtoa", 10.431) * units.cm / units.cm # values are in units of cm to cm
     tspace = config.get("tspace", 0.05) * units.us/ units.us # values are in units of us
     lifetime = config.get("lifetime", 2.0) * units.ms / units.us # values are from ms units of us
-    threshold = config.get("threshold", 5_000) # electrons # it can also be a path to threshold
+    threshold = config.get("threshold", 5.) # thousand electrons # it can also be a path to threshold
     event_list = config.get("event_list", None) # None means select all
     save_waveform = config.get("save_waveform", False)
     uncorr_noise = config.get("uncorr_noise", None)
@@ -684,6 +737,11 @@ def fullsim(config, finpath, foutpath):
     batch_scheme = config.get("batch_scheme", [100, 50])
     npoints = config.get('npoints', (2, 2, 2))
 
+    # point-charge generation
+    point_charge = config.get("point_charge", 100)  # ke- per iteration
+    niter = config.get("niter", 100)                    # iterations to simulate and save
+    tpc_id = config.get("tpc_id", 0)                    # which TPC to use
+
     # loading response
     if os.path.splitext(response_path)[1] == '.npz':
         fres = np.load(response_path)
@@ -692,7 +750,14 @@ def fullsim(config, finpath, foutpath):
         bin_size = fres["bin_size"] * units.cm / units.cm # cm
         warning(f'drtoa, tspace, will be overridden to {drtoa} cm, {tspace} us.')
         pspace = bin_size
-        nimperpix = int(fres['npath'])
+        # use npath from the file if present, else config, else derive from pitch/bin_size
+        if 'npath' in fres.files:
+            nimperpix = int(fres['npath'])
+        elif config.get('npath', None) is not None:
+            nimperpix = int(config['npath'])
+        else:
+            nimperpix = int(round(pitch / bin_size))
+            warning(f"response has no 'npath'; derived nimperpix={nimperpix} from pitch/bin_size.")
         pitch = pspace * nimperpix
         response = ndlarsim(fres['response'], nd_response_shape=fres['response'].shape[:2], nd_nimp=nimperpix)
     else:
