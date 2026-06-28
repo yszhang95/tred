@@ -1,0 +1,20 @@
+response_path: "/home/yousen/Public/ndlar_shared/data/responses/response_44_v2a_full.npz"
+module_yaml: "tests/playground/2x2_mod2mod_variation.yaml"
+tile_yaml: "tests/playground/multi_tile_layout-2.4.16.yaml"
+lifetime: 10000. # ms
+threshold: 5.0 # ke-
+old_geo_config: true
+
+# point-charge study
+point_charge: 8     # ke- per iteration
+niter: 10000        # iterations to simulate and save
+tpc_id: 0
+
+# noises off
+uncorr_noise: null
+reset_noise: null
+thres_noise: null
+fluctuate: false
+
+batch_scheme: [100, 50]
+npoints: [2, 2, 2]
