@@ -452,8 +452,8 @@ def runit(device='cpu'):
                 # if isinstance(threshold, str):
                 #     raise NotImplementedError("To add support for loading a threshold file.")
                 thres = thresholds[tpcdataset.tpc_id].to(device)
-                if thres.ndim > 0:
-                    thres[thres<2] = 1E16 # FIXME: Temporarily disable low threshold channels
+                # if thres.ndim > 0:
+                #     thres[thres<2] = 1E16 # FIXME: Temporarily disable low threshold channels
                 hits = nd_readout(currents, thres, adc_hold_delay, adc_down_time, csa_reset_time, one_tick=one_tick,
                                   offset_to_align=0, # FIXME: how to calculate properly?
                                   pixel_axes=(1,2), uncorr_noise=uncorr_noise, thres_noise=thres_noise, reset_noise=reset_noise)
