@@ -187,6 +187,7 @@ def transform_indices_to_coord_3d(location, pitch, tick, velocity,
 def runit(device='cpu'):
     '''
     '''
+    global response
     export_pickle = False
 
     # eventually replace this hard-wire with configuration
@@ -196,7 +197,12 @@ def runit(device='cpu'):
     diffusion = torch.tensor([DL, DT, DT])
     grid_spacing = (pspace, pspace, tspace)
     # npixpersuper = 16+1-9
-    npixpersuper = 12+1-9
+    # spatial sizes follow the response footprint: resp_npxl = 9 for the
+    # 45x45 quadrant (o_spatial 12, npixpersuper 4 — the old hardcodes),
+    # 25 for the 125x125 quadrant (o_spatial 28)
+    resp_npxl = response.shape[0] // nimperpix
+    o_spatial = 4 + resp_npxl - 1
+    npixpersuper = o_spatial + 1 - resp_npxl
     # ntickperslice = 6912+1-6400
     ntickperslice = 384 # 128*3
     chunk_shape = (npixpersuper * nimperpix, npixpersuper * nimperpix, ntickperslice)
@@ -224,7 +230,7 @@ def runit(device='cpu'):
 
     chunksum_readout = ChunkSum((1,1,120))
     # chunksum_readout = ChunkSum((1,1,12000))
-    convo = LacedConvo(lacing, o_shape=(12, 12, 6912))
+    convo = LacedConvo(lacing, o_shape=(o_spatial, o_spatial, 6912))
     # convo = LacedConvo(lacing, o_shape=(12, 12, 2048))
     chunksum_i = ChunkSum((4, 4, 128), method='chunksum_inplace_v2')
 
@@ -235,8 +241,7 @@ def runit(device='cpu'):
     t1 = time.time()
 
     # response = ndlarsim(response_path) # response is loaded in main function
-
-    global response
+    # (global response is declared at the top of runit)
     response = response.to(device=device)
 
     t2 = time.time()
