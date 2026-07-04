@@ -230,7 +230,12 @@ def runit(device='cpu'):
 
     chunksum_readout = ChunkSum((1,1,120))
     # chunksum_readout = ChunkSum((1,1,12000))
-    convo = LacedConvo(lacing, o_shape=(o_spatial, o_spatial, 6912))
+    # o_shape must be divisible by chunksum_i's cshape (4,4,128) — the
+    # inplace chunksum views the block as exact (m,c) factors — and each dim
+    # must be >= Ns+Nr-1.  Time: 384+response_nt-1; 4608=2^9*3^2 covers the
+    # 3900-tick responses (6912 was for the old 6400-tick files).
+    o_time = 6912 if response.shape[-1] > 4225 else 4608
+    convo = LacedConvo(lacing, o_shape=(o_spatial, o_spatial, o_time))
     # convo = LacedConvo(lacing, o_shape=(12, 12, 2048))
     chunksum_i = ChunkSum((4, 4, 128), method='chunksum_inplace_v2')
 
