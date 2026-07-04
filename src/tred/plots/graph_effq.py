@@ -633,7 +633,9 @@ def fullsim(config, finpath, foutpath):
     # loading response
     if os.path.splitext(response_path)[1] == '.npz':
         fres = np.load(response_path)
-        response = ndlarsim(fres['response'])
+        # take the quadrant shape from the file itself so wider-footprint
+        # responses (e.g. 125x125 = 25x25 pixels) load; (45,45) unchanged
+        response = ndlarsim(fres['response'], nd_response_shape=fres['response'].shape)
         tspace = fres['time_tick'].item()  * units.us / units.us # us
         drtoa = fres['drift_length'].item() * units.cm / units.cm # cm
         bin_size = fres["bin_size"].item() * units.cm / units.cm # cm
