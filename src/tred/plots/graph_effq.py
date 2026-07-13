@@ -56,6 +56,7 @@ velocity = 1.59645 * units.mm/units.us / (units.cm/units.us) # values are in uni
 
 adc_hold_delay = None
 periodic_reset_ticks = None  # LArPix rolling periodic reset, in 0.1-us readout ticks (None/0 = off)
+periodic_reset_sync = False  # True: synchronized rolling schedule (one global phase, 7x7 slot walk)
 adc_down_time = None
 csa_reset_time = None
 one_tick = None
@@ -469,7 +470,7 @@ def runit(device='cpu'):
                     hits = nd_readout_prc(currents, thres, adc_hold_delay, adc_down_time, csa_reset_time, one_tick=one_tick,
                                           offset_to_align=0,
                                           pixel_axes=(1,2), uncorr_noise=uncorr_noise, thres_noise=thres_noise, reset_noise=reset_noise,
-                                          prc_ticks=int(periodic_reset_ticks))
+                                          prc_ticks=int(periodic_reset_ticks), prc_sync=bool(periodic_reset_sync))
                 else:
                     hits = nd_readout(currents, thres, adc_hold_delay, adc_down_time, csa_reset_time, one_tick=one_tick,
                                       offset_to_align=0, # FIXME: how to calculate properly?
@@ -669,6 +670,8 @@ def fullsim(config, finpath, foutpath):
     adc_hold_delay = config.get("adc_hold_delay", 1.5) * units.us / units.us / (tspace * units.us / units.us)
     adc_hold_delay = int(round(adc_hold_delay))
     periodic_reset_ticks = config.get("periodic_reset_ticks", None)
+    global periodic_reset_sync
+    periodic_reset_sync = config.get("periodic_reset_sync", False)
     adc_down_time = config.get("adc_down_time", 1.2) * units.us / units.us / (tspace * units.us / units.us)
     adc_down_time = int(round(adc_down_time))
     csa_reset_time = config.get("csa_reset_time", 0.1) * units.us / units.us / (tspace * units.us / units.us)

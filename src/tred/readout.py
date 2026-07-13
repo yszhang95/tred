@@ -151,7 +151,8 @@ def nd_readout(block, threshold, adc_hold_delay, adc_down_time, csa_reset_time=1
 def nd_readout_prc(block, threshold, adc_hold_delay, adc_down_time, csa_reset_time=1, one_tick=1,
                    offset_to_align=0, pixel_axes=(), taxis=-1,
                    uncorr_noise=None, thres_noise=None, reset_noise=None, leftover=None, niter=10,
-                   prc_ticks=1024):
+                   prc_ticks=1024, prc_sync=False, prc_slot_ticks=16, prc_block_pix=7,
+                   prc_perm_seed=20260713):
     '''
     nd_readout + LArPix rolling periodic reset (2x2 Run 1: 1024 x 100 ns =
     102.4 us per channel; DUNE-doc-32080).  Implemented larnd-sim style
@@ -167,12 +168,43 @@ def nd_readout_prc(block, threshold, adc_hold_delay, adc_down_time, csa_reset_ti
     prc_ticks * one_tick.
     '''
     X = block.data
-    Xp = apply_periodic_reset(X, int(prc_ticks * one_tick))
+    P = int(prc_ticks * one_tick)
+    phase = None
+    if prc_sync:
+        phase = sync_prc_phase(block.location, P, one_tick, X.shape[:-1],
+                               slot_ticks=prc_slot_ticks, block_pix=prc_block_pix,
+                               perm_seed=prc_perm_seed, device=X.device)
+    Xp = apply_periodic_reset(X, P, phase=phase)
     from tred.blocking import Block as _Block
     newblock = _Block(location=block.location, data=Xp)
     return nd_readout(newblock, threshold, adc_hold_delay, adc_down_time, csa_reset_time,
                       one_tick, offset_to_align, pixel_axes, taxis,
                       uncorr_noise, thres_noise, reset_noise, leftover, niter)
+
+
+def sync_prc_phase(location, P, one_tick, phase_shape, slot_ticks=16, block_pix=7,
+                   perm_seed=20260713, device=None):
+    '''Synchronized rolling PRC phases (user-specified model): every chip is a
+    block_pix x block_pix pad block; the in-block pad index p = (iy%7)*7+iz%7
+    maps to a reset slot through ONE random-but-frozen permutation of the 64
+    slots (the real shift-register->pad routing order is unknown; perm_seed
+    freezes the guess).  All chips share the schedule: a single global phase
+    per readout call (uniform in [0, P), i.e. free-running clock vs event),
+    channel at slot s resets at global_phase + s*slot_ticks*one_tick + k*P in
+    GLOBAL event time; each pixel waveform is anchored at its own start
+    location[:, -1], so the local phase is the difference mod P.  Per-channel
+    marginals are identical to independent phases; only the within-event
+    joint structure changes.'''
+    gen = torch.Generator(device='cpu').manual_seed(perm_seed)
+    perm = torch.randperm(64, generator=gen)
+    iy = location[:, 0].to(torch.int64)
+    iz = location[:, 1].to(torch.int64)
+    tstart = location[:, -1].to(torch.int64)
+    pad = (iy % block_pix) * block_pix + iz % block_pix   # 0..48
+    slot = perm.to(location.device)[pad]
+    gphase = torch.randint(0, P, (1,), device=location.device)
+    local = (gphase + slot * slot_ticks * one_tick - tstart) % P
+    return local.view(phase_shape).to(device if device is not None else location.device)
 
 
 def apply_periodic_reset(X, P, phase=None):
