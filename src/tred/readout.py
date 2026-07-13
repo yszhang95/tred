@@ -146,3 +146,54 @@ def nd_readout(block, threshold, adc_hold_delay, adc_down_time, csa_reset_time=1
             torch.zeros((0,), dtype=torch.float32, device=X.device)
         raise NotImplementedError("Not sure how to handle empty hit collection")
     return torch.cat(olocs, dim=0), torch.cat(ocharges, dim=0)
+
+
+def nd_readout_prc(block, threshold, adc_hold_delay, adc_down_time, csa_reset_time=1, one_tick=1,
+                   offset_to_align=0, pixel_axes=(), taxis=-1,
+                   uncorr_noise=None, thres_noise=None, reset_noise=None, leftover=None, niter=10,
+                   prc_ticks=1024):
+    '''
+    nd_readout + LArPix rolling periodic reset (2x2 Run 1: 1024 x 100 ns =
+    102.4 us per channel; DUNE-doc-32080).  Implemented larnd-sim style
+    (fee.py): per-channel INDEPENDENT random phase, unconditional reset that
+    wipes the accumulated sub-threshold charge; the ~100 ns dead slice maps
+    to one fine sample.  Realized as a pure pre-transform on the current
+    block — at each reset sample the charge accumulated since the previous
+    reset is subtracted — then the untouched nd_readout runs on the result.
+    Known approximation: a periodic reset composes with an EARLIER trigger
+    reset in the same waveform as an undershoot (channel needs extra charge
+    to retrigger afterwards); second-order for 2x2 occupancy.
+    prc_ticks is in readout ticks (0.1 us); period in fine samples is
+    prc_ticks * one_tick.
+    '''
+    X = block.data
+    Xp = apply_periodic_reset(X, int(prc_ticks * one_tick))
+    from tred.blocking import Block as _Block
+    newblock = _Block(location=block.location, data=Xp)
+    return nd_readout(newblock, threshold, adc_hold_delay, adc_down_time, csa_reset_time,
+                      one_tick, offset_to_align, pixel_axes, taxis,
+                      uncorr_noise, thres_noise, reset_noise, leftover, niter)
+
+
+def apply_periodic_reset(X, P, phase=None):
+    '''Subtract, at every reset sample r = phase + k*P (per channel), the
+    charge accumulated since the previous reset, so that cumsum(X')(t) =
+    cumsum(X)(t) - cumsum(X)(r_last(t)).  phase: optional tensor of shape
+    X.shape[:-1] (defaults to per-channel uniform random in [0, P)).'''
+    Nt = X.shape[-1]
+    if P <= 0 or P >= Nt:
+        return X
+    Xacc = X.cumsum(dim=-1)
+    if phase is None:
+        phase = torch.randint(0, P, X.shape[:-1], device=X.device)
+    prev = torch.zeros(X.shape[:-1], device=X.device, dtype=X.dtype)
+    Xp = X.clone()
+    for k in range(Nt // P + 2):
+        r = phase + k * P
+        valid = r < Nt
+        rv = r.clamp(max=Nt - 1)
+        cur = torch.gather(Xacc, -1, rv.unsqueeze(-1)).squeeze(-1)
+        delta = torch.where(valid, cur - prev, torch.zeros_like(prev))
+        Xp.scatter_add_(-1, rv.unsqueeze(-1), (-delta).unsqueeze(-1))
+        prev = torch.where(valid, cur, prev)
+    return Xp

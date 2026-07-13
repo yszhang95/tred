@@ -13,7 +13,7 @@ from tred.io_nd import (
 from tred.recombination import birks, box
 from tred.io import write_npz
 from tred import chunking
-from tred.readout import nd_readout
+from tred.readout import nd_readout, nd_readout_prc
 
 import sys
 import h5py
@@ -55,6 +55,7 @@ pspace = pitch/nimperpix
 velocity = 1.59645 * units.mm/units.us / (units.cm/units.us) # values are in units of cm/us
 
 adc_hold_delay = None
+periodic_reset_ticks = None  # LArPix rolling periodic reset, in 0.1-us readout ticks (None/0 = off)
 adc_down_time = None
 csa_reset_time = None
 one_tick = None
@@ -464,9 +465,15 @@ def runit(device='cpu'):
                 thres = thresholds[tpcdataset.tpc_id].to(device)
                 # if thres.ndim > 0:
                 #     thres[thres<2] = 1E16 # FIXME: Temporarily disable low threshold channels
-                hits = nd_readout(currents, thres, adc_hold_delay, adc_down_time, csa_reset_time, one_tick=one_tick,
-                                  offset_to_align=0, # FIXME: how to calculate properly?
-                                  pixel_axes=(1,2), uncorr_noise=uncorr_noise, thres_noise=thres_noise, reset_noise=reset_noise)
+                if periodic_reset_ticks:
+                    hits = nd_readout_prc(currents, thres, adc_hold_delay, adc_down_time, csa_reset_time, one_tick=one_tick,
+                                          offset_to_align=0,
+                                          pixel_axes=(1,2), uncorr_noise=uncorr_noise, thres_noise=thres_noise, reset_noise=reset_noise,
+                                          prc_ticks=int(periodic_reset_ticks))
+                else:
+                    hits = nd_readout(currents, thres, adc_hold_delay, adc_down_time, csa_reset_time, one_tick=one_tick,
+                                      offset_to_align=0, # FIXME: how to calculate properly?
+                                      pixel_axes=(1,2), uncorr_noise=uncorr_noise, thres_noise=thres_noise, reset_noise=reset_noise)
 
                 runtime['to_device'].append(t01-t00)
                 runtime['recomb'].append(t02-t01)
@@ -602,6 +609,7 @@ def fullsim(config, finpath, foutpath):
     global fluctuate
     global effq_out_nt
     global adc_hold_delay
+    global periodic_reset_ticks
     global adc_down_time
     global csa_reset_time
     global one_tick
@@ -660,6 +668,7 @@ def fullsim(config, finpath, foutpath):
 
     adc_hold_delay = config.get("adc_hold_delay", 1.5) * units.us / units.us / (tspace * units.us / units.us)
     adc_hold_delay = int(round(adc_hold_delay))
+    periodic_reset_ticks = config.get("periodic_reset_ticks", None)
     adc_down_time = config.get("adc_down_time", 1.2) * units.us / units.us / (tspace * units.us / units.us)
     adc_down_time = int(round(adc_down_time))
     csa_reset_time = config.get("csa_reset_time", 0.1) * units.us / units.us / (tspace * units.us / units.us)
