@@ -13,7 +13,7 @@ from tred.io_nd import (
 from tred.recombination import birks, box
 from tred.io import write_npz
 from tred import chunking
-from tred.readout import nd_readout, nd_readout_prc, nd_readout_ou
+from tred.readout import nd_readout, nd_readout_prc, nd_readout_ou, nd_readout_full
 
 import sys
 import h5py
@@ -58,6 +58,7 @@ adc_hold_delay = None
 periodic_reset_ticks = None  # LArPix rolling periodic reset, in 0.1-us readout ticks (None/0 = off)
 periodic_reset_sync = False  # True: synchronized rolling schedule (one global phase, 7x7 slot walk)
 ou_tau = None  # correlation time [us] for OU output noise (None = white noise, legacy)
+reset_model = False  # full 6.30 model: OU(uncorr) + per-reset constant offsets (reset_noise re-homed)
 adc_down_time = None
 csa_reset_time = None
 one_tick = None
@@ -467,7 +468,15 @@ def runit(device='cpu'):
                 thres = thresholds[tpcdataset.tpc_id].to(device)
                 # if thres.ndim > 0:
                 #     thres[thres<2] = 1E16 # FIXME: Temporarily disable low threshold channels
-                if ou_tau:
+                if reset_model:
+                    hits = nd_readout_full(currents, thres, adc_hold_delay, adc_down_time, csa_reset_time, one_tick=one_tick,
+                                           offset_to_align=0,
+                                           pixel_axes=(1,2), thres_noise=thres_noise,
+                                           ou_sigma=float(uncorr_noise or 0.5), ou_tau_ticks=float(ou_tau or 0.2)/0.1,
+                                           reset_offset_sigma=float(reset_noise or 0.9),
+                                           prc_ticks=int(periodic_reset_ticks) if periodic_reset_ticks else None,
+                                           prc_sync=bool(periodic_reset_sync))
+                elif ou_tau:
                     _sig = float(np.sqrt((uncorr_noise or 0.0)**2 + (reset_noise or 0.0)**2))
                     hits = nd_readout_ou(currents, thres, adc_hold_delay, adc_down_time, csa_reset_time, one_tick=one_tick,
                                          offset_to_align=0,
@@ -683,6 +692,8 @@ def fullsim(config, finpath, foutpath):
     periodic_reset_sync = config.get("periodic_reset_sync", False)
     global ou_tau
     ou_tau = config.get("ou_tau", None)
+    global reset_model
+    reset_model = config.get("reset_model", False)
     adc_down_time = config.get("adc_down_time", 1.2) * units.us / units.us / (tspace * units.us / units.us)
     adc_down_time = int(round(adc_down_time))
     csa_reset_time = config.get("csa_reset_time", 0.1) * units.us / units.us / (tspace * units.us / units.us)
