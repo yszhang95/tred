@@ -482,3 +482,40 @@ def nd_readout_full(block, threshold, adc_hold_delay, adc_down_time, csa_reset_t
     return nd_readout_rst(newblock, threshold, adc_hold_delay, adc_down_time, csa_reset_time,
                           one_tick, offset_to_align, pixel_axes, taxis,
                           None, thres_noise, reset_offset_sigma, leftover, niter)
+
+
+def nd_readout_qdep(block, threshold, adc_hold_delay, adc_down_time, csa_reset_time=1, one_tick=1,
+                    offset_to_align=0, pixel_axes=(), taxis=-1,
+                    thres_noise=None, leftover=None, niter=10,
+                    qdep_sigma_lo=0.3, qdep_sigma_hi=1.03, qdep_sref=10.0,
+                    prc_ticks=None, prc_sync=False, prc_slot_ticks=16, prc_block_pix=7,
+                    prc_perm_seed=20260713):
+    '''
+    MOCKUP (user test, 2026-07-14; deliberately non-physical): white per-tick
+    output noise whose amplitude scales with the SIGNAL-ONLY cumulative
+    charge:  sigma(t) = lo + (hi-lo)*min(1, S(t)/S_ref).  Small noise before
+    /at low charge (first hits, faint pixels), full noise once the pixel has
+    accumulated ~S_ref.  Pre-registered discriminators vs prcsync: faint
+    singles/low-totQ collapse; totN==1 low peak drops; MIP width kept;
+    soft second-hit hump UNCHANGED (retriggers sit at high S) — the
+    distinguishing signature vs OU.  thres_noise unchanged.  Wrapper: noise
+    added in current domain; nd_readout runs with internal noise disabled.
+    '''
+    X = block.data
+    if prc_ticks:
+        P = int(prc_ticks * one_tick)
+        phase = None
+        if prc_sync:
+            phase = sync_prc_phase(block.location, P, one_tick, X.shape[:-1],
+                                   slot_ticks=prc_slot_ticks, block_pix=prc_block_pix,
+                                   perm_seed=prc_perm_seed, device=X.device)
+        X = apply_periodic_reset(X, P, phase=phase)
+    S = X.cumsum(dim=-1).clamp(min=0.0)
+    sig = qdep_sigma_lo + (qdep_sigma_hi - qdep_sigma_lo) * (S / qdep_sref).clamp(max=1.0)
+    n = torch.randn_like(X) * sig
+    dn = torch.diff(n, dim=-1, prepend=torch.zeros_like(n[..., :1]))
+    from tred.blocking import Block as _Block
+    newblock = _Block(location=block.location, data=X + dn)
+    return nd_readout(newblock, threshold, adc_hold_delay, adc_down_time, csa_reset_time,
+                      one_tick, offset_to_align, pixel_axes, taxis,
+                      None, thres_noise, None, leftover, niter)
