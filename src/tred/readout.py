@@ -519,3 +519,45 @@ def nd_readout_qdep(block, threshold, adc_hold_delay, adc_down_time, csa_reset_t
     return nd_readout(newblock, threshold, adc_hold_delay, adc_down_time, csa_reset_time,
                       one_tick, offset_to_align, pixel_axes, taxis,
                       None, thres_noise, None, leftover, niter)
+
+
+def nd_readout_qdep_corr(block, threshold, adc_hold_delay, adc_down_time, csa_reset_time=1, one_tick=1,
+                         offset_to_align=0, pixel_axes=(), taxis=-1,
+                         thres_noise=None, leftover=None, niter=10,
+                         sigma_lo=0.3, sigma_hi=1.03, s_ref=10.0, tau_ticks=4.0,
+                         prc_ticks=None, prc_sync=False, prc_slot_ticks=16, prc_block_pix=7,
+                         prc_perm_seed=20260713):
+    '''
+    Combined noise model (2026-07-15): output noise that is BOTH
+    charge-amplitude-dependent AND time-correlated.  Unit-RMS correlated
+    noise u(t) (correlation time tau_ticks) is scaled by an amplitude that
+    grows with the pixel's accumulated signal charge:
+        sigma(t) = sigma_lo + (sigma_hi - sigma_lo) * min(1, S(t)/s_ref)
+        n(t) = sigma(t) * u(t)
+    -> small correlated noise before/at low charge (first hits, faint
+    pixels: suppresses spurious low-Q triggers), full correlated noise once
+    the pixel has collected ~s_ref (retriggers: the correlation thins the
+    up-crossing chances that inflate the soft second-hit hump).  Combines the
+    low-S behaviour of the amplitude-dependent model with the high-S
+    behaviour of the correlated model.  thres_noise unchanged; PRC composable.
+    '''
+    X = block.data
+    if prc_ticks:
+        P = int(prc_ticks * one_tick)
+        phase = None
+        if prc_sync:
+            phase = sync_prc_phase(block.location, P, one_tick, X.shape[:-1],
+                                   slot_ticks=prc_slot_ticks, block_pix=prc_block_pix,
+                                   perm_seed=prc_perm_seed, device=X.device)
+        X = apply_periodic_reset(X, P, phase=phase)
+    u = make_ou_noise(tuple(X.shape[:-1]), X.shape[-1], 1.0, tau_ticks * one_tick,
+                      X.device, X.dtype)
+    S = X.cumsum(dim=-1).clamp(min=0.0)
+    sig = sigma_lo + (sigma_hi - sigma_lo) * (S / s_ref).clamp(max=1.0)
+    n = sig * u
+    dn = torch.diff(n, dim=-1, prepend=torch.zeros_like(n[..., :1]))
+    from tred.blocking import Block as _Block
+    newblock = _Block(location=block.location, data=X + dn)
+    return nd_readout(newblock, threshold, adc_hold_delay, adc_down_time, csa_reset_time,
+                      one_tick, offset_to_align, pixel_axes, taxis,
+                      None, thres_noise, None, leftover, niter)

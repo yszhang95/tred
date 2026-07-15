@@ -13,7 +13,7 @@ from tred.io_nd import (
 from tred.recombination import birks, box
 from tred.io import write_npz
 from tred import chunking
-from tred.readout import nd_readout, nd_readout_prc, nd_readout_ou, nd_readout_full, nd_readout_qdep
+from tred.readout import nd_readout, nd_readout_prc, nd_readout_ou, nd_readout_full, nd_readout_qdep, nd_readout_qdep_corr
 
 import sys
 import h5py
@@ -60,6 +60,7 @@ periodic_reset_sync = False  # True: synchronized rolling schedule (one global p
 ou_tau = None  # correlation time [us] for OU output noise (None = white noise, legacy)
 reset_model = False  # full 6.30 model: OU(uncorr) + per-reset constant offsets (reset_noise re-homed)
 qdep_noise = False  # mockup: signal-dependent white noise amplitude (lo at low S, hi at high S)
+qdep_corr = False  # combined: charge-dependent amplitude x time-correlated noise
 adc_down_time = None
 csa_reset_time = None
 one_tick = None
@@ -469,7 +470,15 @@ def runit(device='cpu'):
                 thres = thresholds[tpcdataset.tpc_id].to(device)
                 # if thres.ndim > 0:
                 #     thres[thres<2] = 1E16 # FIXME: Temporarily disable low threshold channels
-                if qdep_noise:
+                if qdep_corr:
+                    hits = nd_readout_qdep_corr(currents, thres, adc_hold_delay, adc_down_time, csa_reset_time, one_tick=one_tick,
+                                                offset_to_align=0,
+                                                pixel_axes=(1,2), thres_noise=thres_noise,
+                                                sigma_lo=0.3, sigma_hi=1.03,
+                                                s_ref=10.0, tau_ticks=float(ou_tau or 0.4)/0.1,
+                                                prc_ticks=int(periodic_reset_ticks) if periodic_reset_ticks else None,
+                                                prc_sync=bool(periodic_reset_sync))
+                elif qdep_noise:
                     hits = nd_readout_qdep(currents, thres, adc_hold_delay, adc_down_time, csa_reset_time, one_tick=one_tick,
                                            offset_to_align=0,
                                            pixel_axes=(1,2), thres_noise=thres_noise,
@@ -704,6 +713,8 @@ def fullsim(config, finpath, foutpath):
     reset_model = config.get("reset_model", False)
     global qdep_noise
     qdep_noise = config.get("qdep_noise", False)
+    global qdep_corr
+    qdep_corr = config.get('qdep_corr', False)
     adc_down_time = config.get("adc_down_time", 1.2) * units.us / units.us / (tspace * units.us / units.us)
     adc_down_time = int(round(adc_down_time))
     csa_reset_time = config.get("csa_reset_time", 0.1) * units.us / units.us / (tspace * units.us / units.us)
