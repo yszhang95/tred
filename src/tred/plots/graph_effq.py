@@ -61,6 +61,8 @@ ou_tau = None  # correlation time [us] for OU output noise (None = white noise, 
 reset_model = False  # full 6.30 model: OU(uncorr) + per-reset constant offsets (reset_noise re-homed)
 qdep_noise = False  # mockup: signal-dependent white noise amplitude (lo at low S, hi at high S)
 qdep_corr = False  # combined: charge-dependent amplitude x time-correlated noise
+charge_fluct = False  # issue #27: per-voxel charge-deposition fluctuation + renorm
+charge_fluct_p = 0.05  # binomial loss prob for the fluctuation scale
 adc_down_time = None
 csa_reset_time = None
 one_tick = None
@@ -390,6 +392,19 @@ def runit(device='cpu'):
                     invalid2 = length2 < 1E-9
                     qblock.data[invalid2] = 0
 
+                    if charge_fluct:
+                        # issue #27 two-step: per-voxel binomial-scale Gaussian
+                        # fluctuation on the rastered charge, then renormalize
+                        # each step's total back to its pre-fluctuation value
+                        # (restores charge conservation; affects trigger+effq).
+                        qd = qblock.data
+                        pre = qd.sum(dim=tuple(range(1, qd.ndim)), keepdim=True)
+                        std = torch.sqrt(torch.clamp(qd, min=0.0) * charge_fluct_p * (1.0 - charge_fluct_p))
+                        qd = qd + torch.randn_like(qd) * std
+                        post = qd.sum(dim=tuple(range(1, qd.ndim)), keepdim=True)
+                        qd = qd * (pre / torch.where(post.abs() < 1e-9, torch.ones_like(post), post))
+                        qblock.data = qd
+
                     signal = chunksum(qblock)
                     effqb = chunksum_effq_out(qblock)
                     effq_blocks_d.append(effqb.data.cpu())
@@ -715,6 +730,9 @@ def fullsim(config, finpath, foutpath):
     qdep_noise = config.get("qdep_noise", False)
     global qdep_corr
     qdep_corr = config.get('qdep_corr', False)
+    global charge_fluct, charge_fluct_p
+    charge_fluct = config.get('charge_fluct', False)
+    charge_fluct_p = float(config.get('charge_fluct_p', 0.05))
     adc_down_time = config.get("adc_down_time", 1.2) * units.us / units.us / (tspace * units.us / units.us)
     adc_down_time = int(round(adc_down_time))
     csa_reset_time = config.get("csa_reset_time", 0.1) * units.us / units.us / (tspace * units.us / units.us)
