@@ -13,7 +13,7 @@ from tred.io_nd import (
 from tred.recombination import birks, box
 from tred.io import write_npz
 from tred import chunking
-from tred.readout import nd_readout, nd_readout_prc, nd_readout_ou, nd_readout_full, nd_readout_qdep, nd_readout_qdep_corr
+from tred.readout import nd_readout, nd_readout_prc, nd_readout_ou, nd_readout_full, nd_readout_qdep, nd_readout_qdep_corr, nd_readout_sep
 
 import sys
 import h5py
@@ -61,6 +61,8 @@ ou_tau = None  # correlation time [us] for OU output noise (None = white noise, 
 reset_model = False  # full 6.30 model: OU(uncorr) + per-reset constant offsets (reset_noise re-homed)
 qdep_noise = False  # mockup: signal-dependent white noise amplitude (lo at low S, hi at high S)
 qdep_corr = False  # combined: charge-dependent amplitude x time-correlated noise
+sep_noise = False  # separated paths: trigger-side constant OU + record-side eps*Q gain noise
+rec_gain_eps = 0.05  # ADC gain/reference noise fraction (record path only)
 charge_fluct = False  # issue #27: per-voxel charge-deposition fluctuation + renorm
 charge_fluct_p = 0.05  # binomial loss prob for the fluctuation scale
 adc_down_time = None
@@ -485,7 +487,15 @@ def runit(device='cpu'):
                 thres = thresholds[tpcdataset.tpc_id].to(device)
                 # if thres.ndim > 0:
                 #     thres[thres<2] = 1E16 # FIXME: Temporarily disable low threshold channels
-                if qdep_corr:
+                if sep_noise:
+                    hits = nd_readout_sep(currents, thres, adc_hold_delay, adc_down_time, csa_reset_time, one_tick=one_tick,
+                                          offset_to_align=0,
+                                          pixel_axes=(1,2), thres_noise=thres_noise,
+                                          ou_sigma=float(np.sqrt((uncorr_noise or 0.5)**2+(reset_noise or 0.9)**2)),
+                                          ou_tau_ticks=float(ou_tau or 0.4)/0.1, rec_gain_eps=rec_gain_eps,
+                                          prc_ticks=int(periodic_reset_ticks) if periodic_reset_ticks else None,
+                                          prc_sync=bool(periodic_reset_sync))
+                elif qdep_corr:
                     hits = nd_readout_qdep_corr(currents, thres, adc_hold_delay, adc_down_time, csa_reset_time, one_tick=one_tick,
                                                 offset_to_align=0,
                                                 pixel_axes=(1,2), thres_noise=thres_noise,
@@ -730,6 +740,9 @@ def fullsim(config, finpath, foutpath):
     qdep_noise = config.get("qdep_noise", False)
     global qdep_corr
     qdep_corr = config.get('qdep_corr', False)
+    global sep_noise, rec_gain_eps
+    sep_noise = config.get('sep_noise', False)
+    rec_gain_eps = float(config.get('rec_gain_eps', 0.05))
     global charge_fluct, charge_fluct_p
     charge_fluct = config.get('charge_fluct', False)
     charge_fluct_p = float(config.get('charge_fluct_p', 0.05))

@@ -6,7 +6,12 @@ from tred.blocking import Block
 
 def nd_readout(block, threshold, adc_hold_delay, adc_down_time, csa_reset_time=1, one_tick=1,
                offset_to_align=0, pixel_axes=(), taxis=-1,
-               uncorr_noise=None, thres_noise=None, reset_noise=None, leftover=None, niter=10):
+               uncorr_noise=None, thres_noise=None, reset_noise=None, leftover=None, niter=10,
+               rec_gain_eps=None):
+    # rec_gain_eps: RECORDING-path multiplicative gain/reference noise
+    #   (ADC-side, digitizes the held value AFTER the discriminator fired) ->
+    #   applied ONLY to the sampled hit charge, NOT to the discriminator input.
+    #   hit -> hit * (1 + rec_gain_eps * N(0,1)).  Does not affect trigger.
     '''
     locs :: (N, nxpl, nxpl, ..., vdim)
     X :: (N, npxl, npxl, ..., Nt)
@@ -118,6 +123,10 @@ def nd_readout(block, threshold, adc_hold_delay, adc_down_time, csa_reset_time=1
         times = gtimes + cross_t[triggered] # 1D with last dim the
         hold_times = gtimes + hold_t[triggered]
         hits = torch.gather(Xacc, taxis, hold_t_inrange)[triggered] # 1D array
+        if rec_gain_eps:
+            # recording-path gain/reference noise: multiplicative on the
+            # sampled value only (post-trigger); does not touch discriminator
+            hits = hits * (1.0 + rec_gain_eps * torch.randn_like(hits))
         # start = hold_t + adc_down_time + 1
         start[triggered] = hold_t[triggered] + adc_down_time + one_tick # on discriminator, controlled by adc down time
         start_times = gtimes + start[triggered]
@@ -561,3 +570,42 @@ def nd_readout_qdep_corr(block, threshold, adc_hold_delay, adc_down_time, csa_re
     return nd_readout(newblock, threshold, adc_hold_delay, adc_down_time, csa_reset_time,
                       one_tick, offset_to_align, pixel_axes, taxis,
                       None, thres_noise, None, leftover, niter)
+
+
+def nd_readout_sep(block, threshold, adc_hold_delay, adc_down_time, csa_reset_time=1, one_tick=1,
+                   offset_to_align=0, pixel_axes=(), taxis=-1,
+                   thres_noise=None, leftover=None, niter=10,
+                   ou_sigma=1.03, ou_tau_ticks=4.0, rec_gain_eps=0.05,
+                   prc_ticks=None, prc_sync=False, prc_slot_ticks=16, prc_block_pix=7,
+                   prc_perm_seed=20260713):
+    '''
+    Separated noise paths (2026-07-22, fixes the qdep_corr conflation):
+      * TRIGGER+RECORD path = CSA/ENC noise: constant-amplitude OU (sigma=
+        ou_sigma, tau=ou_tau_ticks) added to Xacc.  Both discriminator and
+        sample see it, as physically correct for CSA output noise.  NOT
+        Q-scaled (ENC ~ constant).
+      * RECORD-only path = ADC gain/reference noise: multiplicative
+        rec_gain_eps*Q on the SAMPLED hit value (rec_gain_eps passed to
+        nd_readout), applied after the discriminator fired -> does NOT
+        touch the trigger.  This is the correct home for the "noise scales
+        with Q" idea.
+    thres_noise passes through; PRC composable.
+    '''
+    X = block.data
+    if prc_ticks:
+        P = int(prc_ticks * one_tick)
+        phase = None
+        if prc_sync:
+            phase = sync_prc_phase(block.location, P, one_tick, X.shape[:-1],
+                                   slot_ticks=prc_slot_ticks, block_pix=prc_block_pix,
+                                   perm_seed=prc_perm_seed, device=X.device)
+        X = apply_periodic_reset(X, P, phase=phase)
+    # trigger-path CSA/ENC noise: constant-amplitude OU on the integrator
+    u = make_ou_noise(tuple(X.shape[:-1]), X.shape[-1], ou_sigma, ou_tau_ticks * one_tick,
+                      X.device, X.dtype)
+    dn = torch.diff(u, dim=-1, prepend=torch.zeros_like(u[..., :1]))
+    from tred.blocking import Block as _Block
+    newblock = _Block(location=block.location, data=X + dn)
+    return nd_readout(newblock, threshold, adc_hold_delay, adc_down_time, csa_reset_time,
+                      one_tick, offset_to_align, pixel_axes, taxis,
+                      None, thres_noise, None, leftover, niter, rec_gain_eps=rec_gain_eps)
