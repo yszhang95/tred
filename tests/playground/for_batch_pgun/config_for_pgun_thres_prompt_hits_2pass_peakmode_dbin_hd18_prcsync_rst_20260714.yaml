@@ -1,0 +1,55 @@
+response_path: "/home/yousen/projects/2x2_analysis/binaries/response_44_v2a_full.npz"
+module_yaml: "/home/yousen/Documents/NDLAr2x2/tred/tests/playground/2x2_mod2mod_variation.yaml"
+tile_yaml: "/home/yousen/Documents/NDLAr2x2/tred/tests/playground/multi_tile_layout-2.4.16.yaml"
+lifetime: 1.2 # ms
+# Single-variable vs hd18: ONLY adds the LArPix rolling periodic reset
+# (2x2 Run 1: 1024 x 0.1 us = 102.4 us per channel, per-channel random phase,
+# larnd-sim style; see KNOWLEDGE 6.17 and readout.py nd_readout_prc).
+# RESET MODEL stage 1 (KNOWLEDGE 6.30, user design): reset_noise 0.9 re-homed
+# from per-tick white to per-reset CONSTANT offsets (initial baseline +
+# every trigger reset + every periodic reset); output noise = OU(sigma=0.5
+# = uncorr, tau=0.2 us physical); thres 0.65; PRC on; NO undershoot template
+# yet (D=0). Pre-registered: faint singles/low-totQ suppressed (first-hit
+# crossing fluctuation is OU(0.5) only — frozen offset cancels in rate);
+# first-hit peak width preserved (offset enters the sample); second-hit
+# statistics change via fresh per-reset draws; tau back at physical value.
+# under-corrects; data sits between OU(0.2) and white-0.5x -> effective tau
+# 0.3-0.5). Amplitude sigma=1.03 ke and thres_noise=0.65 unchanged (both
+# data-validated); PRC on. Pre-registered: soft hump/low-Q land on or near
+# data; MIP/first-hit peak widths stay at prcsync level.
+# SAME total RMS (sigma = sqrt(0.5^2+0.9^2) = 1.03 ke), correlation time
+# ou_tau = 0.2 us. Physical noise model: true amplitude, thinned independent
+# crossing chances. Pre-registered (KNOWLEDGE 6.27): lands between prcsync
+# (1x white) and noise-half on the low-Q side; MIP peak width/totN==1 stay at
+# prcsync (resolution preserved); soft hump/shoulder/totN>=3 fixes retained.
+# reset 0.9->0.45; total sigma 1.03->0.515 ke). Physical-knob version of the
+# lowTp05 finding: tred effective threshold sits below nominal because white
+# noise gives ~10 independent crossing chances per us. Pre-registered: the
+# lowTp05 fixes (soft hump, shoulder, low-Q peak height) largely reproduced;
+# leading edge NARROWS instead of translating; low-Q totQ peak position stays.
+# NOTE: no internal control bin (noise change is global).
+# table only (67901 channels); analysis classification stays on the original
+# dbin table. Everything else = prcsync baseline. Quantifies how much of the
+# low-T totQ/faint gap a table underestimate could absorb, and what it breaks
+# (retrigger rate, spectrum edge alignment).
+# chips synchronized. Pre-registered: all mean discriminators identical to
+# hd18+PRC within MC statistics (marginals provably unchanged).
+# toward data; Q1 median +0.1-0.2 ke; at-floor slightly up; totN>=3 down.
+# hold 1.5->1.8 us (larnd-sim effective 3+15 ticks) and down 1.2->0.9 us
+# (total cycle kept at 2.7 us). Single-variable hardware-fidelity test;
+# see threshold_studies/KNOWLEDGE.md section 6.5.
+threshold: "/home/yousen/projects/2x2_analysis/2x2_ql/threshold_studies/threshold_july10to11_bin0p2_peakmode_dbin_20260702.hdf5"
+event_list: []
+tpc_list: [0,1,2,3,6,7] # no tpc 4, 5 for module 2
+uncorr_noise: 0.500 #ke
+reset_noise: 0.900 #ke
+thres_noise: 0.650 #ke
+save_waveform: false
+fluctuate: false
+effq_out_nt: 40
+adc_hold_delay: 1.8
+adc_down_time: 0.9
+periodic_reset_ticks: 1024
+periodic_reset_sync: true
+ou_tau: 0.2
+reset_model: true

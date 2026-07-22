@@ -1,0 +1,31 @@
+response_path: "/home/yousen/projects/2x2_analysis/binaries/response_44_v2a_full.npz"
+module_yaml: "/home/yousen/Documents/NDLAr2x2/tred/tests/playground/2x2_mod2mod_variation.yaml"
+tile_yaml: "/home/yousen/Documents/NDLAr2x2/tred/tests/playground/multi_tile_layout-2.4.16.yaml"
+lifetime: 1.2 # ms
+# Single-variable vs hd18: ONLY adds the LArPix rolling periodic reset
+# (2x2 Run 1: 1024 x 0.1 us = 102.4 us per channel, per-channel random phase,
+# larnd-sim style; see KNOWLEDGE 6.17 and readout.py nd_readout_prc).
+# SENSITIVITY TEST (user proposal): T<4 channels raised +0.5 ke in the TRIGGER
+# table only (67901 channels); analysis classification stays on the original
+# dbin table. Everything else = prcsync baseline. Quantifies how much of the
+# low-T totQ/faint gap a table underestimate could absorb, and what it breaks
+# (retrigger rate, spectrum edge alignment).
+# chips synchronized. Pre-registered: all mean discriminators identical to
+# hd18+PRC within MC statistics (marginals provably unchanged).
+# toward data; Q1 median +0.1-0.2 ke; at-floor slightly up; totN>=3 down.
+# hold 1.5->1.8 us (larnd-sim effective 3+15 ticks) and down 1.2->0.9 us
+# (total cycle kept at 2.7 us). Single-variable hardware-fidelity test;
+# see threshold_studies/KNOWLEDGE.md section 6.5.
+threshold: "/home/yousen/projects/2x2_analysis/2x2_ql/threshold_studies/threshold_dbin_lowTplus05_20260713.hdf5"
+event_list: []
+tpc_list: [0,1,2,3,6,7] # no tpc 4, 5 for module 2
+uncorr_noise: 0.500 #ke
+reset_noise: 0.900 #ke
+thres_noise: 0.650 #ke
+save_waveform: false
+fluctuate: false
+effq_out_nt: 40
+adc_hold_delay: 1.8
+adc_down_time: 0.9
+periodic_reset_ticks: 1024
+periodic_reset_sync: true

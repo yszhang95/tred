@@ -1,0 +1,19 @@
+response_path: "/home/yousen/projects/2x2_analysis/binaries/response_44_v2a_full.npz"
+module_yaml: "/home/yousen/Documents/NDLAr2x2/tred/tests/playground/2x2_mod2mod_variation.yaml"
+tile_yaml: "/home/yousen/Documents/NDLAr2x2/tred/tests/playground/multi_tile_layout-2.4.16.yaml"
+lifetime: 1.2 # ms
+# peak-mode table with BINNED delta(peak) correction (delta 0.2..1.0 by peak (no edgetrim
+# position, from the measured tred slow-population delta(T) curve) used
+# directly as the trigger map; see threshold_studies/checks/
+# check_delta_vs_threshold.py and REPORT.md.
+threshold: "/home/yousen/projects/2x2_analysis/2x2_ql/threshold_studies/threshold_july10to11_bin0p2_peakmode_dbin_20260702.hdf5"
+event_list: []
+tpc_list: [0,1,2,3,6,7] # no tpc 4, 5 for module 2
+uncorr_noise: 0.500 #ke
+reset_noise: 0.900 #ke
+thres_noise: 0.650 #ke
+save_waveform: false
+fluctuate: false
+effq_out_nt: 40
+adc_hold_delay: 1.5
+adc_down_time: 1.2

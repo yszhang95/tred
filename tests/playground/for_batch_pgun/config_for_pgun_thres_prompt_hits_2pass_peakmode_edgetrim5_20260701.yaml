@@ -1,0 +1,19 @@
+response_path: "/home/yousen/projects/2x2_analysis/binaries/response_44_v2a_full.npz"
+module_yaml: "/home/yousen/Documents/NDLAr2x2/tred/tests/playground/2x2_mod2mod_variation.yaml"
+tile_yaml: "/home/yousen/Documents/NDLAr2x2/tred/tests/playground/multi_tile_layout-2.4.16.yaml"
+lifetime: 1.2 # ms
+# peak-mode threshold table (threshold_studies/make_threshold_peakmode.py,
+# combined july10+11, delta=0.2 ke) with the edgetrim5 disabled-channel set
+# transplanted (threshold_studies/make_edgetrim.py). Everything else identical
+# to config_for_pgun_thres_prompt_hits_2pass_edgetrim5_20260701.yaml.
+threshold: "/home/yousen/projects/2x2_analysis/binaries/threshold_peakmode_edgetrim5_20260701.hdf5"
+event_list: []
+tpc_list: [0,1,2,3,6,7] # no tpc 4, 5 for module 2
+uncorr_noise: 0.500 #ke
+reset_noise: 0.900 #ke
+thres_noise: 0.650 #ke
+save_waveform: false
+fluctuate: false
+effq_out_nt: 40
+adc_hold_delay: 1.5
+adc_down_time: 1.2

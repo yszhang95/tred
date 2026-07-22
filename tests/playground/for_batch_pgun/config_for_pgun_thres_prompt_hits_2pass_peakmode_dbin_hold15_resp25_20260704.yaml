@@ -1,0 +1,26 @@
+# 2x2 factorial completion: response 25x25 + OLD ADC timing (hold 1.5, down 1.2,
+# cycle kept 2.7 us).  Corners: (45,1.8)=hd18, (45,1.5)=dbin_20260702,
+# (25,1.8)=resp25, (25,1.5)=THIS.  Pre-registered prediction: both effects
+# push first hits softer/earlier roughly additively -> softest corner of the
+# four; at-floor fraction lowest; tests independence of footprint-lift
+# triggering and sampling-time effects.
+# ONLY the response file changes, 45x45 (9x9 pixels) -> 125x125 quadrant
+# (25x25 pixels, long-range induction to +-12 pixels).  ADC timing stays at
+# the adopted hd18 values.  Judged on raw first/second-hit spectra and
+# at-floor fraction curves (KNOWLEDGE 6.13); prediction from
+# checks/check_response_footprint.py: sub-LSB effect.
+response_path: "/srv/storage1/yousen/tred_workspace/response_44_v2a_full_25x25pixel_tred.npz"
+module_yaml: "/home/yousen/Documents/NDLAr2x2/tred/tests/playground/2x2_mod2mod_variation.yaml"
+tile_yaml: "/home/yousen/Documents/NDLAr2x2/tred/tests/playground/multi_tile_layout-2.4.16.yaml"
+lifetime: 1.2 # ms
+threshold: "/home/yousen/projects/2x2_analysis/2x2_ql/threshold_studies/threshold_july10to11_bin0p2_peakmode_dbin_20260702.hdf5"
+event_list: []
+tpc_list: [0,1,2,3,6,7] # no tpc 4, 5 for module 2
+uncorr_noise: 0.500 #ke
+reset_noise: 0.900 #ke
+thres_noise: 0.650 #ke
+save_waveform: false
+fluctuate: false
+effq_out_nt: 40
+adc_hold_delay: 1.5
+adc_down_time: 1.2
