@@ -318,6 +318,7 @@ def nd_readout_rst(block, threshold, adc_hold_delay, adc_down_time, csa_reset_ti
 def nd_readout_prc(block, threshold, adc_hold_delay, adc_down_time, csa_reset_time=1, one_tick=1,
                    offset_to_align=0, pixel_axes=(), taxis=-1,
                    uncorr_noise=None, thres_noise=None, reset_noise=None, leftover=None, niter=10,
+                   rec_gain_eps=None,
                    prc_ticks=1024, prc_sync=False, prc_slot_ticks=16, prc_block_pix=7,
                    prc_perm_seed=20260713):
     '''
@@ -346,7 +347,7 @@ def nd_readout_prc(block, threshold, adc_hold_delay, adc_down_time, csa_reset_ti
     newblock = _Block(location=block.location, data=Xp)
     return nd_readout(newblock, threshold, adc_hold_delay, adc_down_time, csa_reset_time,
                       one_tick, offset_to_align, pixel_axes, taxis,
-                      uncorr_noise, thres_noise, reset_noise, leftover, niter)
+                      uncorr_noise, thres_noise, reset_noise, leftover, niter, rec_gain_eps=rec_gain_eps)
 
 
 def sync_prc_phase(location, P, one_tick, phase_shape, slot_ticks=16, block_pix=7,

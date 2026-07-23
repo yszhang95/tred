@@ -62,7 +62,7 @@ reset_model = False  # full 6.30 model: OU(uncorr) + per-reset constant offsets 
 qdep_noise = False  # mockup: signal-dependent white noise amplitude (lo at low S, hi at high S)
 qdep_corr = False  # combined: charge-dependent amplitude x time-correlated noise
 sep_noise = False  # separated paths: trigger-side constant OU + record-side eps*Q gain noise
-rec_gain_eps = 0.05  # ADC gain/reference noise fraction (record path only)
+rec_gain_eps = None  # ADC gain/reference noise fraction (record path only; None=off)
 charge_fluct = False  # issue #27: per-voxel charge-deposition fluctuation + renorm
 charge_fluct_p = 0.05  # binomial loss prob for the fluctuation scale
 adc_down_time = None
@@ -492,7 +492,7 @@ def runit(device='cpu'):
                                           offset_to_align=0,
                                           pixel_axes=(1,2), thres_noise=thres_noise,
                                           ou_sigma=float(np.sqrt((uncorr_noise or 0.5)**2+(reset_noise or 0.9)**2)),
-                                          ou_tau_ticks=float(ou_tau or 0.4)/0.1, rec_gain_eps=rec_gain_eps,
+                                          ou_tau_ticks=float(ou_tau or 0.4)/0.1, rec_gain_eps=(rec_gain_eps if rec_gain_eps else 0.05),
                                           prc_ticks=int(periodic_reset_ticks) if periodic_reset_ticks else None,
                                           prc_sync=bool(periodic_reset_sync))
                 elif qdep_corr:
@@ -530,6 +530,7 @@ def runit(device='cpu'):
                     hits = nd_readout_prc(currents, thres, adc_hold_delay, adc_down_time, csa_reset_time, one_tick=one_tick,
                                           offset_to_align=0,
                                           pixel_axes=(1,2), uncorr_noise=uncorr_noise, thres_noise=thres_noise, reset_noise=reset_noise,
+                                          rec_gain_eps=(rec_gain_eps if rec_gain_eps else None),
                                           prc_ticks=int(periodic_reset_ticks), prc_sync=bool(periodic_reset_sync))
                 else:
                     hits = nd_readout(currents, thres, adc_hold_delay, adc_down_time, csa_reset_time, one_tick=one_tick,
@@ -742,7 +743,7 @@ def fullsim(config, finpath, foutpath):
     qdep_corr = config.get('qdep_corr', False)
     global sep_noise, rec_gain_eps
     sep_noise = config.get('sep_noise', False)
-    rec_gain_eps = float(config.get('rec_gain_eps', 0.05))
+    rec_gain_eps = config.get('rec_gain_eps', None); rec_gain_eps = float(rec_gain_eps) if rec_gain_eps else None
     global charge_fluct, charge_fluct_p
     charge_fluct = config.get('charge_fluct', False)
     charge_fluct_p = float(config.get('charge_fluct_p', 0.05))
