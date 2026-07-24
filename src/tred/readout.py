@@ -62,13 +62,29 @@ def nd_readout(block, threshold, adc_hold_delay, adc_down_time, csa_reset_time=1
     # info(f'X shape {X.shape}')
     # FIXME: what is an appropriate accumulation function?
     Xacc = X.cumsum(dim=taxis)
+    # Noiseless charge-since-reset accumulator, tracked in parallel so the CSA
+    # reset can be made memoryless (cf. tred pgun_far_field 775fb99 + 8545637).
+    Xacc_true = Xacc.clone().detach()
     # logging.debug(f'Xacc shape {Xacc.shape}')
     # info(f'Xacc shape {Xacc.shape}')
+    # Front-end (per-tick) noise: drawn ONCE and stored, so the same realization
+    # is re-applied unchanged after every reset -> counted exactly once, never
+    # re-injected by the reset subtraction (the double-count fixed in 775fb99).
+    uncorr = None
     if uncorr_noise is not None:
-        Xacc += torch.normal(0, torch.full_like(Xacc, fill_value=uncorr_noise, device=Xacc.device))
-    # FIXME: reset_noise should be used only if leftover is None
+        uncorr = torch.normal(0, torch.full_like(Xacc, fill_value=uncorr_noise, device=Xacc.device))
+        Xacc += uncorr
+    # The electronics power on / begin already in a RESET state: nothing
+    # guarantees the CSA sits at zero before charge arrives.  So the FIRST
+    # integration epoch carries a kTC baseline just like every later reset --
+    # ONE per-channel DC draw (shape Xacc.shape[:-1], broadcast over time).
+    # NOTE: this must be per-channel, NOT the old per-tick full_like(Xacc)
+    # (that was white noise mis-homed as a baseline).  It is memoryless: the
+    # reset rebuild below overwrites it with a fresh per-channel draw, so
+    # baselines never accumulate across resets.
     if (reset_noise is not None) and (leftover is None):
-        Xacc += torch.normal(0, torch.full_like(Xacc, fill_value=reset_noise, device=Xacc.device))
+        Xacc += torch.normal(0, torch.full(Xacc.shape[:-1], fill_value=reset_noise,
+                                           device=Xacc.device)).unsqueeze(-1)
 
     pxl_indices = slice(None, -1, None) # FIXME: hard coded
 
@@ -141,14 +157,27 @@ def nd_readout(block, threshold, adc_hold_delay, adc_down_time, csa_reset_time=1
         # everything happens on CSA
         # hold t may be at the last t;
         # FIXME: what happens if the hold_t is the last element?
-        Xacc_next_to_hold_t = torch.gather(Xacc, taxis, torch.clamp(hold_t+csa_reset_time, min=0, max=Nt-1))
-        # only update the triggered positions
-        Xacc[triggered.squeeze(taxis)] -= Xacc_next_to_hold_t[triggered.squeeze(taxis)]
+        Xacc_true_next_to_hold_t = torch.gather(Xacc_true, taxis, torch.clamp(hold_t+csa_reset_time, min=0, max=Nt-1))
+        trig = triggered.squeeze(taxis)
+        # Reset the noiseless accumulator to charge-since-THIS-reset.  Subtract the
+        # TRUE value (never the noisy gather) so the front-end noise realization is
+        # not re-injected into the post-reset window (double-count fixed in 775fb99).
+        Xacc_true[trig] -= Xacc_true_next_to_hold_t[trig]
+        # Memoryless CSA reset (cf. tred 8545637): rebuild the readout accumulator
+        # directly from the noiseless one instead of subtracting incrementally.
+        # Incremental subtraction keeps (Xacc - Xacc_true) invariant, so a baseline
+        # added via `+=` would survive every future reset and accumulate; on a
+        # bright pixel the piled-up baseline stays above threshold long after the
+        # charge is collected and fakes re-triggers.  Rebuilding forgets all past
+        # baselines: true charge-since-reset + the always-present front-end noise +
+        # ONE fresh kTC baseline drawn for this epoch.
+        Xacc[trig] = Xacc_true[trig]
+        if uncorr is not None:
+            Xacc[trig] += uncorr[trig]
         if reset_noise is not None:
             # FIXME: taxis is assumed to be -1
             Xacc_baseline = torch.normal(0, torch.full(Xacc.shape[:-1], fill_value=reset_noise, device=Xacc.device))
-            # print('shape', Xacc_baseline[triggered.squeeze(taxis)].unsqueeze(-1))
-            Xacc[triggered.squeeze(taxis)] += Xacc_baseline[triggered.squeeze(taxis)].unsqueeze(-1)
+            Xacc[trig] += Xacc_baseline[trig].unsqueeze(-1)
 
         iteration += 1
     if len(olocs) == 0:
