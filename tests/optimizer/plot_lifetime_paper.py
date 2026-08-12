@@ -33,4 +33,6 @@ ax.legend(fontsize=18, frameon=False)
 
 fig.tight_layout()
 
-fig.savefig("lifetime_fit_results_paper.png", dpi=300)
+# fig.savefig("lifetime_fit_results_paper.png", dpi=300)
+for ext in ("png", "pdf"):
+    fig.savefig(f"lifetime_fit_results_new.{ext}", dpi=300)
