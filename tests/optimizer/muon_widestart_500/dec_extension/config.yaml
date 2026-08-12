@@ -1,0 +1,15 @@
+response_path: "/home/yousen/projects/2x2_analysis/binaries/response_44_v2a_full.npz"
+module_yaml: "/home/yousen/Documents/NDLAr2x2/tred/tests/playground/2x2_mod2mod_variation.yaml"
+tile_yaml: "/home/yousen/Documents/NDLAr2x2/tred/tests/playground/multi_tile_layout-2.4.16.yaml"
+lifetime: 1.0 # ms
+event_list: [10,]
+tpc_id: 1
+# dec-arm extension of the 500 e- wide-start run: resume from the exact value
+# where the dec arm ended after its 2600 epochs. Same seed -> identical
+# objective, so the concatenated history is a true continuation.
+lifetime_inc: 0.9982294921875   # inc arm already converged; 1 epoch, eval only
+lifetime_dec: 0.9911992797851562
+nepoches_inc: 1
+nepoches_dec: 1200
+noise_rms: 500.0
+noise_seed: 20260612

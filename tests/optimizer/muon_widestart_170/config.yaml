@@ -1,0 +1,13 @@
+response_path: "/home/yousen/projects/2x2_analysis/binaries/response_44_v2a_full.npz"
+module_yaml: "/home/yousen/Documents/NDLAr2x2/tred/tests/playground/2x2_mod2mod_variation.yaml"
+tile_yaml: "/home/yousen/Documents/NDLAr2x2/tred/tests/playground/multi_tile_layout-2.4.16.yaml"
+lifetime: 1.0 # ms
+event_list: [10,]
+tpc_id: 1
+# wide-start stress: full trajectory from 2.0/0.5 ms in a single run,
+# so the npz holds the complete history (no chunk1/chunk2 concatenation)
+lifetime_inc: 2.0
+lifetime_dec: 0.5
+nepoches: 2600
+noise_rms: 170.0
+noise_seed: 20260612

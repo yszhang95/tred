@@ -1,0 +1,13 @@
+response_path: "/home/yousen/projects/2x2_analysis/binaries/response_44_v2a_full.npz"
+module_yaml: "/home/yousen/Documents/NDLAr2x2/tred/tests/playground/2x2_mod2mod_variation.yaml"
+tile_yaml: "/home/yousen/Documents/NDLAr2x2/tred/tests/playground/multi_tile_layout-2.4.16.yaml"
+lifetime: 1.0 # ms
+event_list: [10,]
+tpc_id: 1
+lifetime_inc: 1.2
+lifetime_dec: 0.8
+nepoches: 1500
+# lr: 0.8        # us per Adam step (default)
+# nbchunk: 20    # segments per forward chunk (default)
+# noise_rms: 170.0
+# noise_seed: 20260612
