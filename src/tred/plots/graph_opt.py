@@ -49,6 +49,19 @@ response = None
 
 old_geo_config = True
 
+noise_rms = 170.0
+noise_seed = 20260612
+
+# fit parameters, overridable from the config yaml
+tpc_id = 2
+lifetime_inc = 1.2395106201171875
+lifetime_dec = 0.8710988159179687
+nepoches = 2000
+nepoches_inc = None  # per-arm override; falls back to nepoches
+nepoches_dec = None
+lr = 0.8
+nbchunk = 20
+
 def params_eligible_this_step(optimizer, model):
     eligible = []
     for group in optimizer.param_groups:
@@ -144,13 +157,6 @@ def runit(device='cpu'):
     '''
     '''
 
-    # lifetime_inc = 1.02
-    # lifetime_dec = 0.98
-
-    lifetime_inc = 1.2
-    lifetime_dec = 0.8
-
-
     # eventually replace this hard-wire with configuration
     twindow_max = 12_000 # 12_000 * 50ns = 600us
     # twindow_max = 9_600 #
@@ -192,21 +198,15 @@ def runit(device='cpu'):
 
     global response
     response = response.to(device=device)
-    global selected_tpcid
-    selected_tpcid = 2
 
     tpcs = segment_to_tpc(*make_nd('cpu'))
 
     total_losses = []
     lifetime_values = []
     edepsim = None
-    nepoches = 1000
-
-    lr = 0.8
-
 
     for itpc, tpcdataset in enumerate(tpcs):
-        if selected_tpcid != tpcdataset.tpc_id:
+        if tpc_id != tpcdataset.tpc_id:
             continue
         info("Selected TPC ID: {}".format(tpcdataset.tpc_id))
 
@@ -255,8 +255,6 @@ def runit(device='cpu'):
 
             edepsim = features[0].cpu().numpy()
 
-            nbchunk = 20
-
             current_blocks = []
             with torch.no_grad():
                 for ichunk, idata in enumerate(
@@ -276,6 +274,12 @@ def runit(device='cpu'):
 
                 currents = concat_blocks(current_blocks)
                 currents = chunking.accumulate(currents)
+                # anchored truth noise: CPU generator with fixed seed so the
+                # realization is reproducible across runs/resumes
+                noise_gen = torch.Generator(device='cpu').manual_seed(noise_seed)
+                currents.data += torch.randn(
+                    currents.data.shape, generator=noise_gen,
+                    dtype=currents.data.dtype) * noise_rms
                 currents_data_true = currents.data.detach().cpu()
                 currents_location_true = currents.location.cpu()
                 currents = None
@@ -291,7 +295,7 @@ def runit(device='cpu'):
             sim.charge.drifter.lifetime = nn.Parameter(
                 torch.tensor(lifetime*lifetime_inc, device=device), requires_grad=True)
             optimizer = optim.Adam([sim.charge.drifter.lifetime], lr=lr)
-            for iepoch in range(nepoches):
+            for iepoch in range(nepoches_inc):
                 total_loss = 0
                 cbs = []
                 if iepoch != 0:
@@ -308,6 +312,9 @@ def runit(device='cpu'):
                     cbs.append(currents)
 
                 currents = concat_blocks(cbs)
+                # merge rows with identical (pixel, time) locations, matching
+                # the truth path; differentiable via index_add
+                currents = chunking.accumulate(currents)
                 loss = nn.MSELoss()(currents.data, currents_data_true.to(device=device))
                 info(f'  Chunk {ichunk} loss: {loss.item()}')
                 if iepoch != 0:
@@ -329,7 +336,7 @@ def runit(device='cpu'):
                 torch.tensor(lifetime*lifetime_dec, device=device), requires_grad=True)
             optimizer = optim.Adam([sim.charge.drifter.lifetime], lr=lr)
 
-            for iepoch in range(nepoches):
+            for iepoch in range(nepoches_dec):
                 total_loss = 0
                 cbs = []
                 if iepoch != 0:
@@ -346,6 +353,9 @@ def runit(device='cpu'):
                     cbs.append(currents)
 
                 currents = concat_blocks(cbs)
+                # merge rows with identical (pixel, time) locations, matching
+                # the truth path; differentiable via index_add
+                currents = chunking.accumulate(currents)
                 loss = nn.MSELoss()(currents.data, currents_data_true.to(device=device))
                 info(f'  Chunk {ichunk} loss: {loss.item()}')
                 if iepoch != 0:
@@ -399,6 +409,22 @@ def train(config, finpath):
     lifetime = config.get("lifetime", 2.0) * units.ms / units.us # values are from ms units of us
     event_list = config.get("event_list", None) # None means select all
     old_geo_config = config.get("old_geo_config", True)
+
+    global tpc_id, lifetime_inc, lifetime_dec, nepoches, lr, nbchunk
+    global noise_rms, noise_seed, nepoches_inc, nepoches_dec
+    tpc_id = config.get("tpc_id", tpc_id)
+    lifetime_inc = config.get("lifetime_inc", lifetime_inc)
+    lifetime_dec = config.get("lifetime_dec", lifetime_dec)
+    nepoches = config.get("nepoches", nepoches)
+    nepoches_inc = config.get("nepoches_inc", nepoches)
+    nepoches_dec = config.get("nepoches_dec", nepoches)
+    lr = config.get("lr", lr)
+    nbchunk = config.get("nbchunk", nbchunk)
+    noise_rms = config.get("noise_rms", noise_rms)
+    noise_seed = config.get("noise_seed", noise_seed)
+    info(f"fit config: tpc_id={tpc_id} lifetime_inc={lifetime_inc} "
+         f"lifetime_dec={lifetime_dec} nepoches={nepoches} lr={lr} "
+         f"nbchunk={nbchunk} noise_rms={noise_rms} noise_seed={noise_seed}")
 
     # loading response
     if os.path.splitext(response_path)[1] == '.npz':
