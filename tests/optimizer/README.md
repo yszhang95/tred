@@ -72,6 +72,39 @@ Notes:
   floor, so raw loss is flat; the log-excess shows 4 decades of
   convergence down to the float32 resolution of the loss).
 
+## Inputs and outputs
+
+Inputs (not in git; paths in the config yamls are absolute — adjust per
+machine):
+
+- **Stress event**: `ev2_tpc2.hdf5` in this directory — single-event,
+  photon-filtered segment files (`ev2_tpc{0,2,5,6,7}.hdf5`); how they were
+  produced from the MiniRun5 file is documented in `ev2_segments_note.md`.
+- **Muon studies**: `muon_long_track/muon_track.hdf5`, regenerated any time
+  with `muon_long_track/make_muon_track.py` from the source
+  `/srv/storage1/yousen/storage/2x2run1/MiniRun5_1E19_RHC.convert2h5.0000000.EDEPSIM.hdf5`.
+- **Detector response**: `response_44_v2a_full.npz`
+  (`/home/yousen/projects/2x2_analysis/binaries/`); geometry yamls from a
+  tred checkout (`tests/playground/2x2_mod2mod_variation.yaml`,
+  `multi_tile_layout-2.4.16.yaml`).
+
+Outputs land in the study directory the run script `cd`s into (all
+gitignored):
+
+- `optimized_*.log` — per-epoch loss and lifetime
+  (`grep "Lifetime:" <log>` for the trajectory).
+- `lifetime_fit_results.npz` — written to the cwd by `graph_opt.py`:
+  `total_losses`/`lifetime_values` (inc-arm epochs then dec-arm epochs),
+  the noisy truth waveforms and locations (`currents_*_true`), the epoch-0
+  waveforms of both arms (`currents_*_{inc,dec}_0`), start factors
+  (`lifetime_inc`/`lifetime_dec`) and the edep-sim features (`edepsim`).
+- `muon_widestart_500/lifetime_fit_results_full.npz` — per-arm concatenated
+  history (`{inc,dec}_lifetimes`, `{inc,dec}_losses`) merged from the main
+  run and `dec_extension/` by `concat_history.py`.
+- Figures from the plotters (png + pdf), e.g.
+  `lifetime_fit_results_new.{png,pdf}`,
+  `muon_widestart_500/lifetime_fit_500e_full.{png,pdf}`.
+
 ## Practicalities
 
 - GPU memory scales with segment count (autograd graph spans all chunks of
